@@ -1,188 +1,130 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:silosend/features/connection/providers/connection_provider.dart';
+import 'package:silosend/models/device.dart';
 
-import '../../../app/constants.dart';
-import '../../../providers/connection_provider.dart';
+class ConnectionScreen extends ConsumerStatefulWidget {
+  final Device device;
 
-class ConnectionScreen extends ConsumerWidget {
-  const ConnectionScreen({super.key});
+  const ConnectionScreen({super.key, required this.device});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+  ConsumerState<ConnectionScreen> createState() => _ConnectionScreenState();
+}
 
+class _ConnectionScreenState extends ConsumerState<ConnectionScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        ref.read(connectionProvider.notifier).setDevice(widget.device);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final connectionState = ref.watch(connectionProvider);
+    final connectionNotifier = ref.read(connectionProvider.notifier);
 
-    final deviceId =
-        connectionState.deviceId ??
-        (GoRouterState.of(context).extra is String
-            ? GoRouterState.of(context).extra as String
-            : null);
+    final statusLabel = switch (connectionState.status) {
+      ConnectionStatus.initial => 'Ready to connect',
+      ConnectionStatus.validating => 'Validating device',
+      ConnectionStatus.connecting => 'Connecting',
+      ConnectionStatus.connected => 'Connected',
+      ConnectionStatus.disconnecting => 'Disconnecting',
+      ConnectionStatus.disconnected => 'Disconnected',
+      ConnectionStatus.error => 'Connection error',
+    };
 
-    // If we arrived with an extra deviceId but provider doesn't know it yet,
-    // set it once. (Mock-only.)
-    if (deviceId != null && connectionState.deviceId == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(connectionProvider.notifier).setDevice(deviceId);
-      });
-    }
-
-    final isBusy =
-        connectionState.status == ConnectionStatus.validating ||
-        connectionState.status == ConnectionStatus.connecting ||
-        connectionState.status == ConnectionStatus.disconnecting;
+    final showPrimaryActions =
+        connectionState.status == ConnectionStatus.initial ||
+        connectionState.status == ConnectionStatus.disconnected ||
+        connectionState.status == ConnectionStatus.error;
 
     return Scaffold(
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            const SliverAppBar(pinned: true, title: Text('Connection')),
-            SliverPadding(
-              padding: const EdgeInsets.all(16),
-              sliver: SliverList(
-                delegate: SliverChildListDelegate.fixed([
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Target device',
-                            style: theme.textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            deviceId ?? 'Not selected',
-                            style: theme.textTheme.titleMedium,
-                          ),
+      appBar: AppBar(title: Text(widget.device.name)),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      children: [
+                        Icon(
+                          connectionState.status == ConnectionStatus.connected
+                              ? Icons.link
+                              : Icons.link_off,
+                          size: 44,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          statusLabel,
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${widget.device.name} - ${widget.device.id}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                          textAlign: TextAlign.center,
+                        ),
+                        if (connectionState.errorMessage != null) ...[
                           const SizedBox(height: 12),
                           Text(
-                            'Status: ${connectionState.status.name}',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color:
-                                  connectionState.status ==
-                                      ConnectionStatus.error
-                                  ? Colors.redAccent
-                                  : null,
+                            connectionState.errorMessage!,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
                             ),
                           ),
-                          if (connectionState.errorMessage != null) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              connectionState.errorMessage!,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: Colors.redAccent,
-                              ),
-                            ),
-                          ],
                         ],
-                      ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Connection controls (Phase 3 UI-only mock)',
-                            style: theme.textTheme.titleSmall,
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 12,
-                            runSpacing: 12,
-                            children: [
-                              FilledButton.tonalIcon(
-                                onPressed: isBusy || deviceId == null
-                                    ? null
-                                    : () => ref
-                                          .read(connectionProvider.notifier)
-                                          .connect(),
-                                icon: const Icon(Icons.link),
-                                label: const Text('Connect'),
-                              ),
-                              FilledButton.tonalIcon(
-                                onPressed: isBusy || deviceId == null
-                                    ? null
-                                    : () => ref
-                                          .read(connectionProvider.notifier)
-                                          .disconnect(),
-                                icon: const Icon(Icons.link_off),
-                                label: const Text('Disconnect'),
-                              ),
-                              FilledButton.tonalIcon(
-                                onPressed: isBusy || deviceId == null
-                                    ? null
-                                    : () => ref
-                                          .read(connectionProvider.notifier)
-                                          .reconnect(),
-                                icon: const Icon(Icons.refresh),
-                                label: const Text('Reconnect'),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            'Timeout simulation:',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                          const SizedBox(height: 6),
-                          FilledButton.icon(
-                            onPressed: isBusy || deviceId == null
-                                ? null
-                                : () async {
-                                    // Mock “timeout connect”: go to connectWithTimeout path
-                                    // by reusing provider’s connect after setting device.
-                                    // We keep it simple: update UI state to connected/error.
-                                    // (Provider uses a 1s timeout internally.)
-                                    await ref
-                                        .read(connectionProvider.notifier)
-                                        .connect();
-                                  },
-                            icon: const Icon(Icons.timer_outlined),
-                            label: const Text('Connect with timeout'),
-                          ),
-                        ],
-                      ),
-                    ),
+                ),
+                const SizedBox(height: 20),
+                if (connectionState.status == ConnectionStatus.validating ||
+                    connectionState.status == ConnectionStatus.connecting ||
+                    connectionState.status == ConnectionStatus.disconnecting)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 20),
+                    child: CircularProgressIndicator(),
                   ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Phase 3 rules: no BLE/WiFi implemented, no file transfer, no messaging.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: Colors.grey,
-                    ),
-                  ),
-                ]),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 18),
-                child: Row(
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  alignment: WrapAlignment.center,
                   children: [
-                    FilledButton.icon(
-                      onPressed: () =>
-                          GoRouter.of(context).go(AppConstants.routeDiscovery),
-                      icon: const Icon(Icons.search),
-                      label: const Text('Back to Discovery'),
-                    ),
+                    if (showPrimaryActions)
+                      ElevatedButton(
+                        onPressed: connectionNotifier.connect,
+                        child: const Text('Connect'),
+                      ),
+                    if (showPrimaryActions)
+                      OutlinedButton(
+                        onPressed: connectionNotifier.reconnect,
+                        child: const Text('Reconnect'),
+                      ),
+                    if (connectionState.status == ConnectionStatus.connected)
+                      OutlinedButton.icon(
+                        onPressed: connectionNotifier.disconnect,
+                        icon: const Icon(Icons.link_off),
+                        label: const Text('Disconnect'),
+                      ),
                   ],
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
-}
-
-extension _NameExt on ConnectionStatus {
-  String get name => toString().split('.').last;
 }

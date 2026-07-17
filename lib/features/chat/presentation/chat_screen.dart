@@ -36,7 +36,7 @@ class ChatScreen extends StatelessWidget {
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               itemCount: messages.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
+              separatorBuilder: (_, _) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final m = messages[index];
                 return _ChatBubble(message: m);

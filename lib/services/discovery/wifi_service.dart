@@ -7,7 +7,7 @@ class WifiService {
     await Future<void>.delayed(const Duration(milliseconds: 500));
 
     return const [
-      Device(id: 'device-sam', name: 'Sam’s Tablet', distanceLabel: '2.4 km'),
+      Device(id: 'device-mi', name: 'Mi Note', distanceLabel: '780 m'),
     ];
   }
 }
