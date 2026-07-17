@@ -43,6 +43,7 @@ dependencies:
   cryptography: ^2.9.0
   crypto: ^3.0.7
   pointycastle: ^4.0.0
+  battery_plus: ^7.1.1
 
 
 dev_dependencies:

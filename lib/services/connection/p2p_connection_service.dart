@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
@@ -20,6 +21,30 @@ class P2pConnectionService {
   Future<void> _ensurePermissions() async {
     await _client.askP2pPermissions();
     await _client.askBluetoothPermissions();
+  }
+
+  Future<bool> checkWifiEnabled() {
+    return _client.checkWifiEnabled();
+  }
+
+  Future<bool> checkBluetoothEnabled() {
+    return _client.checkBluetoothEnabled();
+  }
+
+  Future<bool> checkLocationEnabled() {
+    return _client.checkLocationEnabled();
+  }
+
+  Future<bool> enableWifiServices() {
+    return _client.enableWifiServices();
+  }
+
+  Future<bool> enableBluetoothServices() {
+    return _client.enableBluetoothServices();
+  }
+
+  Future<bool> enableLocationServices() {
+    return _client.enableLocationServices();
   }
 
   Future<void> validateDevice(Device device) async {
@@ -53,6 +78,55 @@ class P2pConnectionService {
 
   Future<void> disconnect() async {
     await _client.disconnect();
+  }
+
+  Stream<String> streamReceivedTexts() {
+    return _client.streamReceivedTexts();
+  }
+
+  Future<void> sendTextToPeer(String clientId, String text) {
+    return _client.sendTextToClient(text, clientId);
+  }
+
+  Future<void> broadcastText(String text) {
+    return _client.broadcastText(text);
+  }
+
+  Future<P2pFileInfo?> sendFileToClient(File file, String clientId) {
+    return _client.sendFileToClient(file, clientId);
+  }
+
+  Future<P2pFileInfo?> broadcastFile(
+    File file, {
+    List<String>? excludeClientIds,
+  }) {
+    return _client.broadcastFile(file, excludeClientIds: excludeClientIds);
+  }
+
+  Stream<List<HostedFileInfo>> streamSentFilesInfo() {
+    return _client.streamSentFilesInfo();
+  }
+
+  Stream<List<ReceivableFileInfo>> streamReceivedFilesInfo() {
+    return _client.streamReceivedFilesInfo();
+  }
+
+  Future<bool> downloadFile(
+    String fileId,
+    String saveDirectory, {
+    String? customFileName,
+    dynamic onProgress,
+    int? rangeStart,
+    int? rangeEnd,
+  }) {
+    return _client.downloadFile(
+      fileId,
+      saveDirectory,
+      customFileName: customFileName,
+      onProgress: onProgress,
+      rangeStart: rangeStart,
+      rangeEnd: rangeEnd,
+    );
   }
 
   Future<void> reconnect(Device device) async {

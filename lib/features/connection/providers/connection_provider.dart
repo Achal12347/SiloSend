@@ -110,11 +110,16 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
   }
 }
 
+final p2pConnectionServiceProvider = Provider<P2pConnectionService>((ref) {
+  final service = P2pConnectionService();
+  ref.onDispose(service.dispose);
+  return service;
+});
+
 final connectionProvider =
     StateNotifierProvider.autoDispose<ConnectionNotifier, ConnectionState>((
       ref,
     ) {
-      final service = P2pConnectionService();
-      ref.onDispose(service.dispose);
+      final service = ref.read(p2pConnectionServiceProvider);
       return ConnectionNotifier(service: service);
     });
