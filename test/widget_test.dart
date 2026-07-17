@@ -5,13 +5,16 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:silosend/main.dart';
+import 'package:silosend/app/app.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
   testWidgets('App boots', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
-    expect(find.text('Foundation placeholder'), findsOneWidget);
+    await tester.pumpWidget(const ProviderScope(child: App()));
+    await tester.pumpAndSettle();
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }
