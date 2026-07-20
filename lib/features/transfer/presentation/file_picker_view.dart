@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:silosend/features/connection/providers/connection_provider.dart';
-import 'package:silosend/features/connection/providers/file_picker_provider.dart';
-import 'package:silosend/features/connection/providers/file_transfer_provider.dart';
 import 'package:silosend/models/transfer_models.dart';
+import '../providers/connection_provider.dart';
+import '../providers/file_picker_provider.dart';
+import '../providers/file_transfer_provider.dart';
 
 class FilePickerView extends ConsumerWidget {
   const FilePickerView({super.key});
@@ -62,6 +62,16 @@ class FilePickerView extends ConsumerWidget {
               ),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Transport is chosen automatically after Send. The app uses the lightest path that fits the file and the current device conditions.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ),
         if (filePickerState.files.isNotEmpty) ...[
           const SizedBox(height: 20),
           const Text(

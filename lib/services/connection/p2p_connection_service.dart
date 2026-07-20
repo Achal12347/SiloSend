@@ -4,13 +4,19 @@ import 'dart:io';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
 import '../../models/device.dart';
+import '../permissions/nearby_device_permission_service.dart';
 
 class P2pConnectionService {
   final FlutterP2pClient _client;
+  final NearbyDevicePermissionService _permissionService;
   bool _initialized = false;
 
-  P2pConnectionService({FlutterP2pClient? client})
-    : _client = client ?? FlutterP2pClient();
+  P2pConnectionService({
+    FlutterP2pClient? client,
+    NearbyDevicePermissionService? permissionService,
+  }) : _client = client ?? FlutterP2pClient(),
+       _permissionService =
+           permissionService ?? NearbyDevicePermissionService();
 
   Future<void> _ensureInitialized() async {
     if (_initialized) return;
@@ -19,8 +25,7 @@ class P2pConnectionService {
   }
 
   Future<void> _ensurePermissions() async {
-    await _client.askP2pPermissions();
-    await _client.askBluetoothPermissions();
+    await _permissionService.requestConnectionPermissions();
   }
 
   Future<bool> checkWifiEnabled() {
@@ -60,6 +65,10 @@ class P2pConnectionService {
     await _ensureInitialized();
     await _ensurePermissions();
     await validateDevice(device);
+
+    if (!await _client.checkBluetoothEnabled()) {
+      await _client.enableBluetoothServices();
+    }
 
     if (!await _client.checkWifiEnabled()) {
       await _client.enableWifiServices();

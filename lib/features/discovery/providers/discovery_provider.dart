@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silosend/core/logging/app_logger.dart';
 import 'package:silosend/models/device.dart';
 import 'package:silosend/services/discovery/p2p_discovery_service.dart';
 
@@ -60,6 +61,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
       );
       state = state.copyWith(status: DiscoveryStatus.done, devices: devices);
     } catch (e) {
+      AppLogger.error('Discovery scan failed', error: e);
       state = state.copyWith(
         status: DiscoveryStatus.error,
         errorMessage: e.toString(),
@@ -78,6 +80,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
         errorMessage: null,
       );
     } catch (e) {
+      AppLogger.error('Hosting start failed', error: e);
       state = state.copyWith(
         status: DiscoveryStatus.error,
         errorMessage: e.toString(),
@@ -96,6 +99,7 @@ class DiscoveryNotifier extends StateNotifier<DiscoveryState> {
         errorMessage: null,
       );
     } catch (e) {
+      AppLogger.error('Hosting stop failed', error: e);
       state = state.copyWith(
         status: DiscoveryStatus.error,
         errorMessage: e.toString(),

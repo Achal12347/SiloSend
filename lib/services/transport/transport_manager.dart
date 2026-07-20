@@ -7,31 +7,51 @@ class SmartTransportManager {
   static const int smallFileThresholdBytes = 1 * 1024 * 1024;
   static const int lowBatteryThreshold = 25;
 
-  final P2pConnectionService _connectionService;
+  final P2pConnectionService connectionService;
   final Battery _battery;
-  final Future<int> Function()? _batteryLevelOverride;
-  final Future<bool> Function()? _wifiEnabledOverride;
-  final Future<bool> Function()? _bluetoothEnabledOverride;
+  final Future<int> Function()? batteryLevelOverride;
+  final Future<bool> Function()? wifiEnabledOverride;
+  final Future<bool> Function()? bluetoothEnabledOverride;
 
   SmartTransportManager({
-    required P2pConnectionService connectionService,
+    required this.connectionService,
     Battery? battery,
-    Future<int> Function()? batteryLevelOverride,
-    Future<bool> Function()? wifiEnabledOverride,
-    Future<bool> Function()? bluetoothEnabledOverride,
-  }) : _connectionService = connectionService,
-       _battery = battery ?? Battery(),
-       _batteryLevelOverride = batteryLevelOverride,
-       _wifiEnabledOverride = wifiEnabledOverride,
-       _bluetoothEnabledOverride = bluetoothEnabledOverride;
+    this.batteryLevelOverride,
+    this.wifiEnabledOverride,
+    this.bluetoothEnabledOverride,
+  }) : _battery = battery ?? Battery();
 
   Future<TransferTransportDecision> decideForText() async {
-    return TransferTransportDecision(
+    final wifiEnabled = await _wifiEnabled();
+    final bluetoothEnabled = await _bluetoothEnabled();
+    final batteryLevel = await _batteryLevel();
+
+    if (!bluetoothEnabled && wifiEnabled) {
+      return _buildDecision(
+        mode: TransferTransportMode.nativeFile,
+        reason: 'BLE is unavailable, so text falls back to the Wi-Fi path.',
+        wifiEnabled: wifiEnabled,
+        bluetoothEnabled: bluetoothEnabled,
+        batteryLevel: batteryLevel,
+      );
+    }
+
+    if (batteryLevel <= lowBatteryThreshold) {
+      return _buildDecision(
+        mode: TransferTransportMode.chunkedText,
+        reason: 'Battery is low, so text stays on the lightweight path.',
+        wifiEnabled: wifiEnabled,
+        bluetoothEnabled: bluetoothEnabled,
+        batteryLevel: batteryLevel,
+      );
+    }
+
+    return _buildDecision(
       mode: TransferTransportMode.chunkedText,
       reason: 'Text uses the lightweight chunked path.',
-      wifiEnabled: await _wifiEnabled(),
-      bluetoothEnabled: await _bluetoothEnabled(),
-      batteryLevel: await _batteryLevel(),
+      wifiEnabled: wifiEnabled,
+      bluetoothEnabled: bluetoothEnabled,
+      batteryLevel: batteryLevel,
     );
   }
 
@@ -42,28 +62,8 @@ class SmartTransportManager {
     final batteryLow = batteryLevel <= lowBatteryThreshold;
     final isSmallFile = fileSizeBytes <= smallFileThresholdBytes;
 
-    if (batteryLow) {
-      return TransferTransportDecision(
-        mode: TransferTransportMode.chunkedText,
-        reason: 'Battery is low, so we prefer the lighter transfer path.',
-        wifiEnabled: wifiEnabled,
-        bluetoothEnabled: bluetoothEnabled,
-        batteryLevel: batteryLevel,
-      );
-    }
-
-    if (!wifiEnabled && bluetoothEnabled) {
-      return TransferTransportDecision(
-        mode: TransferTransportMode.chunkedText,
-        reason: 'Wi-Fi is unavailable, so we fall back to the lighter path.',
-        wifiEnabled: wifiEnabled,
-        bluetoothEnabled: bluetoothEnabled,
-        batteryLevel: batteryLevel,
-      );
-    }
-
     if (!bluetoothEnabled && wifiEnabled) {
-      return TransferTransportDecision(
+      return _buildDecision(
         mode: TransferTransportMode.nativeFile,
         reason: 'BLE is unavailable, so we use the Wi-Fi file path.',
         wifiEnabled: wifiEnabled,
@@ -72,8 +72,42 @@ class SmartTransportManager {
       );
     }
 
+    if (!wifiEnabled && bluetoothEnabled) {
+      return _buildDecision(
+        mode: TransferTransportMode.chunkedText,
+        reason: 'Wi-Fi is unavailable, so we fall back to the lighter path.',
+        wifiEnabled: wifiEnabled,
+        bluetoothEnabled: bluetoothEnabled,
+        batteryLevel: batteryLevel,
+      );
+    }
+
+    if (batteryLow && bluetoothEnabled) {
+      return _buildDecision(
+        mode: TransferTransportMode.chunkedText,
+        reason: 'Battery is low, so we prefer the lighter transfer path.',
+        wifiEnabled: wifiEnabled,
+        bluetoothEnabled: bluetoothEnabled,
+        batteryLevel: batteryLevel,
+      );
+    }
+
+    if (!wifiEnabled && !bluetoothEnabled) {
+      return _buildDecision(
+        mode: isSmallFile
+            ? TransferTransportMode.chunkedText
+            : TransferTransportMode.nativeFile,
+        reason: isSmallFile
+            ? 'Neither radio is reported as available, so we keep the lighter file path.'
+            : 'Neither radio is reported as available, so we keep the file transfer path.',
+        wifiEnabled: wifiEnabled,
+        bluetoothEnabled: bluetoothEnabled,
+        batteryLevel: batteryLevel,
+      );
+    }
+
     if (isSmallFile) {
-      return TransferTransportDecision(
+      return _buildDecision(
         mode: TransferTransportMode.chunkedText,
         reason: 'Small files use the lightweight path automatically.',
         wifiEnabled: wifiEnabled,
@@ -82,7 +116,7 @@ class SmartTransportManager {
       );
     }
 
-    return TransferTransportDecision(
+    return _buildDecision(
       mode: TransferTransportMode.nativeFile,
       reason: 'Large files use the native Wi-Fi file transfer path.',
       wifiEnabled: wifiEnabled,
@@ -97,23 +131,42 @@ class SmartTransportManager {
   }
 
   Future<int> _batteryLevel() async {
-    if (_batteryLevelOverride != null) {
-      return _batteryLevelOverride!();
+    final override = batteryLevelOverride;
+    if (override != null) {
+      return override();
     }
     return _battery.batteryLevel;
   }
 
+  TransferTransportDecision _buildDecision({
+    required TransferTransportMode mode,
+    required String reason,
+    required bool wifiEnabled,
+    required bool bluetoothEnabled,
+    required int batteryLevel,
+  }) {
+    return TransferTransportDecision(
+      mode: mode,
+      reason: reason,
+      wifiEnabled: wifiEnabled,
+      bluetoothEnabled: bluetoothEnabled,
+      batteryLevel: batteryLevel,
+    );
+  }
+
   Future<bool> _wifiEnabled() async {
-    if (_wifiEnabledOverride != null) {
-      return _wifiEnabledOverride!();
+    final override = wifiEnabledOverride;
+    if (override != null) {
+      return override();
     }
-    return _connectionService.checkWifiEnabled();
+    return connectionService.checkWifiEnabled();
   }
 
   Future<bool> _bluetoothEnabled() async {
-    if (_bluetoothEnabledOverride != null) {
-      return _bluetoothEnabledOverride!();
+    final override = bluetoothEnabledOverride;
+    if (override != null) {
+      return override();
     }
-    return _connectionService.checkBluetoothEnabled();
+    return connectionService.checkBluetoothEnabled();
   }
 }

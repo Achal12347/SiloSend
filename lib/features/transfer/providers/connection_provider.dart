@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silosend/core/logging/app_logger.dart';
 import 'package:silosend/models/device.dart';
 import 'package:silosend/services/connection/p2p_connection_service.dart';
 
@@ -65,6 +66,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       await service.connect(device);
       state = state.copyWith(status: ConnectionStatus.connected);
     } catch (e) {
+      AppLogger.error('Connection attempt failed', error: e);
       state = state.copyWith(
         status: ConnectionStatus.error,
         errorMessage: e.toString(),
@@ -82,6 +84,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       await service.disconnect();
       state = state.copyWith(status: ConnectionStatus.disconnected);
     } catch (e) {
+      AppLogger.error('Disconnect attempt failed', error: e);
       state = state.copyWith(
         status: ConnectionStatus.error,
         errorMessage: e.toString(),
@@ -102,6 +105,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionState> {
       await service.reconnect(device);
       state = state.copyWith(status: ConnectionStatus.connected);
     } catch (e) {
+      AppLogger.error('Reconnect attempt failed', error: e);
       state = state.copyWith(
         status: ConnectionStatus.error,
         errorMessage: e.toString(),

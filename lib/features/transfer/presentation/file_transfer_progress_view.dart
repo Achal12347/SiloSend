@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:silosend/features/connection/providers/file_transfer_provider.dart';
 import 'package:silosend/models/transfer_models.dart';
 import 'package:silosend/models/transport_models.dart';
+import '../providers/file_transfer_provider.dart';
 
 class FileTransferProgressView extends ConsumerWidget {
   const FileTransferProgressView({super.key});
@@ -227,11 +227,7 @@ class _TransferItemCard extends StatelessWidget {
   }
 
   String _transportLabel(TransferItem item) {
-    final mode = switch (item.transportMode) {
-      TransferTransportMode.chunkedText => 'Auto transport: lightweight path',
-      TransferTransportMode.nativeFile => 'Auto transport: native Wi-Fi file',
-    };
-    return '$mode • ${item.transportReason}';
+    return '${item.transportMode.label} - ${item.transportReason}';
   }
 
   String _formatBytes(int bytes) {

@@ -1,15 +1,15 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:silosend/app/constants.dart';
-import 'package:silosend/models/device.dart';
 import 'package:silosend/features/about/presentation/about_screen.dart';
 import 'package:silosend/features/chat/presentation/chat_screen.dart';
 import 'package:silosend/features/discovery/presentation/discovery_screen.dart';
-import 'package:silosend/features/connection/presentation/connection_screen.dart';
 import 'package:silosend/features/history/presentation/history_screen.dart';
 import 'package:silosend/features/home/presentation/home_screen.dart';
 import 'package:silosend/features/settings/presentation/settings_screen.dart';
+import 'package:silosend/features/transfer/presentation/connection_screen.dart';
 import 'package:silosend/features/transfer/presentation/transfer_screen.dart';
+import 'package:silosend/models/device.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(

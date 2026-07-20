@@ -41,12 +41,33 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                 : discoveryNotifier.startHosting,
           ),
           IconButton(
+            tooltip: 'Refresh discovery',
             icon: const Icon(Icons.refresh),
             onPressed: discoveryNotifier.startDiscovery,
           ),
         ],
       ),
-      body: _buildBody(context, discoveryState, discoveryNotifier),
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 280),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) {
+          final slide = Tween<Offset>(
+            begin: const Offset(0, 0.04),
+            end: Offset.zero,
+          ).animate(animation);
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(position: slide, child: child),
+          );
+        },
+        child: KeyedSubtree(
+          key: ValueKey(
+            '${discoveryState.status.name}-${discoveryState.isHosting}-${discoveryState.devices.length}',
+          ),
+          child: _buildBody(context, discoveryState, discoveryNotifier),
+        ),
+      ),
     );
   }
 
@@ -57,7 +78,7 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
   ) {
     switch (discoveryState.status) {
       case DiscoveryStatus.searching:
-        return const Center(child: CircularProgressIndicator());
+        return const Center(child: _ScanningState());
 
       case DiscoveryStatus.initial:
       case DiscoveryStatus.done:
@@ -67,26 +88,31 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
             padding: const EdgeInsets.all(24),
             children: [
               if (discoveryState.isHosting) ...[
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.wifi_tethering),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Hosting this device',
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Text('SSID: ${discoveryState.hostSsid ?? "Pending"}'),
-                        Text('Key: ${discoveryState.hostKey ?? "Pending"}'),
-                      ],
+                Semantics(
+                  container: true,
+                  label:
+                      'Hosting this device. Network details are visible below.',
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.wifi_tethering),
+                              const SizedBox(width: 12),
+                              Text(
+                                'Hosting this device',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text('SSID: ${discoveryState.hostSsid ?? "Pending"}'),
+                          Text('Key: ${discoveryState.hostKey ?? "Pending"}'),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -139,16 +165,21 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
                   : '?';
 
               return Card(
-                child: ListTile(
-                  leading: CircleAvatar(child: Text(initial)),
-                  title: Text(
-                    device.name.isNotEmpty ? device.name : 'Unknown Device',
+                child: Semantics(
+                  button: true,
+                  label:
+                      '${device.name.isNotEmpty ? device.name : 'Unknown Device'}, ${device.distanceLabel}',
+                  child: ListTile(
+                    leading: CircleAvatar(child: Text(initial)),
+                    title: Text(
+                      device.name.isNotEmpty ? device.name : 'Unknown Device',
+                    ),
+                    subtitle: Text('${device.distanceLabel} - ${device.id}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => GoRouter.of(
+                      context,
+                    ).go(AppConstants.routeConnection, extra: device),
                   ),
-                  subtitle: Text('${device.distanceLabel} - ${device.id}'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => GoRouter.of(
-                    context,
-                  ).go(AppConstants.routeConnection, extra: device),
                 ),
               );
             },
@@ -186,5 +217,75 @@ class _DiscoveryScreenState extends ConsumerState<DiscoveryScreen> {
           ),
         );
     }
+  }
+}
+
+class _ScanningState extends StatefulWidget {
+  const _ScanningState();
+
+  @override
+  State<_ScanningState> createState() => _ScanningStateState();
+}
+
+class _ScanningStateState extends State<_ScanningState>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: const EdgeInsets.all(24),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                final value = 0.92 + (_controller.value * 0.08);
+                return Transform.scale(scale: value, child: child);
+              },
+              child: Icon(
+                Icons.radar_outlined,
+                size: 48,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Searching for nearby devices',
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Discovery is running in the background while we wait for nearby peers to respond.',
+              style: theme.textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:silosend/features/connection/providers/connection_provider.dart';
 import 'package:silosend/models/device.dart';
+import '../providers/connection_provider.dart';
 
 class ConnectionScreen extends ConsumerStatefulWidget {
   final Device device;

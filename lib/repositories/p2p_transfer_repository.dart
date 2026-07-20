@@ -5,11 +5,14 @@ import 'dart:typed_data';
 
 import 'package:collection/collection.dart';
 import 'package:crypto/crypto.dart';
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
 import '../models/device.dart';
 import '../models/transfer_models.dart';
 import '../models/transport_models.dart';
+import '../services/encryption/encryption_service.dart';
+import '../services/encryption/key_exchange.dart';
 import '../services/transfer/p2p_transfer_service.dart';
 import '../services/transport/transport_manager.dart';
 import 'transfer_repository.dart';
@@ -18,17 +21,22 @@ class P2pTransferRepository implements TransferRepository {
   static const int _chunkSize = 12 * 1024;
   static const String _nativeSaveDirectoryName = 'silosend-native-transfers';
   static const String _messageVersion = '1';
+  static const String _messageEncryptionVersion = 'aes-gcm-1';
   static const String _messageTypeInit = 'transfer_init';
   static const String _messageTypeChunk = 'transfer_chunk';
   static const String _messageTypeComplete = 'transfer_complete';
   static const String _messageTypeCancel = 'transfer_cancel';
+  static const String _nativeEncryptedSuffix = '.siloenc';
 
   final P2pTransferService _service;
-  final SmartTransportManager _transportManager;
+  final SmartTransportManager transportManager;
+  final EncryptionService _encryptionService = EncryptionService();
+  final KeyExchange _keyExchange = KeyExchange();
   final StreamController<TransferState> _stateController =
       StreamController<TransferState>.broadcast();
   final Map<String, _IncomingTransferSession> _incomingSessions = {};
   final Map<String, _OutgoingTransferSession> _outgoingSessions = {};
+  final Map<String, _TransferSecuritySession> _securitySessions = {};
   final List<String> _outgoingQueue = [];
   final Map<String, String> _nativeOutgoingFileIds = {};
   final Set<String> _nativeIncomingDownloads = {};
@@ -41,8 +49,8 @@ class P2pTransferRepository implements TransferRepository {
 
   P2pTransferRepository({
     required this._service,
-    required SmartTransportManager transportManager,
-  }) : _transportManager = transportManager {
+    required this.transportManager,
+  }) {
     _stateController.add(_state);
     _messageSubscription = _service.watchIncomingMessages().listen(
       _handleIncomingMessage,
@@ -70,8 +78,10 @@ class P2pTransferRepository implements TransferRepository {
     required List<TransferSourceFile> files,
   }) async {
     for (final file in files) {
-      final decision = await _transportManager.decideForFile(file.size);
+      final decision = await transportManager.decideForFile(file.size);
       final transferId = _generateTransferId();
+      final sessionKeyBytes = _keyExchange.generateSessionKey();
+      final secretKey = _encryptionService.keyFromBytes(sessionKeyBytes);
       final now = DateTime.now().toUtc();
       final item = TransferItem(
         id: transferId,
@@ -98,6 +108,8 @@ class P2pTransferRepository implements TransferRepository {
         peer: peer,
         transportMode: decision.mode,
         transportReason: decision.reason,
+        sessionKeyBytes: sessionKeyBytes,
+        secretKey: secretKey,
       );
       _updateState((items) => [...items, item]);
     }
@@ -298,6 +310,9 @@ class P2pTransferRepository implements TransferRepository {
       'peerId': session.peer.id,
       'peerName': session.peer.name,
       'direction': TransferDirection.outgoing.name,
+      'encrypted': true,
+      'encryptionVersion': _messageEncryptionVersion,
+      'sessionKey': base64Encode(session.sessionKeyBytes),
     });
     await _service.sendTextToClient(session.peer.id, initMessage);
 
@@ -328,13 +343,21 @@ class P2pTransferRepository implements TransferRepository {
           break;
         }
 
+        final encrypted = await _encryptChunk(
+          transferId: transferId,
+          chunkIndex: chunkIndex,
+          plaintext: Uint8List.fromList(chunk),
+          secretKey: session.secretKey,
+        );
         final chunkMessage = jsonEncode({
           'v': _messageVersion,
           'type': _messageTypeChunk,
           'transferId': transferId,
           'chunkIndex': chunkIndex,
           'chunkCount': chunkCount,
-          'data': base64Encode(chunk),
+          'encrypted': true,
+          'cipherText': base64Encode(encrypted.cipherText),
+          'mac': base64Encode(encrypted.mac.bytes),
         });
         await _service.sendTextToClient(session.peer.id, chunkMessage);
 
@@ -367,6 +390,7 @@ class P2pTransferRepository implements TransferRepository {
         'transferId': transferId,
         'checksum': digest,
         'fileSize': totalBytes,
+        'encrypted': true,
       }),
     );
 
@@ -393,19 +417,31 @@ class P2pTransferRepository implements TransferRepository {
       throw StateError('File not found: ${session.sourceFile.path}');
     }
 
+    final totalBytes = await sourceFile.length();
+    final digest = await _checksumForFile(sourceFile);
+    final chunkCount = _chunkCountFor(totalBytes);
+    final encryptedPackage = await _buildEncryptedNativePackage(
+      transferId: transferId,
+      sourceFile: sourceFile,
+      session: session,
+      totalBytes: totalBytes,
+      digest: digest,
+      chunkCount: chunkCount,
+    );
+
     _updateTransfer(
       transferId,
       (item) => item.copyWith(
         status: TransferStatus.transferring,
         transferredBytes: 0,
-        totalBytes: session.sourceFile.size,
+        totalBytes: totalBytes,
         updatedAt: DateTime.now().toUtc(),
         clearError: true,
       ),
     );
 
     final fileInfo = await _service.sendFileToClient(
-      sourceFile,
+      encryptedPackage,
       session.peer.id,
     );
     if (fileInfo == null) {
@@ -413,6 +449,31 @@ class P2pTransferRepository implements TransferRepository {
     }
 
     _nativeOutgoingFileIds[transferId] = fileInfo.id;
+    await _service.sendTextToClient(
+      session.peer.id,
+      jsonEncode({
+        'v': _messageVersion,
+        'type': _messageTypeInit,
+        'transferId': transferId,
+        'nativeFileId': fileInfo.id,
+        'fileName': session.sourceFile.name,
+        'encryptedFileName': encryptedPackage.path
+            .split(Platform.pathSeparator)
+            .last,
+        'fileSize': totalBytes,
+        'chunkSize': _chunkSize,
+        'chunkCount': chunkCount,
+        'checksum': digest,
+        'peerId': session.peer.id,
+        'peerName': session.peer.name,
+        'direction': TransferDirection.outgoing.name,
+        'encrypted': true,
+        'encryptionVersion': _messageEncryptionVersion,
+        'sessionKey': base64Encode(session.sessionKeyBytes),
+        'transportMode': TransferTransportMode.nativeFile.name,
+      }),
+    );
+
     _updateTransfer(
       transferId,
       (item) => item.copyWith(
@@ -421,6 +482,93 @@ class P2pTransferRepository implements TransferRepository {
         updatedAt: DateTime.now().toUtc(),
         clearError: true,
       ),
+    );
+  }
+
+  Future<File> _buildEncryptedNativePackage({
+    required String transferId,
+    required File sourceFile,
+    required _OutgoingTransferSession session,
+    required int totalBytes,
+    required String digest,
+    required int chunkCount,
+  }) async {
+    final directory = Directory(
+      '${Directory.systemTemp.path}/silosend-encrypted-native',
+    );
+    await directory.create(recursive: true);
+    final safeName = session.sourceFile.name.replaceAll(
+      RegExp(r'[\\/:*?"<>|]'),
+      '_',
+    );
+    final encryptedFileName =
+        [transferId, safeName].join('_') + _nativeEncryptedSuffix;
+    final encryptedFile = File('${directory.path}/$encryptedFileName');
+    await encryptedFile.parent.create(recursive: true);
+
+    final sink = encryptedFile.openWrite();
+    try {
+      sink.writeln(
+        jsonEncode({
+          'v': _messageVersion,
+          'type': 'encrypted_native_package',
+          'transferId': transferId,
+          'fileName': session.sourceFile.name,
+          'fileSize': totalBytes,
+          'chunkSize': _chunkSize,
+          'chunkCount': chunkCount,
+          'checksum': digest,
+          'encryptionVersion': _messageEncryptionVersion,
+        }),
+      );
+
+      final raf = await sourceFile.open(mode: FileMode.read);
+      try {
+        var chunkIndex = 0;
+        while (true) {
+          final chunk = await raf.read(_chunkSize);
+          if (chunk.isEmpty) break;
+
+          final encrypted = await _encryptChunk(
+            transferId: transferId,
+            chunkIndex: chunkIndex,
+            plaintext: Uint8List.fromList(chunk),
+            secretKey: session.secretKey,
+          );
+          sink.writeln(
+            jsonEncode({
+              'chunkIndex': chunkIndex,
+              'cipherText': base64Encode(encrypted.cipherText),
+              'mac': base64Encode(encrypted.mac.bytes),
+            }),
+          );
+          chunkIndex += 1;
+        }
+      } finally {
+        await raf.close();
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+
+    return encryptedFile;
+  }
+
+  Future<SecretBox> _encryptChunk({
+    required String transferId,
+    required int chunkIndex,
+    required Uint8List plaintext,
+    required SecretKey secretKey,
+  }) async {
+    final nonce = await _encryptionService.generateNonce(
+      transferId: transferId,
+      chunkIndex: chunkIndex,
+    );
+    return _encryptionService.encryptBytes(
+      plaintext: plaintext,
+      key: secretKey,
+      nonce: nonce,
     );
   }
 
@@ -455,31 +603,59 @@ class P2pTransferRepository implements TransferRepository {
     final chunkSize = _toInt(payload['chunkSize']);
     final chunkCount = _toInt(payload['chunkCount']);
     final checksum = payload['checksum']?.toString() ?? '';
+    final sessionKey = payload['sessionKey']?.toString();
+    final nativeFileId = payload['nativeFileId']?.toString();
     if (transferId == null ||
         fileName == null ||
         peerId == null ||
         fileSize == null ||
         chunkSize == null ||
-        chunkCount == null) {
+        chunkCount == null ||
+        sessionKey == null) {
       return;
     }
 
-    final now = DateTime.now().toUtc();
-    final destinationPath = await _buildDestinationPath(fileName, transferId);
-    final transferFile = File(destinationPath);
-    await transferFile.parent.create(recursive: true);
-    if (!await transferFile.exists()) {
-      await transferFile.create(recursive: true);
-    }
-
-    final session = await _IncomingTransferSession.create(
-      file: transferFile,
-      totalBytes: fileSize,
-      checksum: checksum,
-      chunkCount: chunkCount,
-      peerId: peerId,
+    final secretKey = _encryptionService.keyFromBytes(
+      Uint8List.fromList(base64Decode(sessionKey)),
     );
-    _incomingSessions[transferId] = session;
+    final now = DateTime.now().toUtc();
+    String? destinationPath;
+    if (nativeFileId != null && nativeFileId.isNotEmpty) {
+      _securitySessions[nativeFileId] = _TransferSecuritySession(
+        keyId: nativeFileId,
+        transferId: transferId,
+        transportMode: TransferTransportMode.nativeFile,
+        secretKey: secretKey,
+        checksum: checksum,
+      );
+      return;
+    } else {
+      destinationPath = await _buildDestinationPath(fileName, transferId);
+      final transferFile = File(destinationPath);
+      await transferFile.parent.create(recursive: true);
+      if (!await transferFile.exists()) {
+        await transferFile.create(recursive: true);
+      }
+
+      final session = await _IncomingTransferSession.create(
+        file: transferFile,
+        totalBytes: fileSize,
+        checksum: checksum,
+        chunkCount: chunkCount,
+        peerId: peerId,
+        secretKey: secretKey,
+      );
+      _incomingSessions[transferId] = session;
+      _securitySessions[transferId] = _TransferSecuritySession(
+        keyId: transferId,
+        transferId: transferId,
+        transportMode: TransferTransportMode.chunkedText,
+        secretKey: secretKey,
+        checksum: checksum,
+        finalPath: destinationPath,
+        temporaryPath: destinationPath,
+      );
+    }
     _updateState((items) {
       final nextItems = [...items];
       nextItems.removeWhere((item) => item.id == transferId);
@@ -487,8 +663,12 @@ class P2pTransferRepository implements TransferRepository {
         TransferItem(
           id: transferId,
           direction: TransferDirection.incoming,
-          transportMode: TransferTransportMode.chunkedText,
-          transportReason: 'Received over the lightweight chunked path.',
+          transportMode: nativeFileId == null
+              ? TransferTransportMode.chunkedText
+              : TransferTransportMode.nativeFile,
+          transportReason: nativeFileId == null
+              ? 'Received over the encrypted lightweight path.'
+              : 'Received over the encrypted native file path.',
           peerId: peerId,
           peerName: peerName,
           fileName: fileName,
@@ -511,14 +691,32 @@ class P2pTransferRepository implements TransferRepository {
 
   Future<void> _handleIncomingChunk(Map<String, dynamic> payload) async {
     final transferId = payload['transferId']?.toString();
-    final data = payload['data']?.toString();
+    final cipherText = payload['cipherText']?.toString();
+    final mac = payload['mac']?.toString();
     final chunkIndex = _toInt(payload['chunkIndex']);
-    if (transferId == null || data == null || chunkIndex == null) return;
+    if (transferId == null ||
+        cipherText == null ||
+        mac == null ||
+        chunkIndex == null) {
+      return;
+    }
 
     final session = _incomingSessions[transferId];
     if (session == null) return;
 
-    final chunk = base64Decode(data);
+    final nonce = await _encryptionService.generateNonce(
+      transferId: transferId,
+      chunkIndex: chunkIndex,
+    );
+    final box = SecretBox(
+      base64Decode(cipherText),
+      nonce: nonce,
+      mac: Mac(base64Decode(mac)),
+    );
+    final chunk = await _encryptionService.decryptBox(
+      box: box,
+      key: session.secretKey,
+    );
     await session.writeChunk(chunkIndex, chunk);
     final receivedBytes = session.receivedBytes;
     _updateTransfer(
@@ -650,7 +848,10 @@ class P2pTransferRepository implements TransferRepository {
 
     final now = DateTime.now().toUtc();
     final saveDirectory = await _nativeSaveDirectory();
-    final path = '${saveDirectory.path}/${file.info.name}';
+    final encryptedFileName = file.info.name;
+    final finalFileName = _stripEncryptedSuffix(encryptedFileName);
+    final encryptedPath = '${saveDirectory.path}/$encryptedFileName';
+    final finalPath = '${saveDirectory.path}/$finalFileName';
     final totalBytes = file.info.size;
     _nativeIncomingDownloads.add(fileId);
 
@@ -662,12 +863,13 @@ class P2pTransferRepository implements TransferRepository {
           id: fileId,
           direction: TransferDirection.incoming,
           transportMode: TransferTransportMode.nativeFile,
-          transportReason: 'Auto-selected native Wi-Fi file transfer.',
+          transportReason:
+              'Auto-selected encrypted native Wi-Fi file transfer.',
           peerId: file.info.senderId,
           peerName: file.info.senderId,
-          fileName: file.info.name,
-          filePath: path,
-          savedPath: path,
+          fileName: finalFileName,
+          filePath: encryptedPath,
+          savedPath: finalPath,
           totalBytes: totalBytes,
           transferredBytes: 0,
           chunkSize: _chunkSize,
@@ -686,7 +888,7 @@ class P2pTransferRepository implements TransferRepository {
       _service.downloadFile(
         fileId,
         saveDirectory.path,
-        customFileName: file.info.name,
+        customFileName: encryptedFileName,
         onProgress: (progress) {
           final bytesDownloaded =
               (progress.bytesDownloaded as num?)?.toInt() ?? 0;
@@ -708,7 +910,7 @@ class P2pTransferRepository implements TransferRepository {
     ReceivableFileInfo file,
     TransferItem existingTransfer,
   ) async {
-    final progress = _nativeProgressPercent(file as HostedFileInfo);
+    final progress = (file.downloadProgressPercent / 100).clamp(0.0, 1.0);
     final stateLabel = _nativeFileStateLabel(file.state);
     final isComplete = stateLabel == 'completed';
     if (isComplete) {
@@ -727,6 +929,14 @@ class P2pTransferRepository implements TransferRepository {
         clearError: true,
       ),
     );
+
+    if (isComplete) {
+      await _finalizeEncryptedNativeTransfer(
+        fileId: file.info.id,
+        filePath: existingTransfer.filePath,
+        finalPath: existingTransfer.savedPath,
+      );
+    }
   }
 
   void _handleTransportError(Object error, StackTrace stackTrace) {
@@ -818,12 +1028,125 @@ class P2pTransferRepository implements TransferRepository {
     return null;
   }
 
+  String _stripEncryptedSuffix(String fileName) {
+    if (fileName.endsWith(_nativeEncryptedSuffix)) {
+      return fileName.substring(
+        0,
+        fileName.length - _nativeEncryptedSuffix.length,
+      );
+    }
+    return fileName;
+  }
+
+  Future<void> _finalizeEncryptedNativeTransfer({
+    required String fileId,
+    required String? filePath,
+    required String? finalPath,
+  }) async {
+    if (filePath == null || finalPath == null) {
+      return;
+    }
+
+    final session = _securitySessions[fileId];
+    if (session == null) {
+      _updateTransfer(
+        fileId,
+        (item) => item.copyWith(
+          status: TransferStatus.failed,
+          errorMessage: 'Missing encryption session for native transfer.',
+          updatedAt: DateTime.now().toUtc(),
+        ),
+      );
+      return;
+    }
+
+    final encryptedFile = File(filePath);
+    final outputFile = File(finalPath);
+    if (!await encryptedFile.exists()) {
+      return;
+    }
+
+    await outputFile.parent.create(recursive: true);
+    final sink = await outputFile.open(mode: FileMode.write);
+    try {
+      final lines = encryptedFile
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+      var isHeader = true;
+      var chunkIndex = 0;
+      await for (final line in lines) {
+        if (line.trim().isEmpty) continue;
+        if (isHeader) {
+          isHeader = false;
+          continue;
+        }
+        final decoded = jsonDecode(line);
+        if (decoded is! Map<String, dynamic>) continue;
+        final cipherText = decoded['cipherText']?.toString();
+        final mac = decoded['mac']?.toString();
+        if (cipherText == null || mac == null) continue;
+        final nonce = await _encryptionService.generateNonce(
+          transferId: session.transferId,
+          chunkIndex: chunkIndex,
+        );
+        final box = SecretBox(
+          base64Decode(cipherText),
+          nonce: nonce,
+          mac: Mac(base64Decode(mac)),
+        );
+        final clearChunk = await _encryptionService.decryptBox(
+          box: box,
+          key: session.secretKey,
+        );
+        await sink.writeFrom(clearChunk);
+        chunkIndex += 1;
+      }
+    } finally {
+      await sink.flush();
+      await sink.close();
+    }
+
+    final checksum = await _checksumForFile(outputFile);
+    final isValid = checksum == session.checksum;
+    if (!isValid) {
+      _updateTransfer(
+        fileId,
+        (item) => item.copyWith(
+          status: TransferStatus.failed,
+          errorMessage: 'Checksum mismatch',
+          updatedAt: DateTime.now().toUtc(),
+        ),
+      );
+      return;
+    }
+
+    _updateTransfer(
+      fileId,
+      (item) => item.copyWith(
+        status: TransferStatus.completed,
+        transferredBytes: item.totalBytes,
+        currentChunkIndex: item.chunkCount,
+        savedPath: outputFile.path,
+        updatedAt: DateTime.now().toUtc(),
+        clearError: true,
+      ),
+    );
+    _securitySessions.remove(fileId);
+    _nativeIncomingDownloads.remove(fileId);
+    try {
+      if (await encryptedFile.exists()) {
+        await encryptedFile.delete();
+      }
+    } catch (_) {}
+  }
+
   double _nativeProgressPercent(HostedFileInfo file) {
     if (file.receiverIds.isEmpty) {
       return 0;
     }
     final receiverId = file.receiverIds.first;
-    return file.getProgressPercent(receiverId).clamp(0.0, 1.0);
+    return (file.getProgressPercent(receiverId).clamp(0.0, 100.0)) / 100.0;
   }
 
   String _nativeFileStateLabel(Object state) {
@@ -847,12 +1170,18 @@ class P2pTransferRepository implements TransferRepository {
     unawaited(_receivedFilesSubscription?.cancel());
     for (final session in _incomingSessions.values) {
       unawaited(session.dispose(deleteFile: false));
+      session.secretKey.destroy();
     }
     for (final session in _outgoingSessions.values) {
       session.resumeCompleter?.complete();
+      session.secretKey.destroy();
+    }
+    for (final session in _securitySessions.values) {
+      session.secretKey.destroy();
     }
     _incomingSessions.clear();
     _outgoingSessions.clear();
+    _securitySessions.clear();
     _nativeOutgoingFileIds.clear();
     _nativeIncomingDownloads.clear();
     _stateController.close();
@@ -864,6 +1193,8 @@ class _OutgoingTransferSession {
   final Device peer;
   final TransferTransportMode transportMode;
   final String transportReason;
+  final Uint8List sessionKeyBytes;
+  final SecretKey secretKey;
   bool isPaused = false;
   bool isCanceled = false;
   Completer<void>? resumeCompleter;
@@ -873,6 +1204,8 @@ class _OutgoingTransferSession {
     required this.peer,
     required this.transportMode,
     required this.transportReason,
+    required this.sessionKeyBytes,
+    required this.secretKey,
   });
 }
 
@@ -882,6 +1215,7 @@ class _IncomingTransferSession {
   final String checksum;
   final int chunkCount;
   final String peerId;
+  final SecretKey secretKey;
   int _receivedBytes = 0;
   late final RandomAccessFile _raf;
 
@@ -891,6 +1225,7 @@ class _IncomingTransferSession {
     required this.checksum,
     required this.chunkCount,
     required this.peerId,
+    required this.secretKey,
   });
 
   static Future<_IncomingTransferSession> create({
@@ -899,6 +1234,7 @@ class _IncomingTransferSession {
     required String checksum,
     required int chunkCount,
     required String peerId,
+    required SecretKey secretKey,
   }) async {
     final session = _IncomingTransferSession._(
       file: file,
@@ -906,6 +1242,7 @@ class _IncomingTransferSession {
       checksum: checksum,
       chunkCount: chunkCount,
       peerId: peerId,
+      secretKey: secretKey,
     );
     session._raf = await file.open(mode: FileMode.write);
     return session;
@@ -932,6 +1269,7 @@ class _IncomingTransferSession {
     try {
       await _raf.close();
     } catch (_) {}
+    secretKey.destroy();
     if (deleteFile) {
       try {
         if (await file.exists()) {
@@ -940,4 +1278,24 @@ class _IncomingTransferSession {
       } catch (_) {}
     }
   }
+}
+
+class _TransferSecuritySession {
+  final String keyId;
+  final String transferId;
+  final TransferTransportMode transportMode;
+  final SecretKey secretKey;
+  final String checksum;
+  final String? finalPath;
+  final String? temporaryPath;
+
+  _TransferSecuritySession({
+    required this.keyId,
+    required this.transferId,
+    required this.transportMode,
+    required this.secretKey,
+    required this.checksum,
+    this.finalPath,
+    this.temporaryPath,
+  });
 }

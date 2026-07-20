@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:silosend/features/connection/presentation/file_picker_view.dart';
-import 'package:silosend/features/connection/presentation/file_transfer_progress_view.dart';
-import 'package:silosend/features/connection/providers/connection_provider.dart'
-    as connection;
+import '../providers/connection_provider.dart' as connection;
+import 'file_picker_view.dart';
+import 'file_transfer_progress_view.dart';
 
 class TransferScreen extends ConsumerWidget {
   const TransferScreen({super.key});
@@ -47,12 +46,12 @@ class TransferScreen extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Phase 4 focus',
+                            'Automatic transport selection',
                             style: theme.textTheme.titleMedium,
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'This screen now drives the real queue, chunking, sending, receiving, merge, and verification flow over the active P2P connection.',
+                            'The transfer layer now chooses the transport automatically. Text and small files stay on the lightweight path, large files switch to the native Wi-Fi path, and the queue keeps the reason with each item.',
                             style: theme.textTheme.bodyMedium,
                           ),
                         ],
@@ -80,43 +79,57 @@ class _ConnectionBanner extends StatelessWidget {
     final isConnected =
         connectionState.status == connection.ConnectionStatus.connected;
 
-    return Card(
-      color: isConnected
-          ? theme.colorScheme.primaryContainer
-          : theme.colorScheme.surfaceContainerHigh,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Icon(
-              isConnected ? Icons.link : Icons.link_off,
-              color: isConnected
-                  ? theme.colorScheme.onPrimaryContainer
-                  : theme.colorScheme.onSurfaceVariant,
-              size: 30,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isConnected
-                        ? 'Connected to ${connectionState.device?.name ?? 'peer'}'
-                        : 'No active transfer connection',
-                    style: theme.textTheme.titleSmall,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      child: Card(
+        color: isConnected
+            ? theme.colorScheme.primaryContainer
+            : theme.colorScheme.surfaceContainerHigh,
+        child: Semantics(
+          container: true,
+          label: isConnected
+              ? 'Connected to ${connectionState.device?.name ?? 'peer'}'
+              : 'No active transfer connection',
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                AnimatedScale(
+                  duration: const Duration(milliseconds: 260),
+                  scale: isConnected ? 1.0 : 0.96,
+                  child: Icon(
+                    isConnected ? Icons.link : Icons.link_off,
+                    color: isConnected
+                        ? theme.colorScheme.onPrimaryContainer
+                        : theme.colorScheme.onSurfaceVariant,
+                    size: 30,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isConnected
-                        ? 'Files can now be queued and transferred.'
-                        : 'Go back to Discovery or Connection to establish a peer link first.',
-                    style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isConnected
+                            ? 'Connected to ${connectionState.device?.name ?? 'peer'}'
+                            : 'No active transfer connection',
+                        style: theme.textTheme.titleSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isConnected
+                            ? 'Files can now be queued and transferred.'
+                            : 'Go back to Discovery or Connection to establish a peer link first.',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

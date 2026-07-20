@@ -10,7 +10,7 @@ class HistoryScreen extends StatelessWidget {
     final mockTransfers = <_HistoryItem>[
       const _HistoryItem(
         fileName: 'ProjectBrief.docx',
-        peerName: 'Ava’s Phone',
+        peerName: "Ava's Phone",
         direction: _HistoryDirection.sent,
         status: 'Completed',
         when: 'Yesterday',
@@ -24,7 +24,7 @@ class HistoryScreen extends StatelessWidget {
       ),
       const _HistoryItem(
         fileName: 'Vacation_2025.zip',
-        peerName: 'Sam’s Tablet',
+        peerName: "Sam's Tablet",
         direction: _HistoryDirection.sent,
         status: 'In progress',
         when: 'Today',
@@ -133,7 +133,7 @@ class _HistoryTile extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
-        subtitle: Text('$directionLabel • ${item.peerName} • ${item.when}'),
+        subtitle: Text('$directionLabel - ${item.peerName} - ${item.when}'),
         trailing: IconButton(
           tooltip: 'Delete (mock)',
           icon: const Icon(Icons.delete_outline),

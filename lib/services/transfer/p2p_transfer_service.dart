@@ -30,7 +30,10 @@ class P2pTransferService {
     File file, {
     List<String>? excludeClientIds,
   }) {
-    return _connectionService.broadcastFile(file, excludeClientIds: excludeClientIds);
+    return _connectionService.broadcastFile(
+      file,
+      excludeClientIds: excludeClientIds,
+    );
   }
 
   Stream<List<HostedFileInfo>> watchSentFilesInfo() {

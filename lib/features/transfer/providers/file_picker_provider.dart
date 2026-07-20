@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:silosend/core/logging/app_logger.dart';
 
 enum FilePickerStatus { initial, picking, picked, error }
 
@@ -33,12 +34,13 @@ class FilePickerNotifier extends StateNotifier<FilePickerState> {
   Future<void> pickFiles() async {
     state = state.copyWith(status: FilePickerStatus.picking);
     try {
-      final result = await FilePicker.platform.pickFiles(allowMultiple: true);
+      final result = await FilePicker.pickFiles();
       state = state.copyWith(
         status: FilePickerStatus.picked,
         files: result?.files ?? state.files,
       );
     } catch (e) {
+      AppLogger.error('File picker failed', error: e);
       state = state.copyWith(
         status: FilePickerStatus.error,
         errorMessage: e.toString(),

@@ -3,17 +3,24 @@ import 'dart:async';
 import 'package:flutter_p2p_connection/flutter_p2p_connection.dart';
 
 import '../../models/device.dart';
+import '../permissions/nearby_device_permission_service.dart';
 
 class P2pDiscoveryService {
   final FlutterP2pClient _client;
   final FlutterP2pHost _host;
+  final NearbyDevicePermissionService _permissionService;
 
   StreamSubscription<List<BleDiscoveredDevice>>? _scanSubscription;
   bool _initialized = false;
 
-  P2pDiscoveryService({FlutterP2pClient? client, FlutterP2pHost? host})
-    : _client = client ?? FlutterP2pClient(),
-      _host = host ?? FlutterP2pHost();
+  P2pDiscoveryService({
+    FlutterP2pClient? client,
+    FlutterP2pHost? host,
+    NearbyDevicePermissionService? permissionService,
+  }) : _client = client ?? FlutterP2pClient(),
+       _host = host ?? FlutterP2pHost(),
+       _permissionService =
+           permissionService ?? NearbyDevicePermissionService();
 
   Future<void> _ensureInitialized() async {
     if (_initialized) return;
@@ -23,8 +30,7 @@ class P2pDiscoveryService {
   }
 
   Future<void> _ensurePermissions() async {
-    await _client.askP2pPermissions();
-    await _client.askBluetoothPermissions();
+    await _permissionService.requestDiscoveryPermissions();
   }
 
   Future<List<Device>> startDiscovery({
@@ -32,6 +38,10 @@ class P2pDiscoveryService {
   }) async {
     await _ensureInitialized();
     await _ensurePermissions();
+
+    if (!await _client.checkBluetoothEnabled()) {
+      await _client.enableBluetoothServices();
+    }
 
     if (!await _client.checkWifiEnabled()) {
       await _client.enableWifiServices();
@@ -68,6 +78,11 @@ class P2pDiscoveryService {
   Future<HotspotHostState> startHosting() async {
     await _ensureInitialized();
     await _ensurePermissions();
+
+    if (!await _client.checkBluetoothEnabled()) {
+      await _client.enableBluetoothServices();
+    }
+
     if (!await _client.checkWifiEnabled()) {
       await _client.enableWifiServices();
     }

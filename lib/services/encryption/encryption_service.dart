@@ -1,23 +1,33 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:cryptography/cryptography.dart';
 
-/// Phase 4 encryption scaffolding.
-///
-/// For now this service provides AES-GCM encrypt/decrypt primitives so the
-/// upcoming File Transfer Engine can wrap encrypted chunk payloads.
-///
-/// No integration with transfer is done in Phase 4.
 class EncryptionService {
+  static const int aesGcmNonceLength = 12;
+
   final AesGcm _aesGcm;
 
   EncryptionService({AesGcm? aesGcm})
     : _aesGcm = aesGcm ?? AesGcm.with256bits();
 
-  /// Encrypts [plaintext] with a symmetric [key] and 12-byte [nonce].
-  ///
-  /// Returns ciphertext + authentication tag as produced by AES-GCM.
-  Future<SecretBox> encrypt({
+  SecretKey keyFromBytes(Uint8List bytes) {
+    return SecretKey(bytes);
+  }
+
+  Future<Uint8List> generateNonce({
+    required String transferId,
+    required int chunkIndex,
+  }) async {
+    final input = utf8.encode('$transferId:$chunkIndex');
+    final digest = sha256.convert(input).bytes;
+    return Uint8List.fromList(
+      digest.take(aesGcmNonceLength).toList(growable: false),
+    );
+  }
+
+  Future<SecretBox> encryptBytes({
     required Uint8List plaintext,
     required SecretKey key,
     required Uint8List nonce,
@@ -27,12 +37,11 @@ class EncryptionService {
       plaintext,
       secretKey: key,
       nonce: nonce,
-      aad: aad == null ? <int>[] : aad.toList(),
+      aad: aad == null ? <int>[] : aad.toList(growable: false),
     );
   }
 
-  /// Decrypts [ciphertext] using AES-GCM.
-  Future<Uint8List> decrypt({
+  Future<Uint8List> decryptBox({
     required SecretBox box,
     required SecretKey key,
     Uint8List? aad,
@@ -40,8 +49,20 @@ class EncryptionService {
     final clear = await _aesGcm.decrypt(
       box,
       secretKey: key,
-      aad: aad == null ? <int>[] : aad.toList(),
+      aad: aad == null ? <int>[] : aad.toList(growable: false),
     );
     return Uint8List.fromList(clear);
+  }
+
+  Future<SecretBox> boxFromEncoded({
+    required Uint8List cipherText,
+    required Uint8List nonce,
+    required Uint8List mac,
+  }) async {
+    return SecretBox(cipherText, nonce: nonce, mac: Mac(mac));
+  }
+
+  Future<Uint8List> encodeBox(SecretBox box) async {
+    return Uint8List.fromList(box.concatenation(nonce: false, mac: true));
   }
 }
