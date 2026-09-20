@@ -55,6 +55,17 @@ class DeviceIdentityManager {
     return minted;
   }
 
+  /// Loads or mints identity with optional default display name and platform.
+  Future<LocalDeviceIdentity> getOrCreateIdentity({
+    String defaultDisplayName = 'SiloSend-Device',
+    String platform = 'generic',
+  }) {
+    return getOrInitializeIdentity(
+      defaultDisplayName: defaultDisplayName,
+      platform: platform,
+    );
+  }
+
   /// Updates the user-visible display name and persists the change.
   Future<void> updateDisplayName(String newName) async {
     final current = _currentIdentity;

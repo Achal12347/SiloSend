@@ -35,8 +35,13 @@ class AppLogger {
   static void info(String tag, String message) =>
       log(LogLevel.info, tag, message);
 
-  static void warning(String tag, String message) =>
-      log(LogLevel.warning, tag, message);
+  static void warning(
+    String tag,
+    String message, {
+    Object? error,
+    StackTrace? stackTrace,
+  }) =>
+      log(LogLevel.warning, tag, message, error: error, stackTrace: stackTrace);
 
   static void error(
     String tag,
