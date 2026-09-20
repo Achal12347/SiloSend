@@ -1,0 +1,100 @@
+# ---------------------------------------------------------
+# SiloSend .gitignore
+# Prevents secrets, sensitive files, credentials, local
+# configurations, and build artifacts from being committed.
+# ---------------------------------------------------------
+
+# AI Operating Documents (Local AI context only)
+AI/
+AI/**
+
+# Build Folders & Artifacts (Ignore entire build output)
+build/
+/build/
+**/build/
+.dart_tool/
+.gradle/
+**/android/.gradle/
+**/android/captures/
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+ehthumbs_vista.db
+Thumbs.db
+Desktop.ini
+*.stackdump
+*.dmp
+
+# Temporary & Log Files
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+.history/
+
+# Environment Variables & Secrets
+.env
+.env.*
+*.env
+secrets/
+credentials/
+
+# Cryptographic Keys, Certificates & Keystores
+*.key
+*.pem
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+secring.gpg
+
+# Android Specific Secrets & Local Configurations
+local.properties
+**/local.properties
+key.properties
+**/key.properties
+google-services.json
+**/google-services.json
+
+# Flutter / Dart / Pub Dependencies & Caches
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+/coverage/
+**/doc/api/
+.widget_preview/
+
+# Ephemeral Native Artifacts
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+
+# IDEs & Editors
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.atom/
+.fleet/
+
+# Symbolication & Obfuscation
+app.*.symbols
+app.*.map.json
+
+# Miscellaneous
+migrate_working_dir/
