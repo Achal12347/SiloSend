@@ -230,5 +230,131 @@ void main() {
         );
       },
     );
+
+    test(
+      'createWithNfcCommitment computes commitment and populates hex fields',
+      () {
+        final pubKey = Uint8List(32)..fillRange(0, 32, 0xAA);
+        final secret = Uint8List(16)..fillRange(0, 16, 0xBB);
+
+        final payload = PairingPayload.createWithNfcCommitment(
+          deviceIdHex: validHexId,
+          displayName: 'NFC-Device',
+          pairingToken: validToken,
+          ed25519PubKey: pubKey,
+          pairingSecret: secret,
+        );
+
+        expect(payload.ed25519PubKeyHex, isNotNull);
+        expect(payload.nfcCommitmentHex, isNotNull);
+        expect(payload.ed25519PubKeyHex!.length, 64);
+        expect(payload.nfcCommitmentHex!.length, 64);
+        expect(payload.ed25519PubKeyBytes, equals(pubKey));
+        expect(payload.pairingSecretBytes, equals(secret));
+
+        final expectedCommitment = PairingPayload.computeCommitmentHex(
+          ed25519PubKey: pubKey,
+          pairingSecret: secret,
+        );
+        expect(payload.nfcCommitmentHex, equals(expectedCommitment));
+      },
+    );
+
+    test(
+      'serializes and deserializes NFC commitment across JSON, URI, and NDEF',
+      () {
+        final pubKey = Uint8List(32)..fillRange(0, 32, 0x12);
+        final secret = Uint8List(16)..fillRange(0, 16, 0x34);
+
+        final payload = PairingPayload.createWithNfcCommitment(
+          deviceIdHex: validHexId,
+          displayName: 'NFC-Roundtrip',
+          pairingToken: validToken,
+          ed25519PubKey: pubKey,
+          pairingSecret: secret,
+        );
+
+        // 1. JSON
+        final json = payload.toJson();
+        expect(json['pubKey'], payload.ed25519PubKeyHex);
+        expect(json['nfcCommitment'], payload.nfcCommitmentHex);
+        final fromJson = PairingPayload.fromJson(json);
+        expect(fromJson.ed25519PubKeyHex, payload.ed25519PubKeyHex);
+        expect(fromJson.nfcCommitmentHex, payload.nfcCommitmentHex);
+
+        // 2. URI
+        final uri = payload.toUri();
+        expect(uri.queryParameters['pk'], payload.ed25519PubKeyHex);
+        expect(uri.queryParameters['nfc'], payload.nfcCommitmentHex);
+        final fromUri = PairingPayload.fromUri(uri);
+        expect(fromUri.ed25519PubKeyHex, payload.ed25519PubKeyHex);
+        expect(fromUri.nfcCommitmentHex, payload.nfcCommitmentHex);
+
+        // 3. NDEF
+        final ndefBytes = payload.toNdefBytes();
+        final fromNdef = PairingPayload.fromNdefBytes(ndefBytes);
+        expect(fromNdef.ed25519PubKeyHex, payload.ed25519PubKeyHex);
+        expect(fromNdef.nfcCommitmentHex, payload.nfcCommitmentHex);
+      },
+    );
+
+    test(
+      'deserialization detects tampered commitment and throws FormatException',
+      () {
+        final pubKey = Uint8List(32)..fillRange(0, 32, 0x12);
+        final secret = Uint8List(16)..fillRange(0, 16, 0x34);
+
+        final payload = PairingPayload.createWithNfcCommitment(
+          deviceIdHex: validHexId,
+          displayName: 'Tampered-Device',
+          pairingToken: validToken,
+          ed25519PubKey: pubKey,
+          pairingSecret: secret,
+        );
+
+        final tamperedJson = payload.toJson();
+        // Alter commitment
+        tamperedJson['nfcCommitment'] =
+            'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+        expect(
+          () => PairingPayload.fromJson(tamperedJson),
+          throwsFormatException,
+        );
+
+        // Alter public key in URI
+        final tamperedUri = Uri.parse(
+          payload.toUri().toString().replaceAll(
+            payload.ed25519PubKeyHex!,
+            '0000000000000000000000000000000000000000000000000000000000000000',
+          ),
+        );
+        expect(
+          () => PairingPayload.fromUri(tamperedUri),
+          throwsFormatException,
+        );
+      },
+    );
+
+    test('validates hex length for ed25519PubKeyHex and nfcCommitmentHex', () {
+      expect(
+        () => PairingPayload(
+          deviceIdHex: validHexId,
+          displayName: 'Test',
+          pairingToken: validToken,
+          ed25519PubKeyHex: 'short',
+        ),
+        throwsArgumentError,
+      );
+
+      expect(
+        () => PairingPayload(
+          deviceIdHex: validHexId,
+          displayName: 'Test',
+          pairingToken: validToken,
+          nfcCommitmentHex: 'short',
+        ),
+        throwsArgumentError,
+      );
+    });
   });
 }

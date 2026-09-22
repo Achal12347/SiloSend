@@ -18,8 +18,15 @@ import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
 import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
 import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
 import 'package:silosend_datasharing_app/core/pairing/nfc_pairing_service.dart';
+import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
+import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
+import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
+import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
+import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
 import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
 import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
+import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
 import 'package:silosend_datasharing_app/platform/platform_service.dart';
 import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
 
@@ -38,12 +45,20 @@ class AppContainer {
   final LanConnectionServer? _injectedLanServer;
   final BleConnectionServer? _injectedBleServer;
   final NfcPairingService? _injectedNfcPairingService;
+  final CryptoService? _injectedCryptoService;
+  final SecureKeyStore? _injectedSecureKeyStore;
+  final PeerTrustStore? _injectedPeerTrustStore;
+  final SecureSessionManager? _injectedSecureSessionManager;
 
   DiscoveryCoordinator? _discoveryCoordinator;
   ConnectionManager? _connectionManager;
   LanConnectionServer? _lanServer;
   BleConnectionServer? _bleServer;
   NfcPairingService? _nfcPairingService;
+  CryptoService? _cryptoService;
+  SecureKeyStore? _secureKeyStore;
+  PeerTrustStore? _peerTrustStore;
+  SecureSessionManager? _secureSessionManager;
 
   bool _isInitialized = false;
   Object? _initError;
@@ -59,11 +74,19 @@ class AppContainer {
     LanConnectionServer? lanServer,
     BleConnectionServer? bleServer,
     NfcPairingService? nfcPairingService,
+    CryptoService? cryptoService,
+    SecureKeyStore? secureKeyStore,
+    PeerTrustStore? peerTrustStore,
+    SecureSessionManager? secureSessionManager,
   }) : _injectedDiscoveryCoordinator = discoveryCoordinator,
        _injectedConnectionManager = connectionManager,
        _injectedLanServer = lanServer,
        _injectedBleServer = bleServer,
-       _injectedNfcPairingService = nfcPairingService;
+       _injectedNfcPairingService = nfcPairingService,
+       _injectedCryptoService = cryptoService,
+       _injectedSecureKeyStore = secureKeyStore,
+       _injectedPeerTrustStore = peerTrustStore,
+       _injectedSecureSessionManager = secureSessionManager;
 
   /// Factory producing a standard production container.
   factory AppContainer.standard({
@@ -75,6 +98,10 @@ class AppContainer {
     LanConnectionServer? lanServer,
     BleConnectionServer? bleServer,
     NfcPairingService? nfcPairingService,
+    CryptoService? cryptoService,
+    SecureKeyStore? secureKeyStore,
+    PeerTrustStore? peerTrustStore,
+    SecureSessionManager? secureSessionManager,
   }) {
     final effectiveStorage = storage ?? _createDefaultFileStorage();
     final effectivePlatform = platformService ?? SystemPlatformService();
@@ -90,6 +117,10 @@ class AppContainer {
       lanServer: lanServer,
       bleServer: bleServer,
       nfcPairingService: nfcPairingService,
+      cryptoService: cryptoService,
+      secureKeyStore: secureKeyStore,
+      peerTrustStore: peerTrustStore,
+      secureSessionManager: secureSessionManager,
     );
   }
 
@@ -189,6 +220,77 @@ class AppContainer {
   /// Explicitly disconnects an active connection session.
   Future<void> disconnectSession(String sessionId, {String? reason}) {
     return connectionManager.disconnectSession(sessionId, reason: reason);
+  }
+
+  /// Cryptographic service providing Ed25519, X25519, HKDF, and AES-256-GCM primitives.
+  CryptoService get cryptoService {
+    if (_cryptoService == null) {
+      throw StateError(
+        'CryptoService accessed before AppContainer.initialize()',
+      );
+    }
+    return _cryptoService!;
+  }
+
+  /// Secure key store for persistent cryptographic key material.
+  SecureKeyStore get secureKeyStore {
+    if (_secureKeyStore == null) {
+      throw StateError(
+        'SecureKeyStore accessed before AppContainer.initialize()',
+      );
+    }
+    return _secureKeyStore!;
+  }
+
+  /// Peer trust store managing TOFU, SAS, and NFC authentication records.
+  PeerTrustStore get trustStore {
+    if (_peerTrustStore == null) {
+      throw StateError(
+        'PeerTrustStore accessed before AppContainer.initialize()',
+      );
+    }
+    return _peerTrustStore!;
+  }
+
+  /// Secure session manager orchestrating authenticated Diffie-Hellman key exchanges.
+  SecureSessionManager get secureSessionManager {
+    if (_secureSessionManager == null) {
+      throw StateError(
+        'SecureSessionManager accessed before AppContainer.initialize()',
+      );
+    }
+    return _secureSessionManager!;
+  }
+
+  /// Local Ed25519 identity keypair.
+  CryptoIdentityKeypair? get localKeypair =>
+      _secureSessionManager?.localKeypair;
+
+  /// Reactive stream of active, secured communication sessions.
+  Stream<SecureSessionImpl> get secureSessionsStream =>
+      _secureSessionManager?.secureSessions ?? const Stream.empty();
+
+  /// Currently active secured communication sessions.
+  List<SecureSessionImpl> get activeSecureSessions =>
+      _secureSessionManager?.activeSessions ?? [];
+
+  /// Retrieves an active secure session by session ID.
+  SecureSessionImpl? getSecureSession(String sessionId) =>
+      _secureSessionManager?.getSession(sessionId);
+
+  /// Promotes a session's peer to [TrustLevel.sasVerified] after out-of-band SAS code confirmation.
+  Future<void> confirmSasVerification(String sessionId) {
+    return secureSessionManager.confirmSasVerification(sessionId);
+  }
+
+  /// Registers an NFC pairing payload pending incoming/outgoing connection authentication.
+  void registerPendingNfcPairing(PairingPayload payload) {
+    secureSessionManager.registerPendingNfcPairing(payload);
+  }
+
+  /// Initiates dynamic in-band cryptographic rekeying for an active session.
+  Future<void> initiateRekey(String sessionId) {
+    return secureSessionManager.initiateRekey(sessionId);
   }
 
   /// Initializes core services, loads/creates device identity, binds discovery coordinator,
@@ -294,7 +396,29 @@ class AppContainer {
         );
       }
 
-      // 9. Connect lifecycle transitions with discovery state
+      // 9. Initialize Cryptographic Security Primitives & Secure Session Manager (Phase 6)
+      _cryptoService = _injectedCryptoService ?? CryptoService();
+      _secureKeyStore = _injectedSecureKeyStore ?? InMemorySecureKeyStore();
+      _peerTrustStore = _injectedPeerTrustStore ?? PeerTrustStore();
+
+      if (_injectedSecureSessionManager != null) {
+        _secureSessionManager = _injectedSecureSessionManager;
+      } else {
+        _secureSessionManager = SecureSessionManager(
+          cryptoService: _cryptoService!,
+          trustStore: _peerTrustStore!,
+          secureKeyStore: _secureKeyStore!,
+          localIdentity: loadedIdentity,
+        );
+      }
+
+      // Load or mint persistent Ed25519 identity keypair
+      await _secureSessionManager!.getOrInitializeLocalKeypair();
+
+      // Wire SecureSessionManager to automatically negotiate encryption for ConnectionManager sessions
+      _secureSessionManager!.attachToConnectionManager(_connectionManager!);
+
+      // 10. Connect lifecycle transitions with discovery state
       lifecycleManager.addListener(_onLifecycleStateChanged);
 
       _isInitialized = true;
@@ -362,6 +486,7 @@ class AppContainer {
   /// Disposes active resources, servers, discovery timers, and connection sessions.
   void dispose() {
     lifecycleManager.removeListener(_onLifecycleStateChanged);
+    _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
     _connectionManager?.dispose();
     _lanServer?.dispose();

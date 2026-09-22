@@ -253,6 +253,7 @@ class ConnectionManager {
         remotePlatform: responsePayload.platform,
         transport: transport,
         framed: framed,
+        isInitiator: true,
       );
     } catch (e) {
       await framed.close(reason: 'handshake_failed');
@@ -341,6 +342,7 @@ class ConnectionManager {
         remotePlatform: initPayload.platform,
         transport: transport,
         framed: framed,
+        isInitiator: false,
       );
     } catch (e) {
       AppLogger.warning(
@@ -358,6 +360,7 @@ class ConnectionManager {
     required String remotePlatform,
     required TransportConnection transport,
     required FramedTransportConnection framed,
+    bool isInitiator = false,
   }) {
     final normalizedRemoteId = remoteDeviceIdHex.toLowerCase();
 
@@ -382,6 +385,7 @@ class ConnectionManager {
       establishedAt: DateTime.now(),
       remoteAddress: transport.remoteAddress,
       remotePort: transport.remotePort,
+      isInitiator: isInitiator,
     );
 
     final session = ConnectionSession(
@@ -392,6 +396,13 @@ class ConnectionManager {
       inactivityTimeout: inactivityTimeout,
       onClosed: _onSessionClosed,
     );
+
+    // Listen to session state transitions (e.g. SessionState.secured) and emit updated active sessions
+    session.stateChanges.listen((_) {
+      if (!_activeSessionsListController.isClosed) {
+        _activeSessionsListController.add(activeSessions);
+      }
+    });
 
     _activeSessions[sessionId] = session;
     _deviceToSessionMap[normalizedRemoteId] = sessionId;

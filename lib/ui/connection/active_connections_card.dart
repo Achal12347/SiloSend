@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
+import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
 import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
 import 'package:silosend_datasharing_app/core/state/app_container.dart';
+import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:silosend_datasharing_app/ui/security/sas_verification_dialog.dart';
 
 /// Renders real-time active point-to-point connection sessions and disconnect actions.
 class ActiveConnectionsCard extends StatelessWidget {
@@ -83,13 +87,18 @@ class ActiveConnectionsCard extends StatelessWidget {
                     ),
                   )
                 else
-                  Column(
-                    children: sessions
-                        .map(
-                          (session) =>
-                              _buildSessionItem(context, theme, session),
-                        )
-                        .toList(),
+                  StreamBuilder<SecureSessionImpl>(
+                    stream: container.secureSessionsStream,
+                    builder: (context, _) {
+                      return Column(
+                        children: sessions
+                            .map(
+                              (session) =>
+                                  _buildSessionItem(context, theme, session),
+                            )
+                            .toList(),
+                      );
+                    },
                   ),
               ],
             ),
@@ -211,34 +220,171 @@ class ActiveConnectionsCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(4),
+          _buildSecurityStatus(context, theme, session),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSecurityStatus(
+    BuildContext context,
+    ThemeData theme,
+    ConnectionSession session,
+  ) {
+    final secureSession = container.getSecureSession(session.sessionId);
+    final isSecured =
+        session.state == SessionState.secured && secureSession != null;
+
+    if (isSecured) {
+      final trustLevel = secureSession.trustLevel;
+      final trustColor = _trustLevelColor(trustLevel);
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: theme.colorScheme.primary.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.lock_rounded, size: 14, color: Colors.green.shade700),
+            const SizedBox(width: 4),
+            Text(
+              'AES-256-GCM',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: Colors.green.shade800,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.info_outline,
-                  size: 12,
-                  color: theme.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: trustColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                trustLevel.displayLabel,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: trustColor,
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  'Transport link established (Phase 5 unauthenticated)',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontStyle: FontStyle.italic,
-                  ),
+              ),
+            ),
+            const Spacer(),
+            InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: () {
+                SasVerificationDialog.show(
+                  context,
+                  session: secureSession,
+                  container: container,
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.fingerprint_rounded,
+                      size: 14,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 2),
+                    Text(
+                      'Verify SAS',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (session.state == SessionState.handshaking) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'Securing communication channel...',
+              style: TextStyle(
+                fontSize: 10,
+                color: theme.colorScheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 12,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Transport link established (Phase 5 unauthenticated)',
+            style: TextStyle(
+              fontSize: 10,
+              color: theme.colorScheme.onSurfaceVariant,
+              fontStyle: FontStyle.italic,
             ),
           ),
         ],
       ),
     );
+  }
+
+  Color _trustLevelColor(TrustLevel level) {
+    switch (level) {
+      case TrustLevel.sasVerified:
+      case TrustLevel.nfcAuthenticated:
+        return Colors.green.shade800;
+      case TrustLevel.trustedTOFU:
+        return Colors.blue.shade800;
+      case TrustLevel.unverifiedTOFU:
+        return Colors.amber.shade900;
+      case TrustLevel.keyConflict:
+        return Colors.red.shade800;
+    }
   }
 }

@@ -1,5 +1,7 @@
 import 'dart:developer' as developer;
 
+import 'package:silosend_datasharing_app/core/logging/security_logging_policy.dart';
+
 /// Log levels for SiloSend application logging.
 enum LogLevel { debug, info, warning, error }
 
@@ -19,9 +21,10 @@ class AppLogger {
     StackTrace? stackTrace,
   }) {
     // In production, sensitive data must never be logged.
+    final sanitizedMessage = SecurityLoggingPolicy.sanitize(message);
     final name = 'SiloSend.$tag';
     developer.log(
-      message,
+      sanitizedMessage,
       name: name,
       level: _levelToInt(level),
       error: error,

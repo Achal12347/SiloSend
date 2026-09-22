@@ -247,6 +247,23 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
                             value:
                                 'v${identity?.protocolVersion ?? AppConstants.protocolVersion}',
                           ),
+                          if (container.localKeypair != null) ...[
+                            const SizedBox(height: 8),
+                            _buildInfoRow(
+                              theme: theme,
+                              label: 'Key Fingerprint',
+                              value:
+                                  container
+                                          .localKeypair!
+                                          .fingerprintHex
+                                          .length >=
+                                      16
+                                  ? '${container.localKeypair!.fingerprintHex.substring(0, 16)}...'
+                                  : container.localKeypair!.fingerprintHex,
+                              tooltip:
+                                  container.localKeypair!.canonicalFingerprint,
+                            ),
+                          ],
                         ],
                       ),
                     ),

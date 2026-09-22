@@ -2,23 +2,21 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
 import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
 
 /// Data payload exchanged out-of-band via NFC tap or QR code scan.
 ///
-/// Communicates direct connection parameters (LAN IP/port, BLE UUID/MAC, supported transports)
-/// and an ephemeral correlation token to initiate transport connections.
-///
-/// NOTE: Out-of-band pairing establishes transport connectivity parameters.
-/// It is NOT cryptographic authentication. Cryptographic proof of identity,
-/// mutual authentication, and end-to-end encrypted session establishment
-/// occur independently in the Secure Session layer (Phase 6).
+/// Communicates direct connection parameters (LAN IP/port, BLE UUID/MAC, supported transports),
+/// an ephemeral correlation token to initiate transport connections, and optional
+/// cryptographic identity commitments for out-of-band mutual authentication.
 class PairingPayload {
   static const int maxDisplayNameBytes = 32;
   static const String ndefMimeType = 'application/vnd.silosend.pairing';
   static const String uriScheme = 'silosend';
   static const String uriHost = 'pair';
+  static const String nfcCommitmentDomainTag = 'SiloSend-NFC-Commitment-v1:';
 
   final int protocolVersion;
   final String deviceIdHex;
@@ -29,6 +27,8 @@ class PairingPayload {
   final String? bleServiceUuid;
   final String? bleDeviceAddress;
   final String pairingToken;
+  final String? ed25519PubKeyHex;
+  final String? nfcCommitmentHex;
   final int timestamp;
 
   PairingPayload({
@@ -41,6 +41,8 @@ class PairingPayload {
     this.bleServiceUuid,
     this.bleDeviceAddress,
     required this.pairingToken,
+    this.ed25519PubKeyHex,
+    this.nfcCommitmentHex,
     int? timestamp,
   }) : displayName = sanitizeDisplayName(displayName),
        timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch {
@@ -66,6 +68,40 @@ class PairingPayload {
         'LAN port must be between 1 and 65535',
       );
     }
+    if (ed25519PubKeyHex != null) {
+      if (ed25519PubKeyHex!.length != 64 ||
+          !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(ed25519PubKeyHex!)) {
+        throw ArgumentError.value(
+          ed25519PubKeyHex,
+          'ed25519PubKeyHex',
+          'Ed25519 public key must be a 64-character hexadecimal string',
+        );
+      }
+    }
+    if (nfcCommitmentHex != null) {
+      if (nfcCommitmentHex!.length != 64 ||
+          !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(nfcCommitmentHex!)) {
+        throw ArgumentError.value(
+          nfcCommitmentHex,
+          'nfcCommitmentHex',
+          'NFC commitment must be a 64-character hexadecimal string',
+        );
+      }
+      if (ed25519PubKeyHex == null) {
+        throw ArgumentError(
+          'ed25519PubKeyHex must be provided when nfcCommitmentHex is specified',
+        );
+      }
+      final computed = computeCommitmentHex(
+        pubKeyHex: ed25519PubKeyHex!,
+        pairingTokenHex: pairingToken,
+      );
+      if (computed.toLowerCase() != nfcCommitmentHex!.toLowerCase()) {
+        throw ArgumentError(
+          'NFC commitment mismatch: computed $computed, got $nfcCommitmentHex',
+        );
+      }
+    }
   }
 
   /// Sanitizes display name: strips control characters, clamps to max 32 UTF-8 bytes.
@@ -90,6 +126,101 @@ class PairingPayload {
     return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
+  /// Computes canonical 32-byte (64 hex characters) SHA-256 NFC commitment:
+  /// SHA-256("SiloSend-NFC-Commitment-v1:" || Ed25519PublicKey || pairingSecret)
+  static String computeCommitmentHex({
+    String? pubKeyHex,
+    String? pairingTokenHex,
+    Uint8List? ed25519PubKey,
+    Uint8List? pairingSecret,
+  }) {
+    final pubKeyBytes =
+        ed25519PubKey ??
+        (pubKeyHex != null
+            ? _hexToBytes(pubKeyHex)
+            : throw ArgumentError('pubKeyHex or ed25519PubKey required'));
+    final secretBytes =
+        pairingSecret ??
+        (pairingTokenHex != null
+            ? _hexToBytes(pairingTokenHex)
+            : throw ArgumentError('pairingTokenHex or pairingSecret required'));
+    final domainTag = utf8.encode(nfcCommitmentDomainTag);
+    final buffer = Uint8List(
+      domainTag.length + pubKeyBytes.length + secretBytes.length,
+    );
+    buffer.setRange(0, domainTag.length, domainTag);
+    buffer.setRange(
+      domainTag.length,
+      domainTag.length + pubKeyBytes.length,
+      pubKeyBytes,
+    );
+    buffer.setRange(
+      domainTag.length + pubKeyBytes.length,
+      buffer.length,
+      secretBytes,
+    );
+    final digest = crypto.sha256.convert(buffer);
+    return digest.bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Factory creating a pairing payload with automatically computed NFC commitment.
+  factory PairingPayload.createWithNfcCommitment({
+    int protocolVersion = AppConstants.protocolVersion,
+    required String deviceIdHex,
+    required String displayName,
+    Set<TransportType> supportedTransports = const {TransportType.lan},
+    String? lanAddress,
+    int? lanPort,
+    String? bleServiceUuid,
+    String? bleDeviceAddress,
+    String? pairingToken,
+    String? ed25519PubKeyHex,
+    Uint8List? ed25519PubKey,
+    Uint8List? pairingSecret,
+    int? timestamp,
+  }) {
+    final effectivePubKeyHex =
+        ed25519PubKeyHex ??
+        (ed25519PubKey != null
+            ? ed25519PubKey
+                  .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                  .join()
+            : throw ArgumentError(
+                'ed25519PubKeyHex or ed25519PubKey required',
+              ));
+    final effectiveTokenHex = pairingSecret != null
+        ? pairingSecret.map((b) => b.toRadixString(16).padLeft(2, '0')).join()
+        : (pairingToken ??
+              (throw ArgumentError('pairingToken or pairingSecret required')));
+
+    final commitment = computeCommitmentHex(
+      pubKeyHex: effectivePubKeyHex,
+      pairingTokenHex: effectiveTokenHex,
+    );
+    return PairingPayload(
+      protocolVersion: protocolVersion,
+      deviceIdHex: deviceIdHex,
+      displayName: displayName,
+      supportedTransports: supportedTransports,
+      lanAddress: lanAddress,
+      lanPort: lanPort,
+      bleServiceUuid: bleServiceUuid,
+      bleDeviceAddress: bleDeviceAddress,
+      pairingToken: effectiveTokenHex,
+      ed25519PubKeyHex: effectivePubKeyHex.toLowerCase(),
+      nfcCommitmentHex: commitment.toLowerCase(),
+      timestamp: timestamp,
+    );
+  }
+
+  Uint8List? get ed25519PubKeyBytes =>
+      ed25519PubKeyHex != null ? _hexToBytes(ed25519PubKeyHex!) : null;
+
+  Uint8List? get nfcCommitmentBytes =>
+      nfcCommitmentHex != null ? _hexToBytes(nfcCommitmentHex!) : null;
+
+  Uint8List get pairingSecretBytes => _hexToBytes(pairingToken);
+
   Map<String, dynamic> toJson() => {
     'version': protocolVersion,
     'deviceId': deviceIdHex,
@@ -100,6 +231,8 @@ class PairingPayload {
     if (bleServiceUuid != null) 'bleServiceUuid': bleServiceUuid,
     if (bleDeviceAddress != null) 'bleDeviceAddress': bleDeviceAddress,
     'pairingToken': pairingToken,
+    if (ed25519PubKeyHex != null) 'pubKey': ed25519PubKeyHex,
+    if (nfcCommitmentHex != null) 'nfcCommitment': nfcCommitmentHex,
     'timestamp': timestamp,
   };
 
@@ -129,21 +262,30 @@ class PairingPayload {
       );
     }).toSet();
 
-    return PairingPayload(
-      protocolVersion: version,
-      deviceIdHex: deviceId,
-      displayName: displayName,
-      supportedTransports: transports.isEmpty
-          ? const {TransportType.lan}
-          : transports,
-      lanAddress: json['lanAddress'] as String?,
-      lanPort: json['lanPort'] as int?,
-      bleServiceUuid: json['bleServiceUuid'] as String?,
-      bleDeviceAddress: json['bleDeviceAddress'] as String?,
-      pairingToken: token,
-      timestamp:
-          json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
-    );
+    final pubKey = json['pubKey'] as String?;
+    final nfcCommitment = json['nfcCommitment'] as String?;
+
+    try {
+      return PairingPayload(
+        protocolVersion: version,
+        deviceIdHex: deviceId,
+        displayName: displayName,
+        supportedTransports: transports.isEmpty
+            ? const {TransportType.lan}
+            : transports,
+        lanAddress: json['lanAddress'] as String?,
+        lanPort: json['lanPort'] as int?,
+        bleServiceUuid: json['bleServiceUuid'] as String?,
+        bleDeviceAddress: json['bleDeviceAddress'] as String?,
+        pairingToken: token,
+        ed25519PubKeyHex: pubKey,
+        nfcCommitmentHex: nfcCommitment,
+        timestamp:
+            json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
+      );
+    } on ArgumentError catch (e) {
+      throw FormatException('Invalid pairing payload parameter: ${e.message}');
+    }
   }
 
   /// Serializes to a standard `silosend://pair?...` URI (for QR codes and NFC URI records).
@@ -164,6 +306,12 @@ class PairingPayload {
     }
     if (bleDeviceAddress != null) {
       queryParams['bleMac'] = bleDeviceAddress!;
+    }
+    if (ed25519PubKeyHex != null) {
+      queryParams['pk'] = ed25519PubKeyHex!;
+    }
+    if (nfcCommitmentHex != null) {
+      queryParams['nfc'] = nfcCommitmentHex!;
     }
 
     return Uri(scheme: uriScheme, host: uriHost, queryParameters: queryParams);
@@ -219,18 +367,27 @@ class PairingPayload {
       lanPort = int.tryParse(parts[1]);
     }
 
-    return PairingPayload(
-      protocolVersion: version,
-      deviceIdHex: deviceId,
-      displayName: displayName,
-      supportedTransports: transports,
-      lanAddress: lanAddress,
-      lanPort: lanPort,
-      bleServiceUuid: params['bleUuid'],
-      bleDeviceAddress: params['bleMac'],
-      pairingToken: token,
-      timestamp: timestamp,
-    );
+    final pubKey = params['pk'];
+    final nfcCommitment = params['nfc'];
+
+    try {
+      return PairingPayload(
+        protocolVersion: version,
+        deviceIdHex: deviceId,
+        displayName: displayName,
+        supportedTransports: transports,
+        lanAddress: lanAddress,
+        lanPort: lanPort,
+        bleServiceUuid: params['bleUuid'],
+        bleDeviceAddress: params['bleMac'],
+        pairingToken: token,
+        ed25519PubKeyHex: pubKey,
+        nfcCommitmentHex: nfcCommitment,
+        timestamp: timestamp,
+      );
+    } on ArgumentError catch (e) {
+      throw FormatException('Invalid pairing URI parameter: ${e.message}');
+    }
   }
 
   /// Encodes this pairing payload into a standard NFC Forum NDEF MIME media record
@@ -348,6 +505,8 @@ class PairingPayload {
     String? bleServiceUuid,
     String? bleDeviceAddress,
     String? pairingToken,
+    String? ed25519PubKeyHex,
+    String? nfcCommitmentHex,
     int? timestamp,
   }) {
     return PairingPayload(
@@ -360,7 +519,25 @@ class PairingPayload {
       bleServiceUuid: bleServiceUuid ?? this.bleServiceUuid,
       bleDeviceAddress: bleDeviceAddress ?? this.bleDeviceAddress,
       pairingToken: pairingToken ?? this.pairingToken,
+      ed25519PubKeyHex: ed25519PubKeyHex ?? this.ed25519PubKeyHex,
+      nfcCommitmentHex: nfcCommitmentHex ?? this.nfcCommitmentHex,
       timestamp: timestamp ?? this.timestamp,
     );
+  }
+
+  static Uint8List _hexToBytes(String hex) {
+    final clean = hex
+        .replaceAll('-', '')
+        .replaceAll(':', '')
+        .replaceAll(' ', '')
+        .toLowerCase();
+    if (clean.length % 2 != 0) {
+      throw const FormatException('Hex string must have an even length');
+    }
+    final bytes = Uint8List(clean.length ~/ 2);
+    for (int i = 0; i < bytes.length; i++) {
+      bytes[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return bytes;
   }
 }

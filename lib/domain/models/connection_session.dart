@@ -14,6 +14,7 @@ class ConnectionSessionInfo {
   final int bytesReceived;
   final String? remoteAddress;
   final int? remotePort;
+  final bool isInitiator;
 
   const ConnectionSessionInfo({
     required this.sessionId,
@@ -27,6 +28,7 @@ class ConnectionSessionInfo {
     this.bytesReceived = 0,
     this.remoteAddress,
     this.remotePort,
+    this.isInitiator = false,
   });
 
   ConnectionSessionInfo copyWith({
@@ -41,6 +43,7 @@ class ConnectionSessionInfo {
     int? bytesReceived,
     String? remoteAddress,
     int? remotePort,
+    bool? isInitiator,
   }) {
     return ConnectionSessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -54,6 +57,7 @@ class ConnectionSessionInfo {
       bytesReceived: bytesReceived ?? this.bytesReceived,
       remoteAddress: remoteAddress ?? this.remoteAddress,
       remotePort: remotePort ?? this.remotePort,
+      isInitiator: isInitiator ?? this.isInitiator,
     );
   }
 }

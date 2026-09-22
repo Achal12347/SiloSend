@@ -57,7 +57,11 @@ class ConnectionSession {
   String get sessionId => _info.sessionId;
   String get remoteDeviceId => _info.remoteDeviceId;
   SessionState get state => _info.state;
-  bool get isActive => _info.state == SessionState.connected && !_isDisposed;
+  bool get isInitiator => _info.isInitiator;
+  bool get isActive =>
+      (_info.state == SessionState.connected ||
+          _info.state == SessionState.secured) &&
+      !_isDisposed;
   LinkMetrics get currentMetrics => connection.currentMetrics;
 
   Stream<SiloSendPacket> get incomingPackets =>
@@ -264,6 +268,11 @@ class ConnectionSession {
     if (!_stateController.isClosed) {
       await _stateController.close();
     }
+  }
+
+  /// Updates the lifecycle state of this connection session.
+  void updateState(SessionState newState) {
+    _updateState(newState);
   }
 
   void _updateState(SessionState newState) {
