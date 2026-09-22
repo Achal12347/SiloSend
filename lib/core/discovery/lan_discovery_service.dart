@@ -141,10 +141,17 @@ class LanDiscoveryService implements DiscoveryService {
     final datagram = _socket!.receive();
     if (datagram == null || !_isScanning) return;
 
+    handleIncomingPacket(Uint8List.fromList(datagram.data), datagram.address);
+  }
+
+  /// Processes raw packet bytes received from the network.
+  ///
+  /// Can also be called directly by tests or network adapters.
+  void handleIncomingPacket(Uint8List data, InternetAddress sourceAddress) {
+    if (!_isScanning) return;
+
     try {
-      final beacon = DiscoveryBeacon.fromBytes(
-        Uint8List.fromList(datagram.data),
-      );
+      final beacon = DiscoveryBeacon.fromBytes(data);
 
       // Strictly filter out self-broadcasts
       if (beacon.deviceIdHex.toLowerCase() == localDeviceId.toLowerCase()) {
@@ -157,7 +164,7 @@ class LanDiscoveryService implements DiscoveryService {
         transportType: TransportType.lan,
         availableTransports: beacon.supportedTransports,
         rssi: 0, // RSSI is not applicable for wired/LAN UDP
-        endpointAddress: '${datagram.address.address}:${beacon.port}',
+        endpointAddress: '${sourceAddress.address}:${beacon.port}',
         lastSeen: DateTime.now(),
         isIdentityVerified: false, // Strictly unverified at discovery stage
       );
@@ -167,7 +174,7 @@ class LanDiscoveryService implements DiscoveryService {
       // Malformed or foreign packets on the port are safely ignored per defensive networking rule
       AppLogger.debug(
         'LanDiscoveryService',
-        'Ignored invalid packet from ${datagram.address.address}: $e',
+        'Ignored invalid packet from ${sourceAddress.address}: $e',
       );
     }
   }

@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
@@ -8,6 +7,8 @@ import 'package:silosend_datasharing_app/core/discovery/ble_discovery_service.da
 import 'package:silosend_datasharing_app/domain/discovery/discovery_beacon.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('BleDiscoveryService Tests', () {
     const localId = '11111111222233334444555566667777';
 
@@ -111,5 +112,121 @@ void main() {
 
       await sub.cancel();
     });
+
+    test('ignores truncated BLE beacon without crashing', () async {
+      final remoteBytes = Uint8List.fromList(
+        List<int>.generate(16, (i) => 0x77),
+      );
+      final beacon = DiscoveryBeacon(
+        deviceId: remoteBytes,
+        port: 53531,
+        supportedTransports: {TransportType.ble},
+        displayName: 'Truncated-Ble',
+      );
+      final validBytes = beacon.toBytes();
+      final truncated = Uint8List.fromList(
+        validBytes.sublist(0, validBytes.length - 6),
+      );
+
+      final emittedPeers = <DiscoveredPeer>[];
+      final sub = service.discoveredPeers.listen(emittedPeers.add);
+
+      service.handleRawScanResult(rawBeaconBytes: truncated, rssi: -80);
+
+      await pumpEventQueue();
+      expect(emittedPeers, isEmpty);
+
+      await sub.cancel();
+    });
+
+    test('ignores BLE beacon with CRC mismatch', () async {
+      final remoteBytes = Uint8List.fromList(
+        List<int>.generate(16, (i) => 0x77),
+      );
+      final beacon = DiscoveryBeacon(
+        deviceId: remoteBytes,
+        port: 53531,
+        supportedTransports: {TransportType.ble},
+        displayName: 'Corrupt-Ble',
+      );
+      final corruptBytes = Uint8List.fromList(beacon.toBytes());
+      corruptBytes[5] ^= 0xAA; // Flip bit in device ID
+
+      final emittedPeers = <DiscoveredPeer>[];
+      final sub = service.discoveredPeers.listen(emittedPeers.add);
+
+      service.handleRawScanResult(rawBeaconBytes: corruptBytes, rssi: -80);
+
+      await pumpEventQueue();
+      expect(emittedPeers, isEmpty);
+
+      await sub.cancel();
+    });
+
+    test('handles Android PERMISSION_DENIED on startScan gracefully', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel(BleDiscoveryService.channelName),
+            (call) async {
+              if (call.method == 'startScan') {
+                throw PlatformException(
+                  code: 'PERMISSION_DENIED',
+                  message: 'Missing Bluetooth scan permission',
+                );
+              }
+              return null;
+            },
+          );
+
+      final permService = BleDiscoveryService(localDeviceId: localId);
+      await permService.startDiscovery();
+
+      expect(permService.isScanning, isFalse);
+      permService.dispose();
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            const MethodChannel(BleDiscoveryService.channelName),
+            null,
+          );
+    });
+
+    test(
+      'handles Android PERMISSION_DENIED on startAdvertising gracefully',
+      () async {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel(BleDiscoveryService.channelName),
+              (call) async {
+                if (call.method == 'startAdvertising') {
+                  throw PlatformException(
+                    code: 'PERMISSION_DENIED',
+                    message: 'Missing Bluetooth advertise permission',
+                  );
+                }
+                return null;
+              },
+            );
+
+        final permService = BleDiscoveryService(localDeviceId: localId);
+        const ad = DeviceAdvertisement(
+          deviceId: localId,
+          displayName: 'Test-Device',
+          port: 53531,
+          supportedTransports: {TransportType.ble},
+          protocolVersion: 1,
+        );
+
+        await permService.startAdvertising(ad);
+        expect(permService.isAdvertising, isFalse);
+        permService.dispose();
+
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(
+              const MethodChannel(BleDiscoveryService.channelName),
+              null,
+            );
+      },
+    );
   });
 }

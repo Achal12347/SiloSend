@@ -24,6 +24,15 @@ class LinkMetrics {
   );
 }
 
+/// Represents the lifecycle state of an active physical transport connection.
+enum ConnectionState {
+  connecting,
+  connected,
+  disconnecting,
+  disconnected,
+  failed,
+}
+
 /// Abstract contract representing a bidirectional connection link to a peer device.
 ///
 /// Concrete implementations exist per platform (e.g. Android BLE, Wi-Fi Direct, LAN sockets).
@@ -34,8 +43,20 @@ abstract class TransportConnection {
   /// The physical transport medium used by this connection.
   TransportType get type;
 
+  /// The current lifecycle state of this transport connection.
+  ConnectionState get state;
+
   /// Whether the connection is currently open and healthy.
-  bool get isConnected;
+  bool get isConnected => state == ConnectionState.connected;
+
+  /// Optional remote endpoint address (e.g. IPv4 string or BLE MAC/UUID).
+  String? get remoteAddress;
+
+  /// Optional remote port (e.g. TCP port for LAN).
+  int? get remotePort;
+
+  /// Optional reason recorded when the link disconnected or failed.
+  String? get disconnectReason;
 
   /// Stream of raw incoming byte chunks received over this link.
   Stream<Uint8List> get incomingBytes;
@@ -44,7 +65,7 @@ abstract class TransportConnection {
   Future<void> sendBytes(Uint8List data);
 
   /// Closes the physical link and releases OS socket/radio resources.
-  Future<void> close();
+  Future<void> close({String? reason});
 
   /// The latest real-time link quality metrics.
   LinkMetrics get currentMetrics;

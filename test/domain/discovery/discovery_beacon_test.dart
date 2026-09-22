@@ -119,5 +119,99 @@ void main() {
 
       expect(() => DiscoveryBeacon.fromBytes(corrupted), throwsFormatException);
     });
+
+    test('rejects buffer shorter than minimum beacon size (27 bytes)', () {
+      expect(
+        () => DiscoveryBeacon.fromBytes(Uint8List.fromList([0x53, 0x53, 0x01])),
+        throwsFormatException,
+      );
+    });
+
+    test('rejects buffer with name length byte exceeding 32 bytes', () {
+      final valid = DiscoveryBeacon(
+        deviceId: sampleDeviceId,
+        port: 53531,
+        supportedTransports: {TransportType.lan},
+        displayName: 'Device',
+      ).toBytes();
+
+      final corrupted = Uint8List.fromList(valid);
+      corrupted[22] = 50; // name length = 50 (> 32 max)
+
+      expect(() => DiscoveryBeacon.fromBytes(corrupted), throwsFormatException);
+    });
+
+    test(
+      'rejects buffer truncated before declared display name bytes finish',
+      () {
+        final valid = DiscoveryBeacon(
+          deviceId: sampleDeviceId,
+          port: 53531,
+          supportedTransports: {TransportType.lan},
+          displayName: 'A-Fairly-Long-Display-Name',
+        ).toBytes();
+
+        // Cut off 5 bytes from the name section
+        final truncated = Uint8List.fromList(
+          valid.sublist(0, valid.length - 8),
+        );
+        expect(
+          () => DiscoveryBeacon.fromBytes(truncated),
+          throwsFormatException,
+        );
+      },
+    );
+
+    test('rejects decoded buffer containing port 0', () {
+      final valid = DiscoveryBeacon(
+        deviceId: sampleDeviceId,
+        port: 53531,
+        supportedTransports: {TransportType.lan},
+        displayName: 'Device',
+      ).toBytes();
+
+      final corrupted = Uint8List.fromList(valid);
+      corrupted[19] = 0; // High byte port = 0
+      corrupted[20] = 0; // Low byte port = 0
+
+      expect(() => DiscoveryBeacon.fromBytes(corrupted), throwsFormatException);
+    });
+
+    test('sanitizes control characters from display name', () {
+      final beacon = DiscoveryBeacon(
+        deviceId: sampleDeviceId,
+        port: 53531,
+        supportedTransports: {TransportType.lan},
+        displayName: 'Device\x00\x07\x1b\tName',
+      );
+
+      expect(beacon.displayName, equals('DeviceName'));
+    });
+
+    test(
+      'defaults empty or whitespace-only display name to SiloSend-Device',
+      () {
+        final beacon = DiscoveryBeacon(
+          deviceId: sampleDeviceId,
+          port: 53531,
+          supportedTransports: {TransportType.lan},
+          displayName: '   ',
+        );
+
+        expect(beacon.displayName, equals('SiloSend-Device'));
+      },
+    );
+
+    test('preserves unicode characters safely in display name', () {
+      final beacon = DiscoveryBeacon(
+        deviceId: sampleDeviceId,
+        port: 53531,
+        supportedTransports: {TransportType.lan, TransportType.ble},
+        displayName: '📱 Phone-फोन',
+      );
+
+      final decoded = DiscoveryBeacon.fromBytes(beacon.toBytes());
+      expect(decoded.displayName, equals('📱 Phone-फोन'));
+    });
   });
 }

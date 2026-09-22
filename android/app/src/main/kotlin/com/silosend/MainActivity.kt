@@ -1,15 +1,20 @@
 package com.silosend
 
+import com.silosend.connection.BleConnectionHandler
 import com.silosend.discovery.BleDiscoveryHandler
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
     private var bleDiscoveryHandler: BleDiscoveryHandler? = null
+    private var bleConnectionHandler: BleConnectionHandler? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         bleDiscoveryHandler = BleDiscoveryHandler(applicationContext).apply {
+            register(flutterEngine.dartExecutor.binaryMessenger)
+        }
+        bleConnectionHandler = BleConnectionHandler(applicationContext).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
     }
@@ -17,6 +22,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         bleDiscoveryHandler?.unregister()
         bleDiscoveryHandler = null
+        bleConnectionHandler?.unregister()
+        bleConnectionHandler = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

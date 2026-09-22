@@ -5,6 +5,8 @@ import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart'
 import 'package:silosend_datasharing_app/core/state/app_container.dart';
 import 'package:silosend_datasharing_app/core/state/app_scope.dart';
 import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:silosend_datasharing_app/ui/connection/active_connections_card.dart';
+import 'package:silosend_datasharing_app/ui/pairing/pairing_dialog.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -132,6 +134,7 @@ class SiloSendHomePage extends StatefulWidget {
 
 class _SiloSendHomePageState extends State<SiloSendHomePage> {
   bool _isBusy = false;
+  final Set<String> _connectingPeerIds = {};
 
   @override
   Widget build(BuildContext context) {
@@ -142,6 +145,13 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
       appBar: AppBar(
         title: const Text(AppConstants.appName),
         centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.qr_code_2_rounded),
+            tooltip: 'Out-of-Band Pairing',
+            onPressed: () => PairingDialog.show(context, container),
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -383,7 +393,13 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
 
                               return Column(
                                 children: peers
-                                    .map((peer) => _buildPeerCard(theme, peer))
+                                    .map(
+                                      (peer) => _buildPeerCard(
+                                        theme,
+                                        container,
+                                        peer,
+                                      ),
+                                    )
                                     .toList(),
                               );
                             },
@@ -394,6 +410,10 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
                   );
                 },
               ),
+              const SizedBox(height: 16),
+
+              // Active Connections Section (Phase 5)
+              ActiveConnectionsCard(container: container),
               const SizedBox(height: 16),
 
               // Application Lifecycle Card
@@ -514,7 +534,7 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Truthful Discovery & Identity Initialized',
+                      'Truthful Discovery & Connection Foundation Active',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurface,
                         fontWeight: FontWeight.w500,
@@ -530,10 +550,19 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
     );
   }
 
-  Widget _buildPeerCard(ThemeData theme, DiscoveredPeer peer) {
+  Widget _buildPeerCard(
+    ThemeData theme,
+    AppContainer container,
+    DiscoveredPeer peer,
+  ) {
     final truncatedId = peer.deviceId.length >= 12
         ? '${peer.deviceId.substring(0, 8)}...${peer.deviceId.substring(peer.deviceId.length - 4)}'
         : peer.deviceId;
+
+    final isConnecting = _connectingPeerIds.contains(peer.deviceId);
+    final isConnected = container.connectionManager.hasSessionWithDevice(
+      peer.deviceId,
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8.0),
@@ -605,6 +634,96 @@ class _SiloSendHomePageState extends State<SiloSendHomePage> {
                   );
                 }).toList(),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (isConnected)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.green.shade300),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.check_circle_rounded,
+                        size: 14,
+                        color: Colors.green.shade700,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Connected',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                FilledButton.tonalIcon(
+                  onPressed: isConnecting
+                      ? null
+                      : () async {
+                          setState(() => _connectingPeerIds.add(peer.deviceId));
+                          try {
+                            await container.connectToPeer(peer);
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Connected to ${peer.displayName}!',
+                                  ),
+                                  backgroundColor: Colors.green,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Failed to connect to ${peer.displayName}: $e',
+                                  ),
+                                  backgroundColor: Colors.red,
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(
+                                () => _connectingPeerIds.remove(peer.deviceId),
+                              );
+                            }
+                          }
+                        },
+                  icon: isConnecting
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.link_rounded, size: 16),
+                  label: Text(isConnecting ? 'Connecting...' : 'Connect'),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                  ),
+                ),
             ],
           ),
         ],

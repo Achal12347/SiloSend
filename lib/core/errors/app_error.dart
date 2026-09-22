@@ -26,3 +26,16 @@ class TransportError extends AppError {
 class SecurityError extends AppError {
   const SecurityError(super.message, [super.cause]);
 }
+
+/// Error thrown when a requested hardware capability is absent, disabled, or unprobed.
+class HardwareUnavailableError extends AppError {
+  final String capabilityName;
+
+  const HardwareUnavailableError(this.capabilityName, [Object? cause])
+    : super('Hardware unavailable: $capabilityName', cause);
+}
+
+/// Error thrown when out-of-band pairing fails or encounters invalid data.
+class PairingError extends AppError {
+  const PairingError(super.message, [super.cause]);
+}

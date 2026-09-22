@@ -5,6 +5,7 @@ enum SessionState {
   disconnected,
   connecting,
   handshaking,
+  connected,
   secured,
   closing,
   closed,
