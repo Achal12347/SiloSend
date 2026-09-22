@@ -93,14 +93,32 @@ class LanConnection implements TransportConnection {
   @override
   Stream<Uint8List> get incomingBytes => _incomingController.stream;
 
+  Future<void>? _sendQueue;
+
   @override
   Future<void> sendBytes(Uint8List data) async {
     if (!isConnected) {
       throw StateError('Cannot send bytes: connection is in state $_state');
     }
-    _socket.add(data);
-    await _socket.flush();
-    _bytesSent += data.length;
+    final prev = _sendQueue;
+    final c = Completer<void>();
+    _sendQueue = c.future;
+    if (prev != null) {
+      try {
+        await prev;
+      } catch (_) {}
+    }
+
+    try {
+      if (!isConnected) {
+        throw StateError('Cannot send bytes: connection is in state $_state');
+      }
+      _socket.add(data);
+      await _socket.flush();
+      _bytesSent += data.length;
+    } finally {
+      c.complete();
+    }
   }
 
   @override

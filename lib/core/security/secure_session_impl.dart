@@ -163,6 +163,7 @@ class SecureSessionImpl implements SecureSession {
   Uint8List get activeConfirmKey => _activeEpoch.confirmKey;
 
   /// Stream of decrypted, integrity-verified application packets.
+  @override
   Stream<SiloSendPacket> get incomingDecryptedPackets =>
       _decryptedPacketsController.stream;
 
@@ -456,6 +457,7 @@ class SecureSessionImpl implements SecureSession {
   }
 
   /// Wraps, encrypts, and sends [packet] over the active connection session.
+  @override
   Future<void> sendEncryptedPacket(SiloSendPacket packet) async {
     if (!isEstablished) {
       throw StateError('Cannot send encrypted packet on unestablished session');

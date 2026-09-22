@@ -1,4 +1,9 @@
-/// Metadata describing a transferable payload (file, contact, or data stream).
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+
+/// Metadata describing a transferable payload (file, contact, message, or data stream).
 class TransferMetadata {
   final String transferId;
   final String fileName;
@@ -7,6 +12,8 @@ class TransferMetadata {
   final int chunkCount;
   final String sha256Checksum;
   final String mimeType;
+  final PayloadType payloadType;
+  final Uint8List? extraMetadata;
 
   TransferMetadata({
     required this.transferId,
@@ -15,7 +22,16 @@ class TransferMetadata {
     this.chunkSize = defaultChunkSize,
     required this.sha256Checksum,
     this.mimeType = 'application/octet-stream',
-  }) : chunkCount = calculateChunkCount(totalBytes, chunkSize);
+    this.payloadType = PayloadType.file,
+    this.extraMetadata,
+  }) : chunkCount = calculateChunkCount(totalBytes, chunkSize) {
+    if (totalBytes < 0) {
+      throw ArgumentError.value(totalBytes, 'totalBytes', 'Cannot be negative');
+    }
+    if (chunkSize <= 0) {
+      throw ArgumentError.value(chunkSize, 'chunkSize', 'Must be positive');
+    }
+  }
 
   static const int defaultChunkSize = 64 * 1024; // 64 KB default chunk
 
@@ -38,9 +54,28 @@ class TransferMetadata {
     'chunkCount': chunkCount,
     'sha256Checksum': sha256Checksum,
     'mimeType': mimeType,
+    'payloadType': payloadType.name,
+    if (extraMetadata != null) 'extraMetadata': base64Encode(extraMetadata!),
   };
 
   factory TransferMetadata.fromJson(Map<String, dynamic> json) {
+    PayloadType pType = PayloadType.file;
+    if (json['payloadType'] != null) {
+      try {
+        pType = PayloadType.values.firstWhere(
+          (t) => t.name == json['payloadType'],
+        );
+      } catch (_) {
+        pType = PayloadType.file;
+      }
+    }
+    Uint8List? extra;
+    if (json['extraMetadata'] != null) {
+      try {
+        extra = base64Decode(json['extraMetadata'] as String);
+      } catch (_) {}
+    }
+
     return TransferMetadata(
       transferId: json['transferId'] as String,
       fileName: json['fileName'] as String,
@@ -48,6 +83,8 @@ class TransferMetadata {
       chunkSize: json['chunkSize'] as int? ?? defaultChunkSize,
       sha256Checksum: json['sha256Checksum'] as String,
       mimeType: json['mimeType'] as String? ?? 'application/octet-stream',
+      payloadType: pType,
+      extraMetadata: extra,
     );
   }
 }

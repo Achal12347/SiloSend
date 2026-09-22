@@ -9,6 +9,7 @@ import 'package:silosend_datasharing_app/core/connection/connection_session.dart
 import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
 import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
 import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
+import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
 import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
 import 'package:silosend_datasharing_app/core/discovery/ble_discovery_service.dart';
 import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
@@ -23,6 +24,7 @@ import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
 import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
 import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
 import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
+import 'package:silosend_datasharing_app/core/transfer/transfer_engine_impl.dart';
 import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
 import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
 import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
@@ -49,6 +51,7 @@ class AppContainer {
   final SecureKeyStore? _injectedSecureKeyStore;
   final PeerTrustStore? _injectedPeerTrustStore;
   final SecureSessionManager? _injectedSecureSessionManager;
+  final TransferEngine? _injectedTransferEngine;
 
   DiscoveryCoordinator? _discoveryCoordinator;
   ConnectionManager? _connectionManager;
@@ -59,6 +62,7 @@ class AppContainer {
   SecureKeyStore? _secureKeyStore;
   PeerTrustStore? _peerTrustStore;
   SecureSessionManager? _secureSessionManager;
+  TransferEngine? _transferEngine;
 
   bool _isInitialized = false;
   Object? _initError;
@@ -78,6 +82,7 @@ class AppContainer {
     SecureKeyStore? secureKeyStore,
     PeerTrustStore? peerTrustStore,
     SecureSessionManager? secureSessionManager,
+    TransferEngine? transferEngine,
   }) : _injectedDiscoveryCoordinator = discoveryCoordinator,
        _injectedConnectionManager = connectionManager,
        _injectedLanServer = lanServer,
@@ -86,7 +91,8 @@ class AppContainer {
        _injectedCryptoService = cryptoService,
        _injectedSecureKeyStore = secureKeyStore,
        _injectedPeerTrustStore = peerTrustStore,
-       _injectedSecureSessionManager = secureSessionManager;
+       _injectedSecureSessionManager = secureSessionManager,
+       _injectedTransferEngine = transferEngine;
 
   /// Factory producing a standard production container.
   factory AppContainer.standard({
@@ -102,6 +108,7 @@ class AppContainer {
     SecureKeyStore? secureKeyStore,
     PeerTrustStore? peerTrustStore,
     SecureSessionManager? secureSessionManager,
+    TransferEngine? transferEngine,
   }) {
     final effectiveStorage = storage ?? _createDefaultFileStorage();
     final effectivePlatform = platformService ?? SystemPlatformService();
@@ -121,6 +128,7 @@ class AppContainer {
       secureKeyStore: secureKeyStore,
       peerTrustStore: peerTrustStore,
       secureSessionManager: secureSessionManager,
+      transferEngine: transferEngine,
     );
   }
 
@@ -293,6 +301,24 @@ class AppContainer {
     return secureSessionManager.initiateRekey(sessionId);
   }
 
+  /// Unified transfer engine orchestrating high-performance encrypted data and file transfers.
+  TransferEngine get transferEngine {
+    if (_transferEngine == null) {
+      throw StateError(
+        'TransferEngine accessed before AppContainer.initialize()',
+      );
+    }
+    return _transferEngine!;
+  }
+
+  /// Reactive stream of incoming transfer offers from remote peers.
+  Stream<IncomingTransferRequest> get incomingTransferRequests =>
+      transferEngine.incomingTransferRequests;
+
+  /// Currently active transfer tasks (both outbound and inbound).
+  List<TransferTask> get activeTransfers =>
+      _transferEngine?.activeTransfers ?? const [];
+
   /// Initializes core services, loads/creates device identity, binds discovery coordinator,
   /// starts transport servers, and initializes connection manager and pairing services.
   Future<void> initialize() async {
@@ -418,7 +444,17 @@ class AppContainer {
       // Wire SecureSessionManager to automatically negotiate encryption for ConnectionManager sessions
       _secureSessionManager!.attachToConnectionManager(_connectionManager!);
 
-      // 10. Connect lifecycle transitions with discovery state
+      // 10. Initialize Unified Transfer Engine (Phase 7)
+      if (_injectedTransferEngine != null) {
+        _transferEngine = _injectedTransferEngine;
+      } else {
+        _transferEngine = TransferEngineImpl(
+          localDeviceId: loadedIdentity.idHex,
+          secureSessionManager: _secureSessionManager!,
+        );
+      }
+
+      // 11. Connect lifecycle transitions with discovery state
       lifecycleManager.addListener(_onLifecycleStateChanged);
 
       _isInitialized = true;
@@ -486,6 +522,7 @@ class AppContainer {
   /// Disposes active resources, servers, discovery timers, and connection sessions.
   void dispose() {
     lifecycleManager.removeListener(_onLifecycleStateChanged);
+    _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
     _connectionManager?.dispose();
