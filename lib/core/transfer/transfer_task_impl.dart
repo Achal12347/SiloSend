@@ -157,7 +157,12 @@ class OutboundTransferTask implements TransferTask {
       payload: metaPayload.toBytes(),
     );
 
-    await secureSession.sendEncryptedPacket(packet);
+    try {
+      await secureSession.sendEncryptedPacket(packet);
+    } catch (e) {
+      handleSessionClosed('Unable to start transfer: $e');
+      rethrow;
+    }
 
     if (metadata.chunkCount == 0) {
       // Empty payload: Wait for ACK from receiver
@@ -424,6 +429,26 @@ class OutboundTransferTask implements TransferTask {
           transferId,
           cancel.message.isNotEmpty ? cancel.message : cancel.reason.name,
         ),
+      );
+    }
+  }
+
+  /// Fails the transfer when its authenticated session closes unexpectedly.
+  void handleSessionClosed(String reason) {
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
+
+    _cleanupTimers();
+    _status = TransferStatus.failed;
+    _emitProgress();
+    _closeControllers();
+
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.completeError(
+        TransferConnectionException(transferId, reason),
       );
     }
   }
@@ -917,6 +942,26 @@ class InboundTransferTask implements TransferTask {
           transferId,
           cancel.message.isNotEmpty ? cancel.message : cancel.reason.name,
         ),
+      );
+    }
+  }
+
+  /// Aborts the staging destination when its authenticated session closes.
+  Future<void> handleSessionClosed(String reason) async {
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
+
+    await destination.abortAndCleanup();
+    _status = TransferStatus.failed;
+    _emitProgress();
+    _closeControllers();
+
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.completeError(
+        TransferConnectionException(transferId, reason),
       );
     }
   }

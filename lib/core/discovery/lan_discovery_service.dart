@@ -102,10 +102,24 @@ class LanDiscoveryService implements DiscoveryService {
 
       _socket!.broadcastEnabled = true;
 
-      // Join multicast group
+      // Join multicast group on default and each active network interface
       try {
         final mcastGroup = InternetAddress(multicastAddressStr);
-        _socket!.joinMulticast(mcastGroup);
+        try {
+          _socket!.joinMulticast(mcastGroup);
+        } catch (_) {}
+
+        try {
+          final interfaces = await NetworkInterface.list(
+            includeLoopback: false,
+            type: InternetAddressType.IPv4,
+          );
+          for (final iface in interfaces) {
+            try {
+              _socket!.joinMulticast(mcastGroup, iface);
+            } catch (_) {}
+          }
+        } catch (_) {}
       } catch (e) {
         AppLogger.warning(
           'LanDiscoveryService',
@@ -158,15 +172,17 @@ class LanDiscoveryService implements DiscoveryService {
         return;
       }
 
+      final lanEndpoint = '${sourceAddress.address}:${beacon.port}';
       final peer = DiscoveredPeer(
         deviceId: beacon.deviceIdHex,
         displayName: beacon.displayName,
         transportType: TransportType.lan,
         availableTransports: beacon.supportedTransports,
         rssi: 0, // RSSI is not applicable for wired/LAN UDP
-        endpointAddress: '${sourceAddress.address}:${beacon.port}',
+        endpointAddress: lanEndpoint,
         lastSeen: DateTime.now(),
         isIdentityVerified: false, // Strictly unverified at discovery stage
+        transportEndpoints: {TransportType.lan: lanEndpoint},
       );
 
       _peerController.add(peer);
@@ -179,7 +195,7 @@ class LanDiscoveryService implements DiscoveryService {
     }
   }
 
-  void _broadcastBeacon() {
+  Future<void> _broadcastBeacon() async {
     if (_socket == null || _currentAdvertisement == null) return;
 
     try {
@@ -200,10 +216,35 @@ class LanDiscoveryService implements DiscoveryService {
         _socket!.send(bytes, mcastGroup, discoveryPort);
       } catch (_) {}
 
-      // 2. Subnet broadcast dispatch
+      // 2. Global subnet broadcast dispatch
       try {
         final broadcastAddr = InternetAddress('255.255.255.255');
         _socket!.send(bytes, broadcastAddr, discoveryPort);
+      } catch (_) {}
+
+      // 3. Directed subnet broadcast dispatch for each active interface (e.g. 192.168.1.255, 192.168.43.255)
+      try {
+        final interfaces = await NetworkInterface.list(
+          includeLoopback: false,
+          type: InternetAddressType.IPv4,
+        );
+        for (final iface in interfaces) {
+          for (final addr in iface.addresses) {
+            if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+              final parts = addr.address.split('.');
+              if (parts.length == 4) {
+                final subnetBcast = '${parts[0]}.${parts[1]}.${parts[2]}.255';
+                try {
+                  _socket!.send(
+                    bytes,
+                    InternetAddress(subnetBcast),
+                    discoveryPort,
+                  );
+                } catch (_) {}
+              }
+            }
+          }
+        }
       } catch (_) {}
     } catch (e) {
       AppLogger.warning(

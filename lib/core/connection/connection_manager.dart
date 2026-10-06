@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:silosend_datasharing_app/core/connection/ble_connection.dart';
 import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
 import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
 import 'package:silosend_datasharing_app/core/connection/lan_connection.dart';
@@ -127,7 +128,7 @@ class ConnectionManager {
                   : peer.transportType));
 
     if (transportToUse == TransportType.lan) {
-      final endpoint = peer.endpointAddress;
+      final endpoint = peer.lanEndpoint ?? peer.endpointAddress;
       if (endpoint == null || !endpoint.contains(':')) {
         throw ArgumentError(
           'Cannot connect to LAN peer ${peer.displayName}: missing or invalid endpointAddress (${peer.endpointAddress})',
@@ -143,11 +144,45 @@ class ConnectionManager {
         targetDeviceId: peer.deviceId,
         timeout: timeout,
       );
+    } else if (transportToUse == TransportType.ble) {
+      final endpoint = peer.bleEndpoint ?? peer.endpointAddress;
+      if (endpoint == null || endpoint.isEmpty) {
+        throw ArgumentError(
+          'Cannot connect to BLE peer ${peer.displayName}: missing endpointAddress (BLE address)',
+        );
+      }
+
+      return connectToBlePeer(
+        remoteAddress: endpoint,
+        targetDeviceId: peer.deviceId,
+        timeout: timeout,
+      );
     } else {
       throw UnsupportedError(
         'Transport ${transportToUse.name} connection not supported directly via connectToPeer yet',
       );
     }
+  }
+
+  /// Outgoing: connects to a remote BLE GATT peer by address, executing the handshake negotiation.
+  Future<ConnectionSession> connectToBlePeer({
+    required String remoteAddress,
+    String? targetDeviceId,
+    Duration? timeout,
+    BleTransportAdapter? bleAdapter,
+  }) async {
+    final effectiveTimeout = timeout ?? handshakeTimeout;
+    final transport = await BleConnection.connect(
+      remoteAddress,
+      adapter: bleAdapter,
+      timeout: effectiveTimeout,
+    );
+
+    return initiateHandshake(
+      transport,
+      targetDeviceId: targetDeviceId,
+      timeout: effectiveTimeout,
+    );
   }
 
   /// Outgoing: connects to a remote LAN peer by IPv4 and port, executing the handshake negotiation.

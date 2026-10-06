@@ -69,10 +69,23 @@ class TransferEngineImpl implements TransferEngine {
       },
       onDone: () {
         _sessionSubscriptions.remove(session.sessionId)?.cancel();
+        _handleSessionClosed(session, 'Authenticated session closed');
       },
     );
 
     _sessionSubscriptions[session.sessionId] = sub;
+  }
+
+  void _handleSessionClosed(SecureSession session, String reason) {
+    for (final task in _tasks.values.toList()) {
+      if (task is OutboundTransferTask &&
+          identical(task.secureSession, session)) {
+        task.handleSessionClosed(reason);
+      } else if (task is InboundTransferTask &&
+          identical(task.secureSession, session)) {
+        task.handleSessionClosed(reason).ignore();
+      }
+    }
   }
 
   /// Resolves an active [SecureSession] for [remoteDeviceId].
@@ -271,7 +284,13 @@ class TransferEngineImpl implements TransferEngine {
       payload: ack.toBytes(),
     );
 
-    await session.sendEncryptedPacket(ackPacket);
+    try {
+      await session.sendEncryptedPacket(ackPacket);
+    } catch (e) {
+      _tasks.remove(metadata.transferId);
+      await inboundTask.handleSessionClosed('Unable to accept transfer: $e');
+      rethrow;
+    }
 
     if (metadata.chunkCount == 0) {
       await inboundTask.verifyIfEmpty();
@@ -363,12 +382,12 @@ class TransferEngineImpl implements TransferEngine {
     await _newSessionSubscription?.cancel();
     _newSessionSubscription = null;
 
-    for (final sub in _sessionSubscriptions.values) {
+    for (final sub in _sessionSubscriptions.values.toList()) {
       await sub.cancel();
     }
     _sessionSubscriptions.clear();
 
-    for (final task in _tasks.values) {
+    for (final task in _tasks.values.toList()) {
       await task.cancel('TransferEngine disposed');
     }
     _tasks.clear();

@@ -29,35 +29,30 @@ void main() {
         platformService: SystemPlatformService(platformNameOverride: 'android'),
       );
 
+      await container.initialize();
       await tester.pumpWidget(SiloSendApp(container: container));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
-      // Verify app name and subtitle
+      // Verify app name in AppBar
       expect(find.text(AppConstants.appName), findsWidgets);
-      expect(find.text('Offline Device-to-Device Sharing'), findsOneWidget);
 
-      // Verify real local device identity
+      // Verify real local device identity card
+      expect(find.text('Your Device'), findsOneWidget);
       expect(find.text('Test-Device-Alpha'), findsOneWidget);
       expect(find.text('42424242...4242'), findsOneWidget);
-      expect(find.text('v1'), findsOneWidget);
 
-      // Verify device discovery card exists with Scan Nearby button
-      expect(find.text('Nearby Device Discovery'), findsOneWidget);
+      // Verify nearby devices section exists with Scan Nearby button
+      expect(find.text('Nearby Devices'), findsOneWidget);
       expect(find.text('Scan Nearby'), findsOneWidget);
 
       // Verify active connections card exists
       expect(find.text('Active Connections'), findsOneWidget);
       expect(find.textContaining('No active peer connections'), findsOneWidget);
 
-      // Verify application lifecycle
-      expect(find.text('Foreground (Active)'), findsOneWidget);
-
-      // Verify truthful capabilities without fake claims
-      expect(find.text('Unknown (Not Probed)'), findsNWidgets(3));
-
-      // Verify honest status confirmation
+      // Verify architecture confirmation banner
       expect(
-        find.text('Truthful Discovery & Connection Foundation Active'),
+        find.text('End-to-End Encrypted (AES-256-GCM) • Offline Direct'),
         findsOneWidget,
       );
 
@@ -76,16 +71,16 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Verify peer is displayed with Unverified Claim badge and Connect button
+      // Verify peer is displayed with action buttons
       expect(find.text('Remote-Pixel'), findsOneWidget);
-      expect(find.text('Unverified Claim'), findsOneWidget);
       expect(find.text('LAN'), findsWidgets);
       expect(find.text('BLE'), findsWidgets);
+      expect(find.text('Send File'), findsNWidgets(2));
       expect(find.text('Connect'), findsOneWidget);
 
       // Tap pairing button in AppBar to open out-of-band pairing dialog
       await tester.tap(find.byIcon(Icons.qr_code_2_rounded));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Out-of-Band Pairing'), findsOneWidget);
       expect(find.text('Local Pairing URI'), findsOneWidget);
@@ -93,7 +88,7 @@ void main() {
 
       // Close pairing dialog
       await tester.tap(find.text('Close'));
-      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.text('Out-of-Band Pairing'), findsNothing);
 

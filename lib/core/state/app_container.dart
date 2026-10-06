@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
+import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
 import 'package:silosend_datasharing_app/core/connection/ble_connection_server.dart';
 import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
 import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
@@ -22,10 +23,24 @@ import 'package:silosend_datasharing_app/core/pairing/nfc_pairing_service.dart';
 import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
 import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
 import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
+import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
+import 'package:silosend_datasharing_app/core/battery/system_battery_provider.dart';
+import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
+import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
+import 'package:silosend_datasharing_app/core/contracts/transport_selector_contract.dart';
 import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
 import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
+import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
+import 'package:silosend_datasharing_app/core/contracts/storage_contract.dart';
+import 'package:silosend_datasharing_app/core/file/system_file_picker_service.dart';
+import 'package:silosend_datasharing_app/core/file/system_storage_service.dart';
+import 'package:silosend_datasharing_app/core/session/session_lifecycle_policy.dart';
+import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
+import 'package:silosend_datasharing_app/core/transfer/file_sharing_coordinator.dart';
 import 'package:silosend_datasharing_app/core/transfer/transfer_engine_impl.dart';
+import 'package:silosend_datasharing_app/core/transport/smart_transport_selector_impl.dart';
 import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
+import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
 import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
 import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
 import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
@@ -39,6 +54,7 @@ import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
 /// testable application context.
 class AppContainer {
   final IdentityStorage identityStorage;
+  final SettingsStorage settingsStorage;
   final DeviceIdentityManager identityManager;
   final PlatformService platformService;
   final AppLifecycleManager lifecycleManager;
@@ -52,8 +68,16 @@ class AppContainer {
   final PeerTrustStore? _injectedPeerTrustStore;
   final SecureSessionManager? _injectedSecureSessionManager;
   final TransferEngine? _injectedTransferEngine;
+  final BatteryStateProvider? _injectedBatteryProvider;
+  final TransportSelector? _injectedTransportSelector;
+  final FilePickerService? _injectedFilePickerService;
+  final StorageService? _injectedStorageService;
+  final SessionLifecyclePolicy? _injectedSessionLifecyclePolicy;
+  final FileSharingCoordinator? _injectedFileSharingCoordinator;
+  final CapabilityCoordinator? _injectedCapabilityCoordinator;
 
   DiscoveryCoordinator? _discoveryCoordinator;
+  CapabilityCoordinator? _capabilityCoordinator;
   ConnectionManager? _connectionManager;
   LanConnectionServer? _lanServer;
   BleConnectionServer? _bleServer;
@@ -63,13 +87,28 @@ class AppContainer {
   PeerTrustStore? _peerTrustStore;
   SecureSessionManager? _secureSessionManager;
   TransferEngine? _transferEngine;
+  BatteryStateProvider? _batteryProvider;
+  TransportSelector? _transportSelector;
+  FilePickerService? _filePickerService;
+  StorageService? _storageService;
+  SessionLifecyclePolicy? _sessionLifecyclePolicy;
+  FileSharingCoordinator? _fileSharingCoordinator;
+  AppOrchestrator? _orchestrator;
+
+  UserSettings _userSettings = const UserSettings();
+  final StreamController<UserSettings> _userSettingsController =
+      StreamController<UserSettings>.broadcast();
 
   bool _isInitialized = false;
   Object? _initError;
   DeviceCapabilities _capabilities = DeviceCapabilities.unknown;
+  SystemCapabilities _systemCapabilities = SystemCapabilities.baseline();
+  final StreamController<SystemCapabilities> _capabilitiesController =
+      StreamController<SystemCapabilities>.broadcast();
 
   AppContainer({
     required this.identityStorage,
+    SettingsStorage? settingsStorage,
     required this.identityManager,
     required this.platformService,
     required this.lifecycleManager,
@@ -83,7 +122,15 @@ class AppContainer {
     PeerTrustStore? peerTrustStore,
     SecureSessionManager? secureSessionManager,
     TransferEngine? transferEngine,
-  }) : _injectedDiscoveryCoordinator = discoveryCoordinator,
+    BatteryStateProvider? batteryProvider,
+    TransportSelector? transportSelector,
+    FilePickerService? filePickerService,
+    StorageService? storageService,
+    SessionLifecyclePolicy? sessionLifecyclePolicy,
+    FileSharingCoordinator? fileSharingCoordinator,
+    CapabilityCoordinator? capabilityCoordinator,
+  }) : settingsStorage = settingsStorage ?? InMemorySettingsStorage(),
+       _injectedDiscoveryCoordinator = discoveryCoordinator,
        _injectedConnectionManager = connectionManager,
        _injectedLanServer = lanServer,
        _injectedBleServer = bleServer,
@@ -92,11 +139,19 @@ class AppContainer {
        _injectedSecureKeyStore = secureKeyStore,
        _injectedPeerTrustStore = peerTrustStore,
        _injectedSecureSessionManager = secureSessionManager,
-       _injectedTransferEngine = transferEngine;
+       _injectedTransferEngine = transferEngine,
+       _injectedBatteryProvider = batteryProvider,
+       _injectedTransportSelector = transportSelector,
+       _injectedFilePickerService = filePickerService,
+       _injectedStorageService = storageService,
+       _injectedSessionLifecyclePolicy = sessionLifecyclePolicy,
+       _injectedFileSharingCoordinator = fileSharingCoordinator,
+       _injectedCapabilityCoordinator = capabilityCoordinator;
 
   /// Factory producing a standard production container.
   factory AppContainer.standard({
     IdentityStorage? storage,
+    SettingsStorage? settingsStorage,
     PlatformService? platformService,
     AppLifecycleManager? lifecycleManager,
     DiscoveryCoordinator? discoveryCoordinator,
@@ -109,13 +164,23 @@ class AppContainer {
     PeerTrustStore? peerTrustStore,
     SecureSessionManager? secureSessionManager,
     TransferEngine? transferEngine,
+    BatteryStateProvider? batteryProvider,
+    TransportSelector? transportSelector,
+    FilePickerService? filePickerService,
+    StorageService? storageService,
+    SessionLifecyclePolicy? sessionLifecyclePolicy,
+    FileSharingCoordinator? fileSharingCoordinator,
+    CapabilityCoordinator? capabilityCoordinator,
   }) {
     final effectiveStorage = storage ?? _createDefaultFileStorage();
+    final effectiveSettings =
+        settingsStorage ?? _createDefaultSettingsStorage();
     final effectivePlatform = platformService ?? SystemPlatformService();
     final effectiveLifecycle = lifecycleManager ?? AppLifecycleManager();
 
     return AppContainer(
       identityStorage: effectiveStorage,
+      settingsStorage: effectiveSettings,
       identityManager: DeviceIdentityManager(effectiveStorage),
       platformService: effectivePlatform,
       lifecycleManager: effectiveLifecycle,
@@ -129,6 +194,13 @@ class AppContainer {
       peerTrustStore: peerTrustStore,
       secureSessionManager: secureSessionManager,
       transferEngine: transferEngine,
+      batteryProvider: batteryProvider,
+      transportSelector: transportSelector,
+      filePickerService: filePickerService,
+      storageService: storageService,
+      sessionLifecyclePolicy: sessionLifecyclePolicy,
+      fileSharingCoordinator: fileSharingCoordinator,
+      capabilityCoordinator: capabilityCoordinator,
     );
   }
 
@@ -143,6 +215,41 @@ class AppContainer {
 
   /// Current probed hardware capabilities.
   DeviceCapabilities get capabilities => _capabilities;
+
+  /// Current real-time system capabilities (radios, permissions, network).
+  SystemCapabilities get systemCapabilities => _systemCapabilities;
+
+  /// Reactive stream of real-time system capabilities.
+  Stream<SystemCapabilities> get capabilitiesStream =>
+      _capabilitiesController.stream;
+
+  /// Probes real-time system capabilities and notifies listeners.
+  Future<SystemCapabilities> refreshCapabilities() async {
+    final caps = await platformService.checkCapabilities();
+    _systemCapabilities = caps;
+    if (!_capabilitiesController.isClosed) {
+      _capabilitiesController.add(caps);
+    }
+    _capabilities = _capabilities.copyWith(
+      ble: caps.bluetoothState == RadioState.unsupported
+          ? CapabilityStatus.unavailable
+          : (caps.bluetoothState == RadioState.enabled ||
+                    caps.bluetoothState == RadioState.disabled
+                ? CapabilityStatus.supported
+                : CapabilityStatus.unknown),
+    );
+    return caps;
+  }
+
+  /// Capability coordinator managing dynamic capability UX and recovery.
+  CapabilityCoordinator get capabilityCoordinator {
+    if (_capabilityCoordinator == null) {
+      throw StateError(
+        'CapabilityCoordinator accessed before AppContainer.initialize()',
+      );
+    }
+    return _capabilityCoordinator!;
+  }
 
   /// Current application lifecycle state.
   AppLifecycleState get lifecycleState => lifecycleManager.currentState;
@@ -319,6 +426,90 @@ class AppContainer {
   List<TransferTask> get activeTransfers =>
       _transferEngine?.activeTransfers ?? const [];
 
+  /// Real battery metrics provider.
+  BatteryStateProvider get batteryProvider {
+    if (_batteryProvider == null) {
+      throw StateError(
+        'BatteryStateProvider accessed before AppContainer.initialize()',
+      );
+    }
+    return _batteryProvider!;
+  }
+
+  /// Smart transport selector evaluating candidates and coordinating fallback.
+  TransportSelector get transportSelector {
+    if (_transportSelector == null) {
+      throw StateError(
+        'TransportSelector accessed before AppContainer.initialize()',
+      );
+    }
+    return _transportSelector!;
+  }
+
+  /// Platform document picker service (Phase 9).
+  FilePickerService get filePickerService {
+    if (_filePickerService == null) {
+      throw StateError(
+        'FilePickerService accessed before AppContainer.initialize()',
+      );
+    }
+    return _filePickerService!;
+  }
+
+  /// Platform storage and downloads management service (Phase 9).
+  StorageService get storageService {
+    if (_storageService == null) {
+      throw StateError(
+        'StorageService accessed before AppContainer.initialize()',
+      );
+    }
+    return _storageService!;
+  }
+
+  /// Policy governing session retention and automatic idle timeout (Phase 9).
+  SessionLifecyclePolicy get sessionLifecyclePolicy {
+    if (_sessionLifecyclePolicy == null) {
+      throw StateError(
+        'SessionLifecyclePolicy accessed before AppContainer.initialize()',
+      );
+    }
+    return _sessionLifecyclePolicy!;
+  }
+
+  /// End-to-end file sharing coordinator (Phase 9).
+  FileSharingCoordinator get fileSharingCoordinator {
+    if (_fileSharingCoordinator == null) {
+      throw StateError(
+        'FileSharingCoordinator accessed before AppContainer.initialize()',
+      );
+    }
+    return _fileSharingCoordinator!;
+  }
+
+  /// Reactive stream of active and recently completed file transfers.
+  Stream<List<TransferTask>> get activeTransfersStream =>
+      _fileSharingCoordinator?.activeTransfersStream ?? const Stream.empty();
+
+  /// Central application orchestrator maintaining unified state (Track C: U1–U8).
+  AppOrchestrator get orchestrator {
+    if (_orchestrator == null) {
+      throw StateError(
+        'AppOrchestrator accessed before AppContainer.initialize()',
+      );
+    }
+    return _orchestrator!;
+  }
+
+  /// Reactive stream of unified application state changes.
+  Stream<AppOrchestratorState> get orchestratorStateStream =>
+      _orchestrator?.stateStream ?? const Stream.empty();
+
+  /// Current user settings and preferences.
+  UserSettings get userSettings => _userSettings;
+
+  /// Reactive stream of user settings changes.
+  Stream<UserSettings> get userSettingsStream => _userSettingsController.stream;
+
   /// Initializes core services, loads/creates device identity, binds discovery coordinator,
   /// starts transport servers, and initializes connection manager and pairing services.
   Future<void> initialize() async {
@@ -332,9 +523,33 @@ class AppContainer {
 
       // 2. Query platform capabilities truthfully
       _capabilities = await platformService.getCapabilities();
+      await refreshCapabilities();
+
+      // 2b. Initialize Capability Coordinator (Phase 14)
+      _capabilityCoordinator =
+          _injectedCapabilityCoordinator ??
+          CapabilityCoordinator(
+            platformService: platformService,
+            lifecycleManager: lifecycleManager,
+            initialCapabilities: _systemCapabilities,
+            onCapabilitiesChanged: _onCapabilitiesRefreshed,
+          );
+
+      // 2c. Load persistent user settings
+      _userSettings = await settingsStorage.loadSettings();
+      if (!_userSettingsController.isClosed) {
+        _userSettingsController.add(_userSettings);
+      }
 
       // 3. Load or mint persistent local device identity
       final loadedIdentity = await identityManager.getOrCreateIdentity();
+      if (_userSettings.customDisplayName != null &&
+          _userSettings.customDisplayName!.trim().isNotEmpty &&
+          _userSettings.customDisplayName != loadedIdentity.displayName) {
+        await identityManager.updateDisplayName(
+          _userSettings.customDisplayName!,
+        );
+      }
 
       // 4. Initialize Discovery Coordinator
       if (_injectedDiscoveryCoordinator != null) {
@@ -454,7 +669,66 @@ class AppContainer {
         );
       }
 
-      // 11. Connect lifecycle transitions with discovery state
+      // 11. Initialize Battery State Provider & Smart Transport Selector (Phase 8)
+      _batteryProvider = _injectedBatteryProvider ?? SystemBatteryProvider();
+      _transportSelector =
+          _injectedTransportSelector ??
+          SmartTransportSelectorImpl(
+            platformService: platformService,
+            batteryProvider: _batteryProvider!,
+            connectionManager: _connectionManager!,
+            secureSessionManager: _secureSessionManager!,
+          );
+
+      // 12. Initialize File Services, Storage Services & File Sharing Coordinator (Phase 9)
+      _filePickerService =
+          _injectedFilePickerService ?? SystemFilePickerService();
+      _storageService = _injectedStorageService ?? SystemStorageService();
+      _sessionLifecyclePolicy =
+          _injectedSessionLifecyclePolicy ??
+          SessionLifecyclePolicy(
+            idleTimeout: const Duration(minutes: 3),
+            keepAliveAfterTransfer: true,
+            onDisconnectSession: (sessionId, reason) async {
+              await disconnectSession(sessionId, reason: reason);
+            },
+          );
+      _fileSharingCoordinator =
+          _injectedFileSharingCoordinator ??
+          FileSharingCoordinator(
+            transferEngine: _transferEngine!,
+            transportSelector: _transportSelector!,
+            filePickerService: _filePickerService!,
+            storageService: _storageService!,
+            secureSessionManager: _secureSessionManager!,
+            sessionLifecyclePolicy: _sessionLifecyclePolicy!,
+          );
+
+      // 13. Initialize Central Application Orchestrator (Track C: U1–U8)
+      _orchestrator = AppOrchestrator(
+        capabilityCoordinator: _capabilityCoordinator!,
+        discoveryCoordinator: _discoveryCoordinator!,
+        connectionManager: _connectionManager!,
+        secureSessionManager: _secureSessionManager!,
+        fileSharingCoordinator: _fileSharingCoordinator!,
+        batteryProvider: _batteryProvider!,
+        isBatterySaverActiveEvaluator: (snapshot) {
+          return _shouldBatterySaverBeActive(
+            _userSettings.batterySaverMode,
+            snapshot,
+          );
+        },
+      );
+
+      // Check initial battery saver state and configure discovery throttling
+      final initialSnapshot = await _batteryProvider!.getBatterySnapshot();
+      final isBatterySaverActive = _shouldBatterySaverBeActive(
+        _userSettings.batterySaverMode,
+        initialSnapshot,
+      );
+      _discoveryCoordinator?.setBatterySaver(isBatterySaverActive);
+
+      // 14. Connect lifecycle transitions with discovery state
       lifecycleManager.addListener(_onLifecycleStateChanged);
 
       _isInitialized = true;
@@ -484,8 +758,55 @@ class AppContainer {
     } else if (state == AppLifecycleState.resumed) {
       AppLogger.info(
         'AppContainer',
-        'App resumed: discovery coordinator active',
+        'App resumed: refreshing platform capabilities',
       );
+      refreshCapabilities().ignore();
+    }
+  }
+
+  /// Reconciles transport state and running discovery when capabilities change.
+  Future<void> _onCapabilitiesRefreshed() async {
+    final caps =
+        _capabilityCoordinator?.rawCapabilities ??
+        await platformService.checkCapabilities();
+    _systemCapabilities = caps;
+    if (!_capabilitiesController.isClosed) {
+      _capabilitiesController.add(caps);
+    }
+
+    if (_discoveryCoordinator != null &&
+        _discoveryCoordinator!.status == DiscoveryStatus.active) {
+      final canLan = caps.canUseLan || !Platform.isAndroid;
+      final canBle = caps.canUseBle;
+      if (!canLan && !canBle) {
+        AppLogger.warning(
+          'AppContainer',
+          'All discovery transports lost; stopping discovery',
+        );
+        await stopDiscoveryAndAdvertising();
+      } else {
+        final currentActive = _discoveryCoordinator!.activeTransports;
+        final needsLan = canLan && !currentActive.contains(TransportType.lan);
+        final needsBle = canBle && !currentActive.contains(TransportType.ble);
+        final dropLan = !canLan && currentActive.contains(TransportType.lan);
+        final dropBle = !canBle && currentActive.contains(TransportType.ble);
+
+        if (needsLan || needsBle || dropLan || dropBle) {
+          AppLogger.info(
+            'AppContainer',
+            'Discovery transports changed; reconciling discovery...',
+          );
+          try {
+            await stopDiscoveryAndAdvertising();
+            await startDiscoveryAndAdvertising();
+          } catch (e) {
+            AppLogger.warning(
+              'AppContainer',
+              'Failed to reconcile discovery after transport change: $e',
+            );
+          }
+        }
+      }
     }
   }
 
@@ -496,18 +817,55 @@ class AppContainer {
       throw StateError('Cannot start discovery before identity is initialized');
     }
 
+    final caps = await refreshCapabilities();
+
+    final bool canLan = caps.canUseLan || !Platform.isAndroid;
+    final bool canBle = caps.canUseBle;
+
+    if (!canLan && !canBle) {
+      if (caps.isBluetoothOff && !caps.canUseLan) {
+        throw StateError(
+          'Wi-Fi network is disconnected and Bluetooth is turned off. '
+          'Connect to Wi-Fi or turn on Bluetooth to discover nearby devices.',
+        );
+      }
+      if (caps.isNearbyPermissionMissing && !caps.canUseLan) {
+        throw StateError(
+          'Wi-Fi network is disconnected and Nearby device permission is required for Bluetooth discovery. '
+          'Allow nearby device access in settings or connect to Wi-Fi.',
+        );
+      }
+      throw StateError(
+        'No viable discovery transports available. '
+        'Connect to a local Wi-Fi network or enable Bluetooth with nearby permissions.',
+      );
+    }
+
+    final supported = <TransportType>{
+      if (canLan) TransportType.lan,
+      if (canBle) TransportType.ble,
+    };
+
     final serverPort = _lanServer?.boundPort ?? 53531;
 
     final ad = DeviceAdvertisement(
       deviceId: id.idHex,
       displayName: id.displayName,
       port: serverPort,
-      supportedTransports: {
-        TransportType.lan,
-        if (_capabilities.supportsBle) TransportType.ble,
-      },
+      supportedTransports: supported,
       protocolVersion: id.protocolVersion,
     );
+
+    if (canLan && Platform.isAndroid) {
+      try {
+        await platformService.acquireMulticastLock();
+      } catch (e) {
+        AppLogger.warning(
+          'AppContainer',
+          'Failed to acquire multicast lock: $e',
+        );
+      }
+    }
 
     await discoveryCoordinator.startAdvertising(ad);
     await discoveryCoordinator.startDiscovery();
@@ -517,11 +875,34 @@ class AppContainer {
   Future<void> stopDiscoveryAndAdvertising() async {
     await discoveryCoordinator.stopAdvertising();
     await discoveryCoordinator.stopDiscovery();
+    if (Platform.isAndroid) {
+      try {
+        await platformService.releaseMulticastLock();
+      } catch (e) {
+        AppLogger.warning(
+          'AppContainer',
+          'Failed to release multicast lock: $e',
+        );
+      }
+    }
   }
 
   /// Disposes active resources, servers, discovery timers, and connection sessions.
   void dispose() {
+    if (Platform.isAndroid) {
+      try {
+        platformService.releaseMulticastLock();
+      } catch (_) {}
+    }
     lifecycleManager.removeListener(_onLifecycleStateChanged);
+    _orchestrator?.dispose();
+    _orchestrator = null;
+    _capabilityCoordinator?.dispose();
+    _capabilityCoordinator = null;
+    _sessionLifecyclePolicy?.dispose();
+    _sessionLifecyclePolicy = null;
+    _fileSharingCoordinator?.dispose();
+    _fileSharingCoordinator = null;
     _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
@@ -531,12 +912,75 @@ class AppContainer {
     _nfcPairingService?.dispose();
     lifecycleManager.dispose();
     identityManager.dispose();
+    if (!_capabilitiesController.isClosed) {
+      _capabilitiesController.close();
+    }
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.close();
+    }
     _isInitialized = false;
+  }
+
+  bool _shouldBatterySaverBeActive(
+    BatterySaverMode mode,
+    BatterySnapshot snapshot,
+  ) {
+    switch (mode) {
+      case BatterySaverMode.on:
+        return true;
+      case BatterySaverMode.off:
+        return false;
+      case BatterySaverMode.system:
+        return snapshot.isBatterySaverActive == true ||
+            snapshot.isCriticalBattery;
+    }
+  }
+
+  /// Updates user Battery Saver mode and adjusts discovery duty cycles accordingly.
+  Future<void> setBatterySaverMode(BatterySaverMode mode) async {
+    _userSettings = _userSettings.copyWith(batterySaverMode: mode);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+    final snapshot =
+        await _batteryProvider?.getBatterySnapshot() ??
+        BatterySnapshot.unknown();
+    final isActive = _shouldBatterySaverBeActive(mode, snapshot);
+    _discoveryCoordinator?.setBatterySaver(isActive);
+    _orchestrator?.refreshState();
+  }
+
+  /// Updates device display name, persists change, and restarts advertising if active.
+  Future<void> updateCustomDisplayName(String newName) async {
+    await identityManager.updateDisplayName(newName);
+    _userSettings = _userSettings.copyWith(customDisplayName: newName);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+    if (_discoveryCoordinator?.status == DiscoveryStatus.active) {
+      await stopDiscoveryAndAdvertising();
+      await startDiscoveryAndAdvertising();
+    }
+  }
+
+  /// Updates custom downloads directory path.
+  Future<void> updateCustomDownloadsPath(String path) async {
+    _userSettings = _userSettings.copyWith(customDownloadsPath: path);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
   }
 
   /// Resolves standard platform storage file without external dependencies.
   static IdentityStorage _createDefaultFileStorage() {
     try {
+      if (Platform.environment.containsKey('FLUTTER_TEST') ||
+          WidgetsBinding.instance.runtimeType.toString().contains('Test')) {
+        return InMemoryIdentityStorage();
+      }
       File file;
       if (Platform.isAndroid) {
         final dir = Directory(
@@ -562,6 +1006,41 @@ class AppContainer {
       return FileIdentityStorage(file);
     } catch (_) {
       return InMemoryIdentityStorage();
+    }
+  }
+
+  /// Resolves standard platform settings file without external dependencies.
+  static SettingsStorage _createDefaultSettingsStorage() {
+    try {
+      if (Platform.environment.containsKey('FLUTTER_TEST') ||
+          WidgetsBinding.instance.runtimeType.toString().contains('Test')) {
+        return InMemorySettingsStorage();
+      }
+      File file;
+      if (Platform.isAndroid) {
+        final dir = Directory(
+          '/data/user/0/${AppConstants.applicationId}/files',
+        );
+        file = File('${dir.path}/user_settings.json');
+      } else if (Platform.isWindows) {
+        final appData =
+            Platform.environment['APPDATA'] ??
+            Platform.environment['LOCALAPPDATA'];
+        if (appData != null) {
+          file = File('$appData/${AppConstants.appName}/user_settings.json');
+        } else {
+          file = File(
+            '${Directory.systemTemp.path}/${AppConstants.applicationId}/user_settings.json',
+          );
+        }
+      } else {
+        file = File(
+          '${Directory.systemTemp.path}/${AppConstants.applicationId}/user_settings.json',
+        );
+      }
+      return FileSettingsStorage(file);
+    } catch (_) {
+      return InMemorySettingsStorage();
     }
   }
 }

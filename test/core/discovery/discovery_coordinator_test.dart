@@ -346,6 +346,65 @@ void main() {
         expect(coordinator.currentPeers.length, equals(1));
       },
     );
+
+    test('tracks operationalState transitions: idle -> searching -> noDevices -> ready', () async {
+      expect(
+        coordinator.operationalState,
+        equals(DiscoveryOperationalState.idle),
+      );
+      expect(coordinator.activeTransports, isEmpty);
+
+      final states = <DiscoveryOperationalState>[];
+      final sub = coordinator.operationalStateStream.listen(states.add);
+
+      await coordinator.startDiscovery();
+
+      expect(
+        coordinator.activeTransports,
+        containsAll([TransportType.lan, TransportType.ble]),
+      );
+      expect(
+        coordinator.operationalState,
+        equals(DiscoveryOperationalState.searching),
+      );
+
+      // Simulate passing the initial search window (>= 4s)
+      coordinator.setDiscoveryStartedAtForTesting(
+        DateTime.now().subtract(const Duration(seconds: 5)),
+      );
+      await pumpEventQueue();
+
+      expect(
+        coordinator.operationalState,
+        equals(DiscoveryOperationalState.noDevices),
+      );
+
+      // Remote peer discovered -> transitions to ready
+      lanService.emitPeer(
+        DiscoveredPeer(
+          deviceId: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+          displayName: 'Remote-Phone',
+          transportType: TransportType.lan,
+          rssi: -50,
+          lastSeen: DateTime.now(),
+        ),
+      );
+      await pumpEventQueue();
+
+      expect(
+        coordinator.operationalState,
+        equals(DiscoveryOperationalState.ready),
+      );
+
+      await coordinator.stopDiscovery();
+      expect(
+        coordinator.operationalState,
+        equals(DiscoveryOperationalState.idle),
+      );
+      expect(coordinator.activeTransports, isEmpty);
+
+      await sub.cancel();
+    });
   });
 }
 

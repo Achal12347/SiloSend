@@ -42,18 +42,38 @@ class BleDiscoveryService implements DiscoveryService {
   @override
   Stream<DiscoveredPeer> get discoveredPeers => _peerController.stream;
 
+  bool _batterySaver = false;
+
   bool get isScanning => _isScanning;
   bool get isAdvertising => _isAdvertising;
+  bool get isBatterySaverEnabled => _batterySaver;
+
+  /// Sets battery saver mode and dynamically reapplies radio power settings.
+  void setBatterySaver(bool enabled) {
+    if (_batterySaver == enabled) return;
+    _batterySaver = enabled;
+    if (_isScanning) {
+      stopDiscovery().then((_) => startDiscovery());
+    }
+    if (_isAdvertising && _currentAdvertisement != null) {
+      final ad = _currentAdvertisement!;
+      stopAdvertising().then((_) => startAdvertising(ad));
+    }
+  }
 
   @override
   Future<void> startDiscovery() async {
     if (_isScanning) return;
-    AppLogger.info('BleDiscoveryService', 'Starting BLE discovery scanning...');
+    AppLogger.info(
+      'BleDiscoveryService',
+      'Starting BLE discovery scanning (batterySaver: $_batterySaver)...',
+    );
 
     try {
       _startListeningToScanEvents();
       await _methodChannel.invokeMethod('startScan', {
         'serviceUuid': silosendServiceUuid,
+        'batterySaver': _batterySaver,
       });
       _isScanning = true;
       AppLogger.info('BleDiscoveryService', 'BLE discovery scanning active');
@@ -110,6 +130,7 @@ class BleDiscoveryService implements DiscoveryService {
       await _methodChannel.invokeMethod('startAdvertising', {
         'serviceUuid': silosendServiceUuid,
         'beaconBytes': beaconBytes,
+        'batterySaver': _batterySaver,
       });
 
       _isAdvertising = true;
@@ -198,6 +219,10 @@ class BleDiscoveryService implements DiscoveryService {
         availableTransports: beacon.supportedTransports,
         rssi: rssi,
         endpointAddress: deviceAddress,
+        transportEndpoints: {
+          if (deviceAddress != null && deviceAddress.isNotEmpty)
+            TransportType.ble: deviceAddress,
+        },
         lastSeen: DateTime.now(),
         isIdentityVerified: false, // Strictly unverified at discovery
       );

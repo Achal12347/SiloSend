@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
+import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
 import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
 import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
 import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
@@ -122,6 +123,14 @@ class ActiveConnectionsCard extends StatelessWidget {
 
     final metrics = session.currentMetrics;
     final isLan = info.activeTransport == TransportType.lan;
+    DiscoveredPeer? discoveredPeer;
+    for (final peer in container.discoveredPeers) {
+      if (peer.deviceId == remoteId) {
+        discoveredPeer = peer;
+        break;
+      }
+    }
+    final sendPeer = discoveredPeer;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8.0),
@@ -159,20 +168,56 @@ class ActiveConnectionsCard extends StatelessWidget {
                   ],
                 ),
               ),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.close_rounded, size: 14),
-                label: const Text('Disconnect'),
-                style: OutlinedButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                  foregroundColor: Colors.red.shade700,
-                  side: BorderSide(color: Colors.red.shade300),
-                ),
-                onPressed: () async {
-                  await container.disconnectSession(
-                    session.sessionId,
-                    reason: 'Disconnected by user',
-                  );
-                },
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(Icons.send_rounded, size: 14),
+                    label: const Text('Send File'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                    ),
+                    onPressed: sendPeer == null
+                        ? null
+                        : () async {
+                            try {
+                              await container.fileSharingCoordinator
+                                  .sendFileToPeer(sendPeer);
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: const Text(
+                                      'Unable to send file. Check the connection and try again.',
+                                    ),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                  ),
+                  const SizedBox(width: 6),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.close_rounded, size: 14),
+                    label: const Text('Disconnect'),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      foregroundColor: Colors.red.shade700,
+                      side: BorderSide(color: Colors.red.shade300),
+                    ),
+                    onPressed: () async {
+                      await container.disconnectSession(
+                        session.sessionId,
+                        reason: 'Disconnected by user',
+                      );
+                    },
+                  ),
+                ],
               ),
             ],
           ),

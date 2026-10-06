@@ -22,8 +22,14 @@ class DiscoveryCoordinator {
   final _peersController = StreamController<List<DiscoveredPeer>>.broadcast();
   final _statusController = StreamController<DiscoveryStatus>.broadcast();
 
+  final Set<TransportType> _activeTransports = {};
+  final _operationalStateController =
+      StreamController<DiscoveryOperationalState>.broadcast();
+
   Timer? _reaperTimer;
   DiscoveryStatus _status = DiscoveryStatus.idle;
+  DateTime? _discoveryStartedAt;
+  Timer? _initialSearchTimer;
 
   DiscoveryCoordinator({
     required this.services,
@@ -46,6 +52,55 @@ class DiscoveryCoordinator {
   /// Reactive stream of operational status transitions.
   Stream<DiscoveryStatus> get statusStream => _statusController.stream;
 
+  /// Physical transports currently active and scanning.
+  Set<TransportType> get activeTransports =>
+      Set.unmodifiable(_activeTransports);
+
+  bool _isBatterySaverActive = false;
+
+  /// Whether battery saver throttling is currently active.
+  bool get isBatterySaverActive => _isBatterySaverActive;
+
+  /// Sets battery saver throttling mode across all discovery services.
+  void setBatterySaver(bool enabled) {
+    if (_isBatterySaverActive == enabled) return;
+    _isBatterySaverActive = enabled;
+    for (final service in services) {
+      if (service.transportType == TransportType.ble) {
+        try {
+          (service as dynamic).setBatterySaver(enabled);
+        } catch (_) {}
+      }
+    }
+    if (_status == DiscoveryStatus.active) {
+      _startReaper();
+    }
+  }
+
+  /// Current high-level operational state for product UX.
+  DiscoveryOperationalState get operationalState {
+    if (_status == DiscoveryStatus.idle) {
+      return DiscoveryOperationalState.idle;
+    }
+    if (_status == DiscoveryStatus.error ||
+        (_status == DiscoveryStatus.active && _activeTransports.isEmpty)) {
+      return DiscoveryOperationalState.actionRequired;
+    }
+    if (_discoveredPeers.isNotEmpty) {
+      return DiscoveryOperationalState.ready;
+    }
+    if (_discoveryStartedAt != null &&
+        DateTime.now().difference(_discoveryStartedAt!) >=
+            const Duration(seconds: 4)) {
+      return DiscoveryOperationalState.noDevices;
+    }
+    return DiscoveryOperationalState.searching;
+  }
+
+  /// Reactive stream of operational state transitions.
+  Stream<DiscoveryOperationalState> get operationalStateStream =>
+      _operationalStateController.stream;
+
   /// Starts discovery scanning across all configured transport services.
   Future<void> startDiscovery() async {
     if (_status == DiscoveryStatus.active) return;
@@ -56,24 +111,51 @@ class DiscoveryCoordinator {
       'Starting multi-transport discovery...',
     );
 
-    try {
-      await Future.wait(services.map((s) => s.startDiscovery()));
-      _startReaper();
-      _updateStatus(DiscoveryStatus.active);
-      AppLogger.info(
-        'DiscoveryCoordinator',
-        'Multi-transport discovery active',
-      );
-    } catch (e, stack) {
+    var startedCount = 0;
+    Object? lastError;
+    _activeTransports.clear();
+    for (final service in services) {
+      try {
+        await service.startDiscovery();
+        startedCount++;
+        _activeTransports.add(service.transportType);
+      } catch (e, stack) {
+        lastError = e;
+        AppLogger.warning(
+          'DiscoveryCoordinator',
+          'Failed to start discovery service ${service.transportType}: $e',
+          stackTrace: stack,
+        );
+      }
+    }
+
+    if (startedCount == 0) {
       _updateStatus(DiscoveryStatus.error);
       AppLogger.error(
         'DiscoveryCoordinator',
-        'Failed to start discovery',
-        error: e,
-        stackTrace: stack,
+        'No discovery services could be started',
       );
-      rethrow;
+      if (lastError is Exception) {
+        throw lastError;
+      }
+      throw Exception(
+        lastError?.toString() ?? 'No discovery services could be started',
+      );
     }
+
+    _startReaper();
+    _discoveryStartedAt = DateTime.now();
+    _initialSearchTimer?.cancel();
+    _initialSearchTimer = Timer(const Duration(seconds: 4), () {
+      if (!_operationalStateController.isClosed) {
+        _operationalStateController.add(operationalState);
+      }
+    });
+    _updateStatus(DiscoveryStatus.active);
+    AppLogger.info(
+      'DiscoveryCoordinator',
+      'Multi-transport discovery active ($startedCount/${services.length} services started)',
+    );
   }
 
   /// Stops discovery scanning across all services.
@@ -87,7 +169,13 @@ class DiscoveryCoordinator {
     );
 
     _stopReaper();
-    await Future.wait(services.map((s) => s.stopDiscovery()));
+    _initialSearchTimer?.cancel();
+    _initialSearchTimer = null;
+    _discoveryStartedAt = null;
+    await Future.wait(
+      services.map((s) => s.stopDiscovery().catchError((_) {})),
+    );
+    _activeTransports.clear();
     _discoveredPeers.clear();
     _peersController.add([]);
     _updateStatus(DiscoveryStatus.idle);
@@ -100,7 +188,16 @@ class DiscoveryCoordinator {
       'DiscoveryCoordinator',
       'Starting multi-transport advertising...',
     );
-    await Future.wait(services.map((s) => s.startAdvertising(advertisement)));
+    for (final service in services) {
+      try {
+        await service.startAdvertising(advertisement);
+      } catch (e) {
+        AppLogger.warning(
+          'DiscoveryCoordinator',
+          'Failed to start advertising on ${service.transportType}: $e',
+        );
+      }
+    }
   }
 
   /// Stops advertising local presence across all transports.
@@ -109,7 +206,9 @@ class DiscoveryCoordinator {
       'DiscoveryCoordinator',
       'Stopping multi-transport advertising...',
     );
-    await Future.wait(services.map((s) => s.stopAdvertising()));
+    await Future.wait(
+      services.map((s) => s.stopAdvertising().catchError((_) {})),
+    );
   }
 
   void _attachServiceListeners() {
@@ -147,23 +246,33 @@ class DiscoveryCoordinator {
             ..addAll(incoming.availableTransports)
             ..add(incoming.transportType);
 
+      final mergedEndpoints = Map<TransportType, String>.from(
+        existing.transportEndpoints,
+      )..addAll(incoming.transportEndpoints);
+
       _discoveredPeers[key] = existing.copyWith(
         displayName: incoming.displayName,
         transportType: incoming.transportType, // Most recent observation
         availableTransports: mergedTransports,
+        transportEndpoints: mergedEndpoints,
         rssi: incoming.rssi != 0 ? incoming.rssi : existing.rssi,
-        endpointAddress: incoming.endpointAddress ?? existing.endpointAddress,
         lastSeen: incoming.lastSeen,
         isIdentityVerified: false, // Unverified at discovery
       );
     }
 
     _peersController.add(currentPeers);
+    if (!_operationalStateController.isClosed) {
+      _operationalStateController.add(operationalState);
+    }
   }
 
   void _startReaper() {
     _reaperTimer?.cancel();
-    _reaperTimer = Timer.periodic(reaperInterval, (_) => _evictStalePeers());
+    final interval = _isBatterySaverActive
+        ? Duration(seconds: reaperInterval.inSeconds * 2)
+        : reaperInterval;
+    _reaperTimer = Timer.periodic(interval, (_) => _evictStalePeers());
   }
 
   void _stopReaper() {
@@ -188,16 +297,23 @@ class DiscoveryCoordinator {
 
     if (_discoveredPeers.length != initialCount) {
       _peersController.add(currentPeers);
+      if (!_operationalStateController.isClosed) {
+        _operationalStateController.add(operationalState);
+      }
     }
   }
 
   void _updateStatus(DiscoveryStatus newStatus) {
     _status = newStatus;
     _statusController.add(newStatus);
+    if (!_operationalStateController.isClosed) {
+      _operationalStateController.add(operationalState);
+    }
   }
 
   /// Manually injects a peer (primarily for unit tests and local simulations).
   void ingestPeerForTesting(DiscoveredPeer peer) {
+    _activeTransports.add(peer.transportType);
     _handleDiscoveredPeer(peer);
   }
 
@@ -206,13 +322,28 @@ class DiscoveryCoordinator {
     _evictStalePeers();
   }
 
+  /// Sets discovery start time directly for test timing simulations.
+  void setDiscoveryStartedAtForTesting(DateTime? time) {
+    _discoveryStartedAt = time;
+    if (!_operationalStateController.isClosed) {
+      _operationalStateController.add(operationalState);
+    }
+  }
+
   void dispose() {
     _stopReaper();
+    _initialSearchTimer?.cancel();
+    _initialSearchTimer = null;
+    for (final service in services) {
+      service.stopAdvertising().ignore();
+      service.stopDiscovery().ignore();
+    }
     for (final sub in _subscriptions) {
       sub.cancel();
     }
     _subscriptions.clear();
     _peersController.close();
     _statusController.close();
+    _operationalStateController.close();
   }
 }

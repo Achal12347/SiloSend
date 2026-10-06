@@ -21,6 +21,28 @@ enum DiscoveryStatus {
   bool get isActive => this == DiscoveryStatus.active;
 }
 
+/// High-level product operational state of discovery.
+enum DiscoveryOperationalState {
+  /// Discovery has not been started yet.
+  idle,
+
+  /// Actively broadcasting beacons and searching on active transports.
+  searching,
+
+  /// One or more nearby devices have been discovered and are ready to share.
+  ready,
+
+  /// Active scan has not found any nearby devices yet.
+  noDevices,
+
+  /// Discovery cannot proceed until a required capability or transport is enabled.
+  actionRequired;
+
+  bool get isSearching => this == DiscoveryOperationalState.searching;
+  bool get isReady => this == DiscoveryOperationalState.ready;
+  bool get isIdle => this == DiscoveryOperationalState.idle;
+}
+
 /// Represents a nearby device discovered via radio beacons or network discovery.
 ///
 /// NOTE: Discovery represents an unauthenticated claimed presence ("I claim to be device X").
@@ -42,8 +64,8 @@ class DiscoveredPeer {
   /// Signal strength indicator (or 0 for LAN).
   final int rssi;
 
-  /// Network or radio endpoint (IP:Port for LAN, MAC/UUID for BLE).
-  final String? endpointAddress;
+  /// Transport-specific endpoints (LAN IP:Port, BLE Address, etc.).
+  final Map<TransportType, String> transportEndpoints;
 
   /// Timestamp when the most recent beacon was received from this peer.
   final DateTime lastSeen;
@@ -61,11 +83,28 @@ class DiscoveredPeer {
     required this.transportType,
     Set<TransportType>? availableTransports,
     required this.rssi,
-    this.endpointAddress,
+    String? endpointAddress,
+    Map<TransportType, String>? transportEndpoints,
     required this.lastSeen,
     this.isIdentityVerified = false,
     this.metadata = const {},
-  }) : availableTransports = availableTransports ?? {transportType};
+  }) : availableTransports = availableTransports ?? {transportType},
+       transportEndpoints = transportEndpoints != null
+           ? Map<TransportType, String>.unmodifiable(transportEndpoints)
+           : (endpointAddress != null
+                 ? Map<TransportType, String>.unmodifiable({
+                     transportType: endpointAddress,
+                   })
+                 : const {});
+
+  /// Network or radio endpoint for the primary observed [transportType].
+  String? get endpointAddress => transportEndpoints[transportType];
+
+  /// Specifically retrieves the LAN endpoint (IP:Port), if discovered.
+  String? get lanEndpoint => transportEndpoints[TransportType.lan];
+
+  /// Specifically retrieves the BLE device address, if discovered.
+  String? get bleEndpoint => transportEndpoints[TransportType.ble];
 
   DiscoveredPeer copyWith({
     String? deviceId,
@@ -74,17 +113,26 @@ class DiscoveredPeer {
     Set<TransportType>? availableTransports,
     int? rssi,
     String? endpointAddress,
+    Map<TransportType, String>? transportEndpoints,
     DateTime? lastSeen,
     bool? isIdentityVerified,
     Map<String, dynamic>? metadata,
   }) {
+    final effectiveTransport = transportType ?? this.transportType;
+    final effectiveEndpoints = transportEndpoints != null
+        ? Map<TransportType, String>.from(transportEndpoints)
+        : Map<TransportType, String>.from(this.transportEndpoints);
+    if (endpointAddress != null) {
+      effectiveEndpoints[effectiveTransport] = endpointAddress;
+    }
+
     return DiscoveredPeer(
       deviceId: deviceId ?? this.deviceId,
       displayName: displayName ?? this.displayName,
-      transportType: transportType ?? this.transportType,
+      transportType: effectiveTransport,
       availableTransports: availableTransports ?? this.availableTransports,
       rssi: rssi ?? this.rssi,
-      endpointAddress: endpointAddress ?? this.endpointAddress,
+      transportEndpoints: effectiveEndpoints,
       lastSeen: lastSeen ?? this.lastSeen,
       isIdentityVerified: isIdentityVerified ?? this.isIdentityVerified,
       metadata: metadata ?? this.metadata,

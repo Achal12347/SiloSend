@@ -10,6 +10,12 @@ import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
 class _TestBleAdapter implements BleTransportAdapter {
   final List<Uint8List> sentChunks = [];
   bool disconnected = false;
+  bool connected = false;
+
+  @override
+  Future<void> connect(String address, {int mtu = 512}) async {
+    connected = true;
+  }
 
   @override
   Future<void> sendChunk(String connectionId, Uint8List chunk) async {

@@ -28,8 +28,8 @@ class ConnectionSession {
   ConnectionSessionInfo _info;
   late final Uint8List _remoteDeviceIdBytes;
 
-  final StreamController<SiloSendPacket> _incomingPacketsController =
-      StreamController<SiloSendPacket>.broadcast();
+  late final StreamController<SiloSendPacket> _incomingPacketsController;
+  final List<SiloSendPacket> _bufferedIncomingPackets = [];
   final StreamController<ConnectionSessionInfo> _stateController =
       StreamController<ConnectionSessionInfo>.broadcast();
 
@@ -50,7 +50,18 @@ class ConnectionSession {
        _onClosedCallback = onClosed,
        _lastActivity = DateTime.now() {
     _remoteDeviceIdBytes = _parseHexToBytes(info.remoteDeviceId);
+    _incomingPacketsController = StreamController<SiloSendPacket>.broadcast(
+      onListen: _flushBufferedPackets,
+    );
     _init();
+  }
+
+  void _flushBufferedPackets() {
+    while (_bufferedIncomingPackets.isNotEmpty &&
+        _incomingPacketsController.hasListener &&
+        !_incomingPacketsController.isClosed) {
+      _incomingPacketsController.add(_bufferedIncomingPackets.removeAt(0));
+    }
   }
 
   ConnectionSessionInfo get info => _info;
@@ -122,7 +133,11 @@ class ConnectionSession {
       default:
         // Application / transport data packet
         if (!_incomingPacketsController.isClosed) {
-          _incomingPacketsController.add(packet);
+          if (_incomingPacketsController.hasListener) {
+            _incomingPacketsController.add(packet);
+          } else {
+            _bufferedIncomingPackets.add(packet);
+          }
         }
         break;
     }

@@ -70,7 +70,8 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "startScan" -> {
-                startScan(result)
+                val batterySaver = call.argument<Boolean>("batterySaver") ?: false
+                startScan(batterySaver, result)
             }
             "stopScan" -> {
                 stopScan()
@@ -78,8 +79,9 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
             }
             "startAdvertising" -> {
                 val beaconBytes = call.argument<ByteArray>("beaconBytes")
+                val batterySaver = call.argument<Boolean>("batterySaver") ?: false
                 if (beaconBytes != null) {
-                    startAdvertising(beaconBytes, result)
+                    startAdvertising(beaconBytes, batterySaver, result)
                 } else {
                     result.error("INVALID_ARGUMENT", "beaconBytes parameter required", null)
                 }
@@ -100,7 +102,7 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         eventSink = null
     }
 
-    private fun startScan(result: MethodChannel.Result) {
+    private fun startScan(batterySaver: Boolean, result: MethodChannel.Result) {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             result.error("BLUETOOTH_DISABLED", "Bluetooth adapter is not enabled", null)
@@ -118,15 +120,21 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
             .setServiceData(serviceUuid, null)
             .build()
 
+        val scanMode = if (batterySaver) {
+            ScanSettings.SCAN_MODE_LOW_POWER
+        } else {
+            ScanSettings.SCAN_MODE_LOW_LATENCY
+        }
+
         val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setScanMode(scanMode)
             .build()
 
         try {
             scanner?.startScan(listOf(filter), settings, scanCallback)
             isScanning = true
             result.success(null)
-            Log.i(TAG, "BLE scan started successfully")
+            Log.i(TAG, "BLE scan started successfully (lowPower: $batterySaver)")
         } catch (e: SecurityException) {
             result.error("PERMISSION_DENIED", "Missing Bluetooth scan permission: ${e.message}", null)
         } catch (e: Exception) {
@@ -143,7 +151,7 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         Log.i(TAG, "BLE scan stopped")
     }
 
-    private fun startAdvertising(beaconBytes: ByteArray, result: MethodChannel.Result) {
+    private fun startAdvertising(beaconBytes: ByteArray, batterySaver: Boolean, result: MethodChannel.Result) {
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             result.error("BLUETOOTH_DISABLED", "Bluetooth adapter is not enabled", null)
@@ -156,25 +164,62 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
             return
         }
 
+        val advertiseMode = if (batterySaver) {
+            AdvertiseSettings.ADVERTISE_MODE_LOW_POWER
+        } else {
+            AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY
+        }
+        val txPower = if (batterySaver) {
+            AdvertiseSettings.ADVERTISE_TX_POWER_LOW
+        } else {
+            AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM
+        }
+
         val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+            .setAdvertiseMode(advertiseMode)
+            .setTxPowerLevel(txPower)
             .setConnectable(false)
             .setTimeout(0)
             .build()
 
         val serviceUuid = ParcelUuid(UUID.fromString(SILOSEND_SERVICE_UUID))
-        val data = AdvertiseData.Builder()
-            .setIncludeDeviceName(false)
-            .setIncludeTxPowerLevel(false)
-            .addServiceData(serviceUuid, beaconBytes)
-            .build()
+
+        val advertiseData: AdvertiseData
+        val scanResponseData: AdvertiseData?
+
+        if (beaconBytes.size <= 24) {
+            advertiseData = AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .setIncludeTxPowerLevel(false)
+                .addServiceData(serviceUuid, beaconBytes)
+                .build()
+            scanResponseData = null
+        } else {
+            val part1 = beaconBytes.copyOfRange(0, 20)
+            val part2 = beaconBytes.copyOfRange(20, beaconBytes.size)
+
+            advertiseData = AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .setIncludeTxPowerLevel(false)
+                .addServiceData(serviceUuid, part1)
+                .build()
+
+            scanResponseData = AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .setIncludeTxPowerLevel(false)
+                .addServiceData(serviceUuid, part2)
+                .build()
+        }
 
         try {
-            advertiser?.startAdvertising(settings, data, advertiseCallback)
+            if (scanResponseData != null) {
+                advertiser?.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback)
+            } else {
+                advertiser?.startAdvertising(settings, advertiseData, advertiseCallback)
+            }
             isAdvertising = true
             result.success(null)
-            Log.i(TAG, "BLE advertising started successfully")
+            Log.i(TAG, "BLE advertising started successfully (bytes: ${beaconBytes.size})")
         } catch (e: SecurityException) {
             result.error("PERMISSION_DENIED", "Missing Bluetooth advertise permission: ${e.message}", null)
         } catch (e: Exception) {
@@ -192,21 +237,43 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
     }
 
     private val scanCallback = object : ScanCallback() {
+        private val pendingBeacons = mutableMapOf<String, ByteArray>()
+
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result ?: return
             val record = result.scanRecord ?: return
+            val address = result.device?.address ?: return
 
             val serviceUuid = ParcelUuid(UUID.fromString(SILOSEND_SERVICE_UUID))
             val serviceData = record.getServiceData(serviceUuid) ?: return
 
-            val eventMap = mapOf(
-                "beaconBytes" to serviceData,
-                "rssi" to result.rssi,
-                "address" to (result.device?.address ?: "")
-            )
+            var completeBeacon: ByteArray? = null
+            if (serviceData.size >= 27) {
+                // Already complete beacon
+                completeBeacon = serviceData
+            } else {
+                // Reassemble primary + scan response fragments
+                val existing = pendingBeacons[address]
+                if (existing == null) {
+                    pendingBeacons[address] = serviceData
+                } else {
+                    val combined = existing + serviceData
+                    pendingBeacons.remove(address)
+                    if (combined.size >= 27) {
+                        completeBeacon = combined
+                    }
+                }
+            }
 
-            mainHandler.post {
-                eventSink?.success(eventMap)
+            if (completeBeacon != null) {
+                val eventMap = mapOf(
+                    "beaconBytes" to completeBeacon,
+                    "rssi" to result.rssi,
+                    "address" to address
+                )
+                mainHandler.post {
+                    eventSink?.success(eventMap)
+                }
             }
         }
 

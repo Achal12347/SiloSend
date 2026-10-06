@@ -1,6 +1,9 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/services.dart';
+
 import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
+import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
 import 'package:silosend_datasharing_app/platform/platform_service.dart';
 
 /// Real platform capability provider.
@@ -10,10 +13,25 @@ import 'package:silosend_datasharing_app/platform/platform_service.dart';
 /// - Unprobed radios and sensors are explicitly reported as [CapabilityStatus.unknown]
 ///   until real native platform channels or plugins are attached.
 class SystemPlatformService implements PlatformService {
+  static const MethodChannel _channel = MethodChannel('com.silosend/platform');
+
   final String? platformNameOverride;
   final Future<DeviceCapabilities> Function()? customProbe;
+  final Future<SystemCapabilities> Function()? customCapabilitiesProbe;
 
-  SystemPlatformService({this.platformNameOverride, this.customProbe});
+  SystemPlatformService({
+    this.platformNameOverride,
+    this.customProbe,
+    this.customCapabilitiesProbe,
+  });
+
+  bool get _isActualAndroid {
+    try {
+      return Platform.isAndroid;
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   String get platformName {
@@ -35,8 +53,8 @@ class SystemPlatformService implements PlatformService {
       return probe();
     }
 
-    // Truthful baseline: Without native platform channels (BLE/Wi-Fi Direct plugins)
-    // attached, hardware support cannot be confirmed. We explicitly declare them unknown
+    // Truthful baseline: Without native platform channels attached,
+    // hardware support cannot be confirmed. We explicitly declare them unknown
     // rather than faking support.
     return const DeviceCapabilities(
       ble: CapabilityStatus.unknown,
@@ -45,6 +63,33 @@ class SystemPlatformService implements PlatformService {
       nfc: CapabilityStatus.unknown,
       camera: CapabilityStatus.unknown,
     );
+  }
+
+  @override
+  Future<SystemCapabilities> checkCapabilities() async {
+    final probe = customCapabilitiesProbe;
+    if (probe != null) {
+      return probe();
+    }
+
+    if (!_isActualAndroid) {
+      return SystemCapabilities.baseline(platformName: platformName);
+    }
+
+    try {
+      final res = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('checkCapabilities')
+          .timeout(const Duration(seconds: 2));
+      if (res != null) {
+        return SystemCapabilities.fromMap(res, platform: platformName);
+      }
+    } on MissingPluginException {
+      // Unintegrated or test harness baseline
+    } on PlatformException {
+      // Channel failure
+    } catch (_) {}
+
+    return SystemCapabilities.baseline(platformName: platformName);
   }
 
   @override
@@ -60,9 +105,125 @@ class SystemPlatformService implements PlatformService {
   }
 
   @override
+  Future<PermissionStatus> requestNearbyPermissions() async {
+    if (!_isActualAndroid) {
+      return PermissionStatus.denied;
+    }
+
+    try {
+      final statusStr = await _channel
+          .invokeMethod<String>('requestNearbyPermissions')
+          .timeout(const Duration(seconds: 2));
+      switch (statusStr) {
+        case 'granted':
+          return PermissionStatus.granted;
+        case 'permanently_denied':
+          return PermissionStatus.permanentlyDenied;
+        case 'denied':
+          return PermissionStatus.denied;
+        case 'not_required':
+          return PermissionStatus.notRequired;
+        default:
+          return PermissionStatus.unknown;
+      }
+    } on MissingPluginException {
+      return PermissionStatus.denied;
+    } on PlatformException {
+      return PermissionStatus.denied;
+    } catch (_) {
+      return PermissionStatus.denied;
+    }
+  }
+
+  @override
+  Future<bool> requestEnableBluetooth() async {
+    if (!_isActualAndroid) {
+      return false;
+    }
+
+    try {
+      return await _channel
+              .invokeMethod<bool>('enableBluetooth')
+              .timeout(const Duration(seconds: 2)) ??
+          false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> openAppSettings() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel
+          .invokeMethod<void>('openAppSettings')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> openLocationSettings() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel
+          .invokeMethod<void>('openLocationSettings')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> openWifiSettings() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel
+          .invokeMethod<void>('openWifiSettings')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  @override
+  Future<bool> openFile(String filePath, {String? mimeType}) async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel
+              .invokeMethod<bool>('openFile', {
+                'path': filePath,
+                'mimeType': mimeType ?? '*/*',
+              })
+              .timeout(const Duration(seconds: 2)) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> acquireMulticastLock() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel
+          .invokeMethod<void>('acquireMulticastLock')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> releaseMulticastLock() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel
+          .invokeMethod<void>('releaseMulticastLock')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  @override
   Future<bool> requestPermissions() async {
-    // True permission requests will be handled when native permission channels are wired.
-    // We truthfully return false indicating runtime permissions have not been requested/granted.
-    return false;
+    final status = await requestNearbyPermissions();
+    return status == PermissionStatus.granted;
   }
 }

@@ -7,6 +7,7 @@ import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
 
 /// Pluggable interface for invoking native BLE GATT transport operations.
 abstract class BleTransportAdapter {
+  Future<void> connect(String address, {int mtu = 512});
   Future<void> sendChunk(String connectionId, Uint8List chunk);
   Future<void> disconnect(String connectionId);
 }
@@ -16,6 +17,11 @@ class PlatformBleTransportAdapter implements BleTransportAdapter {
   static const MethodChannel _channel = MethodChannel(
     'com.silosend/ble_connection',
   );
+
+  @override
+  Future<void> connect(String address, {int mtu = 512}) async {
+    await _channel.invokeMethod('connect', {'address': address, 'mtu': mtu});
+  }
 
   @override
   Future<void> sendChunk(String connectionId, Uint8List chunk) async {
@@ -61,6 +67,35 @@ class BleConnection implements TransportConnection {
     BleTransportAdapter? adapter,
   }) : _currentMtu = initialMtu,
        _adapter = adapter ?? PlatformBleTransportAdapter();
+
+  /// Connects to a remote BLE GATT server and returns an active [BleConnection].
+  static Future<BleConnection> connect(
+    String remoteAddress, {
+    int requestedMtu = 512,
+    BleTransportAdapter? adapter,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final effectiveAdapter = adapter ?? PlatformBleTransportAdapter();
+    final connectionId = 'ble_$remoteAddress';
+
+    await effectiveAdapter
+        .connect(remoteAddress, mtu: requestedMtu)
+        .timeout(
+          timeout,
+          onTimeout: () {
+            throw TimeoutException(
+              'Timed out connecting to BLE peer at $remoteAddress',
+            );
+          },
+        );
+
+    return BleConnection(
+      connectionId: connectionId,
+      remoteAddress: remoteAddress,
+      initialMtu: requestedMtu,
+      adapter: effectiveAdapter,
+    );
+  }
 
   @override
   TransportType get type => TransportType.ble;

@@ -52,6 +52,7 @@ class SecureSessionManager {
   final Map<String, PendingNfcPairing> _pendingNfcPairings = {};
   final Map<String, StreamSubscription<SiloSendPacket>> _rekeySubscriptions =
       {};
+  final Map<String, Future<SecureSessionImpl>> _inFlightOutboundSecuring = {};
   final StreamController<SecureSessionImpl> _sessionController =
       StreamController<SecureSessionImpl>.broadcast();
 
@@ -122,6 +123,47 @@ class SecureSessionManager {
   /// Initiates a 3-way authenticated Diffie-Hellman exchange over an outbound [connectionSession].
   /// Elevates session state from `connected` to `secured`.
   Future<SecureSessionImpl> secureOutboundConnection(
+    ConnectionSession connectionSession, {
+    Uint8List? nfcCommitment,
+    Uint8List? pairingSecret,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final existing = _sessions[connectionSession.sessionId];
+    if (existing != null && existing.isEstablished) {
+      return existing;
+    }
+
+    final inFlight = _inFlightOutboundSecuring[connectionSession.sessionId];
+    if (inFlight != null) {
+      return await inFlight;
+    }
+
+    // Preserve caller credentials, fallback to pending NFC pairing if unsupplied
+    Uint8List? effectiveNfcCommitment = nfcCommitment;
+    Uint8List? effectivePairingSecret = pairingSecret;
+    if (effectiveNfcCommitment == null && effectivePairingSecret == null) {
+      final pendingNfc = _consumePendingNfcPairing(
+        connectionSession.remoteDeviceId,
+      );
+      effectiveNfcCommitment = pendingNfc?.nfcCommitment;
+      effectivePairingSecret = pendingNfc?.pairingSecret;
+    }
+
+    final future = _doSecureOutboundConnection(
+      connectionSession,
+      nfcCommitment: effectiveNfcCommitment,
+      pairingSecret: effectivePairingSecret,
+      timeout: timeout,
+    );
+    _inFlightOutboundSecuring[connectionSession.sessionId] = future;
+    try {
+      return await future;
+    } finally {
+      _inFlightOutboundSecuring.remove(connectionSession.sessionId);
+    }
+  }
+
+  Future<SecureSessionImpl> _doSecureOutboundConnection(
     ConnectionSession connectionSession, {
     Uint8List? nfcCommitment,
     Uint8List? pairingSecret,
@@ -457,7 +499,11 @@ class SecureSessionManager {
 
     // 10. Await AuthConfirmPayload (49 bytes) from Initiator
     final confirmPacket = await connectionSession.incomingPackets
-        .where((p) => p.packetType == PacketType.authExchange)
+        .where(
+          (p) =>
+              p.packetType == PacketType.authExchange &&
+              p.payload.length == AuthConfirmPayload.payloadSize,
+        )
         .first
         .timeout(
           timeout,
@@ -588,25 +634,27 @@ class SecureSessionManager {
   }
 
   Future<void> _handleSessionEstablished(ConnectionSession session) async {
-    final pendingNfc = _consumePendingNfcPairing(session.remoteDeviceId);
-    final nfcCommitment = pendingNfc?.nfcCommitment;
-    final pairingSecret = pendingNfc?.pairingSecret;
-
     if (session.isInitiator) {
-      // Initiator triggers 3-way authenticated Diffie-Hellman handshake
+      // Yield to allow synchronous/immediate caller elevation (e.g. SmartTransportSelectorImpl
+      // or explicit secureOutboundConnection calls) to take precedence with custom credentials/timeouts.
+      await Future<void>.delayed(Duration.zero);
+      if (_sessions[session.sessionId]?.isEstablished == true ||
+          _inFlightOutboundSecuring.containsKey(session.sessionId)) {
+        return;
+      }
       try {
-        await secureOutboundConnection(
-          session,
-          nfcCommitment: nfcCommitment,
-          pairingSecret: pairingSecret,
-        );
+        await secureOutboundConnection(session);
       } catch (e) {
         AppLogger.warning(
           'SecureSessionManager',
-          'Failed to secure outbound session ${session.sessionId}: $e',
+          'Failed to auto-secure outbound session ${session.sessionId}: $e',
         );
       }
     } else {
+      final pendingNfc = _consumePendingNfcPairing(session.remoteDeviceId);
+      final nfcCommitment = pendingNfc?.nfcCommitment;
+      final pairingSecret = pendingNfc?.pairingSecret;
+
       // Responder awaits AuthInitPayload from Initiator
       try {
         final packet = await session.incomingPackets

@@ -62,6 +62,11 @@ void main() {
       expect(peer.displayName, equals('Remote-LAN-Device'));
       expect(peer.transportType, equals(TransportType.lan));
       expect(peer.endpointAddress, equals('192.168.1.105:53531'));
+      expect(peer.lanEndpoint, equals('192.168.1.105:53531'));
+      expect(
+        peer.transportEndpoints[TransportType.lan],
+        equals('192.168.1.105:53531'),
+      );
       expect(peer.isIdentityVerified, isFalse);
 
       await sub.cancel();

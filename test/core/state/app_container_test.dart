@@ -8,6 +8,7 @@ import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
 import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
 import 'package:silosend_datasharing_app/core/state/app_container.dart';
 import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
+import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
 import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
 
 void main() {
@@ -118,5 +119,67 @@ void main() {
       await sub.cancel();
       container.dispose();
     });
+
+    test(
+      'initializes CapabilityCoordinator and reconciles capabilities on resume',
+      () async {
+        final mockPlatform = _MockAppContainerPlatform();
+        final lifecycleManager = AppLifecycleManager();
+        final container = AppContainer(
+          identityStorage: storage,
+          identityManager: DeviceIdentityManager(storage),
+          platformService: mockPlatform,
+          lifecycleManager: lifecycleManager,
+        );
+
+        await container.initialize();
+
+        expect(container.capabilityCoordinator, isNotNull);
+        expect(container.capabilityCoordinator.state.canUseLan, isTrue);
+        expect(container.capabilityCoordinator.state.canUseBle, isFalse);
+
+        // Change platform capabilities (e.g., user granted permissions in Settings and enabled Bluetooth)
+        mockPlatform.caps = mockPlatform.caps.copyWith(
+          bluetoothState: RadioState.enabled,
+          nearbyPermission: PermissionStatus.granted,
+        );
+
+        // Transition paused -> resumed
+        lifecycleManager.transitionTo(AppLifecycleState.paused);
+        lifecycleManager.transitionTo(AppLifecycleState.resumed);
+        await pumpEventQueue();
+
+        expect(container.capabilityCoordinator.state.canUseBle, isTrue);
+        expect(container.systemCapabilities.canUseBle, isTrue);
+
+        container.dispose();
+      },
+    );
   });
+}
+
+class _MockAppContainerPlatform extends SystemPlatformService {
+  SystemCapabilities caps = const SystemCapabilities(
+    wifiEnabled: true,
+    lanState: NetworkState.lanAvailable,
+    bluetoothState: RadioState.disabled,
+    nearbyPermission: PermissionStatus.denied,
+    platformName: 'android',
+  );
+
+  @override
+  String get platformName => 'android';
+
+  @override
+  Future<DeviceCapabilities> getCapabilities() async =>
+      const DeviceCapabilities.fromBooleans(
+        supportsBle: true,
+        supportsBleAdvertising: true,
+        supportsWifiDirect: false,
+        supportsNfc: false,
+        hasCamera: false,
+      );
+
+  @override
+  Future<SystemCapabilities> checkCapabilities() async => caps;
 }

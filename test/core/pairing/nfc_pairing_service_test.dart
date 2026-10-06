@@ -6,7 +6,7 @@ import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dar
 import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
 import 'package:silosend_datasharing_app/platform/platform_service.dart';
 
-class _FakePlatformService implements PlatformService {
+class _FakePlatformService extends PlatformService {
   final DeviceCapabilities capabilities;
 
   _FakePlatformService({required this.capabilities});

@@ -82,14 +82,14 @@ void main() {
         // the connection automatically elevates from SessionState.connected to SessionState.secured!
         await tester.runAsync(() async {
           final sessionBFuture = containerB.secureSessionsStream.first;
+          final sessionAFuture = containerA.secureSessionsStream.first;
           await containerA.connectionManager.connectToLanPeer(
             remoteAddress: '127.0.0.1',
             remotePort: serverB.boundPort,
           );
 
           // Await secured session on both sides
-          await sessionBFuture;
-          await containerA.secureSessionsStream.first;
+          await Future.wait([sessionBFuture, sessionAFuture]);
         });
 
         // Pump to render updated secured connection card
@@ -140,12 +140,12 @@ void main() {
 
       await tester.runAsync(() async {
         final sessionBFuture = containerB.secureSessionsStream.first;
+        final sessionAFuture = containerA.secureSessionsStream.first;
         await containerA.connectionManager.connectToLanPeer(
           remoteAddress: '127.0.0.1',
           remotePort: serverB.boundPort,
         );
-        await sessionBFuture;
-        await containerA.secureSessionsStream.first;
+        await Future.wait([sessionBFuture, sessionAFuture]);
       });
 
       await tester.pumpAndSettle();

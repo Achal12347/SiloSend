@@ -77,6 +77,12 @@ class TransferStorageException extends TransferException {
     : super(transferId, 'Storage error - $message');
 }
 
+/// Thrown when the authenticated session closes before a transfer completes.
+class TransferConnectionException extends TransferException {
+  TransferConnectionException(String transferId, String message)
+    : super(transferId, 'Connection lost - $message');
+}
+
 /// Current lifecycle status of an individual transfer.
 enum TransferStatus {
   idle,

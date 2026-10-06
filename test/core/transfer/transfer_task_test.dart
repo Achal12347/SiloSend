@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -448,5 +449,80 @@ void main() {
         equals(TransferCancelReason.checksumMismatch),
       );
     });
+
+    test(
+      'OutboundTransferTask fails truthfully when secure session closes',
+      () async {
+        final session = TestSecureSession();
+        final source = MemoryPayloadSource(Uint8List(64 * 1024));
+        final metadata = TransferMetadata(
+          transferId: transferIdStr,
+          fileName: 'interrupted.bin',
+          totalBytes: source.length,
+          chunkSize: 64 * 1024,
+          sha256Checksum: await source.computeSha256(),
+        );
+        final task = OutboundTransferTask(
+          transferId: transferIdStr,
+          localDeviceId: localDeviceStr,
+          remoteDeviceId: remoteDeviceStr,
+          secureSession: session,
+          source: source,
+          metadata: metadata,
+        );
+
+        await task.start();
+        task.handleSessionClosed('Wi-Fi connection lost');
+
+        expect(task.status, TransferStatus.failed);
+        expect(task.done, throwsA(isA<TransferConnectionException>()));
+      },
+    );
+
+    test(
+      'InboundTransferTask removes staging data when secure session closes',
+      () async {
+        final session = TestSecureSession();
+        final tempDir = await Directory.systemTemp.createTemp(
+          'silosend_interrupt_',
+        );
+        final targetPath = '${tempDir.path}/interrupted.bin';
+        final destination = FilePayloadDestination(
+          targetFilePath: targetPath,
+          totalBytes: 128 * 1024,
+        );
+        final task = InboundTransferTask(
+          transferId: transferIdStr,
+          localDeviceId: localDeviceStr,
+          remoteDeviceId: remoteDeviceStr,
+          secureSession: session,
+          destination: destination,
+          metadata: TransferMetadata(
+            transferId: transferIdStr,
+            fileName: 'interrupted.bin',
+            totalBytes: 128 * 1024,
+            chunkSize: 64 * 1024,
+            sha256Checksum: '0' * 64,
+          ),
+        );
+
+        await task.handleChunk(
+          TransferChunkPayload.create(
+            transferId: transferIdBytes,
+            chunkIndex: 0,
+            chunkOffset: 0,
+            chunkData: Uint8List(64 * 1024),
+          ),
+        );
+        await task.handleSessionClosed('LAN connection lost');
+
+        expect(task.status, TransferStatus.failed);
+        expect(task.done, throwsA(isA<TransferConnectionException>()));
+        expect(File(destination.stagingPath).existsSync(), isFalse);
+        expect(File(targetPath).existsSync(), isFalse);
+
+        await tempDir.delete(recursive: true);
+      },
+    );
   });
 }
