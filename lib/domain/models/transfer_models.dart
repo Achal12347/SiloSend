@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 
 /// Metadata describing a transferable payload (file, contact, message, or data stream).
 class TransferMetadata {

@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/packet_framing.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/framed_transport_connection.dart';
+import 'package:vayu/core/connection/packet_framing.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 class _MockTransportConnection implements TransportConnection {
   @override
@@ -63,12 +63,12 @@ void main() {
     final devB = Uint8List.fromList(List.generate(16, (i) => i + 10));
 
     test('correctly frames a single complete packet', () async {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.chatMessage,
         packetId: 101,
         sourceDeviceId: devA,
         destinationDeviceId: devB,
-        payload: Uint8List.fromList(utf8.encode('Hello SiloSend!')),
+        payload: Uint8List.fromList(utf8.encode('Hello Vayu!')),
       );
 
       final controller = StreamController<Uint8List>();
@@ -76,7 +76,7 @@ void main() {
         PacketStreamTransformer(),
       );
 
-      final results = <SiloSendPacket>[];
+      final results = <VayuPacket>[];
       final sub = framedStream.listen(results.add);
 
       controller.add(packet.toBytes());
@@ -84,7 +84,7 @@ void main() {
 
       expect(results.length, equals(1));
       expect(results.first.packetId, equals(101));
-      expect(utf8.decode(results.first.payload), equals('Hello SiloSend!'));
+      expect(utf8.decode(results.first.payload), equals('Hello Vayu!'));
 
       await sub.cancel();
       await controller.close();
@@ -93,7 +93,7 @@ void main() {
     test(
       'reassembles a packet fragmented across multiple byte chunks',
       () async {
-        final packet = SiloSendPacket(
+        final packet = VayuPacket(
           packetType: PacketType.handshakeInit,
           packetId: 202,
           sourceDeviceId: devA,
@@ -109,7 +109,7 @@ void main() {
           PacketStreamTransformer(),
         );
 
-        final results = <SiloSendPacket>[];
+        final results = <VayuPacket>[];
         final sub = framedStream.listen(results.add);
 
         // Split into 3 arbitrary chunks: 10 bytes, 25 bytes, remaining
@@ -139,14 +139,14 @@ void main() {
     test(
       'extracts multiple packets delivered in a single byte chunk',
       () async {
-        final p1 = SiloSendPacket(
+        final p1 = VayuPacket(
           packetType: PacketType.ping,
           packetId: 1,
           sourceDeviceId: devA,
           destinationDeviceId: devB,
           payload: Uint8List(0),
         );
-        final p2 = SiloSendPacket(
+        final p2 = VayuPacket(
           packetType: PacketType.pong,
           packetId: 2,
           sourceDeviceId: devB,
@@ -161,7 +161,7 @@ void main() {
           PacketStreamTransformer(),
         );
 
-        final results = <SiloSendPacket>[];
+        final results = <VayuPacket>[];
         final sub = framedStream.listen(results.add);
 
         controller.add(combined);
@@ -177,7 +177,7 @@ void main() {
     );
 
     test('discards leading garbage bytes preceding magic bytes', () async {
-      final validPacket = SiloSendPacket(
+      final validPacket = VayuPacket(
         packetType: PacketType.ping,
         packetId: 777,
         sourceDeviceId: devA,
@@ -202,7 +202,7 @@ void main() {
         PacketStreamTransformer(),
       );
 
-      final results = <SiloSendPacket>[];
+      final results = <VayuPacket>[];
       final sub = framedStream.listen(results.add);
 
       controller.add(combined);
@@ -230,10 +230,10 @@ void main() {
       expect(framed.remoteAddress, equals('192.168.1.100'));
       expect(framed.remotePort, equals(53531));
 
-      final receivedPackets = <SiloSendPacket>[];
+      final receivedPackets = <VayuPacket>[];
       final sub = framed.incomingPackets.listen(receivedPackets.add);
 
-      final packetIn = SiloSendPacket(
+      final packetIn = VayuPacket(
         packetType: PacketType.ping,
         packetId: 999,
         sourceDeviceId: devA,
@@ -248,7 +248,7 @@ void main() {
       expect(receivedPackets.first.packetId, equals(999));
 
       // Test sendPacket
-      final packetOut = SiloSendPacket(
+      final packetOut = VayuPacket(
         packetType: PacketType.pong,
         packetId: 1000,
         sourceDeviceId: devB,

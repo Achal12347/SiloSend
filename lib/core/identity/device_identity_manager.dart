@@ -1,10 +1,10 @@
 import 'dart:async';
 
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
 
-/// Manages loading, minting, updating, and broadcasting the local SiloSend device identity.
+/// Manages loading, minting, updating, and broadcasting the local Vayu device identity.
 class DeviceIdentityManager {
   final IdentityStorage _storage;
   final _identityController = StreamController<LocalDeviceIdentity>.broadcast();
@@ -57,7 +57,7 @@ class DeviceIdentityManager {
 
   /// Loads or mints identity with optional default display name and platform.
   Future<LocalDeviceIdentity> getOrCreateIdentity({
-    String defaultDisplayName = 'SiloSend-Device',
+    String defaultDisplayName = 'Vayu-Device',
     String platform = 'generic',
   }) {
     return getOrInitializeIdentity(

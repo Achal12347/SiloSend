@@ -1,6 +1,6 @@
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 
-/// Represents a verified nearby SiloSend peer device.
+/// Represents a verified nearby Vayu peer device.
 ///
 /// Per AI/AGENTS.md, instances must be created from actual discovery results,
 /// never fake or simulated data.

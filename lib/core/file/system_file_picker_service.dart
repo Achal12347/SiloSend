@@ -2,19 +2,19 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/transfer/content_uri_payload_source.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_source.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/transfer/content_uri_payload_source.dart';
+import 'package:vayu/domain/transfer/payload_source.dart';
 
 /// Concrete implementation of [FilePickerService] interacting with the native Android
-/// Storage Access Framework (SAF) via platform channel `com.silosend/file_picker`.
+/// Storage Access Framework (SAF) via platform channel `com.achyrio.vayu/file_picker`.
 ///
 /// Falls back to direct file selection on desktop platforms or during automated tests.
 class SystemFilePickerService implements FilePickerService {
   static const MethodChannel _channel = MethodChannel(
-    'com.silosend/file_picker',
+    'com.achyrio.vayu/file_picker',
   );
 
   final MethodChannel channel;

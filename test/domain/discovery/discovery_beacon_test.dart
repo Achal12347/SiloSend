@@ -2,8 +2,8 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/discovery/discovery_beacon.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/discovery/discovery_beacon.dart';
 
 void main() {
   group('DiscoveryBeacon Tests', () {
@@ -189,7 +189,7 @@ void main() {
     });
 
     test(
-      'defaults empty or whitespace-only display name to SiloSend-Device',
+      'defaults empty or whitespace-only display name to Vayu-Device',
       () {
         final beacon = DiscoveryBeacon(
           deviceId: sampleDeviceId,
@@ -198,7 +198,7 @@ void main() {
           displayName: '   ',
         );
 
-        expect(beacon.displayName, equals('SiloSend-Device'));
+        expect(beacon.displayName, equals('Vayu-Device'));
       },
     );
 

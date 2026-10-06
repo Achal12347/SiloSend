@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 
 /// Payload exchanged during transport handshake to negotiate session parameters
 /// and verify basic presence and protocol compatibility between peers.
@@ -64,7 +64,7 @@ class HandshakePayload {
   /// Sanitizes and clamps display names to 32 UTF-8 bytes max, stripping control chars.
   static String sanitizeDisplayName(String name) {
     final stripped = name.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
-    final effective = stripped.isEmpty ? 'SiloSend-Device' : stripped;
+    final effective = stripped.isEmpty ? 'Vayu-Device' : stripped;
     final encoded = utf8.encode(effective);
     if (encoded.length <= maxDisplayNameBytes) {
       return effective;
@@ -101,7 +101,7 @@ class HandshakePayload {
       );
     }
 
-    final displayName = json['displayName'] as String? ?? 'SiloSend-Device';
+    final displayName = json['displayName'] as String? ?? 'Vayu-Device';
     final platform = json['platform'] as String? ?? 'unknown';
 
     final transportsList = json['transports'] as List<dynamic>? ?? [];

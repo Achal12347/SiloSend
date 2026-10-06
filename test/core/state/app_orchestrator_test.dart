@@ -1,23 +1,23 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/discovery/discovery_coordinator.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/settings/user_settings.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 void main() {
   group('AppOrchestrator Central State Tests (Track C: U1–U8 & Section 33)', () {

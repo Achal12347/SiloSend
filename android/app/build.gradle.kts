@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.silosend"
+    namespace = "com.achyrio.vayu"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,7 +15,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.silosend"
+        applicationId = "com.achyrio.vayu"
         // Target Android 8.0 (API 26) and above
         minSdk = 26
         targetSdk = flutter.targetSdkVersion

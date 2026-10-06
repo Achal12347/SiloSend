@@ -1,10 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/pairing/nfc_pairing_service.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/pairing/nfc_pairing_service.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 class _FakePlatformService extends PlatformService {
   final DeviceCapabilities capabilities;

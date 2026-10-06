@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/security/crypto_identity_keypair.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 /// Modal dialog for out-of-band (OOB) Short Authentication String (SAS) verification.
 ///

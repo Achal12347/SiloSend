@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/connection/handshake_payload.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/connection/handshake_payload.dart';
 
 void main() {
   group('HandshakePayload', () {
@@ -98,7 +98,7 @@ void main() {
         platform: 'android',
       );
 
-      expect(payload.displayName, 'SiloSend-Device');
+      expect(payload.displayName, 'Vayu-Device');
     });
 
     test('validates device ID hex format and length', () {

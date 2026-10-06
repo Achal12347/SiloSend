@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/framed_transport_connection.dart';
+import 'package:vayu/core/connection/lan_connection.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 void main() {
   group('LanConnection & LanConnectionServer Real TCP Socket Tests', () {
@@ -44,7 +44,7 @@ void main() {
         final serverFramed = FramedTransportConnection(serverRaw);
 
         // Client sends packet to server
-        final testPacket = SiloSendPacket(
+        final testPacket = VayuPacket(
           packetType: PacketType.chatMessage,
           packetId: 555,
           sourceDeviceId: devA,
@@ -64,7 +64,7 @@ void main() {
         );
 
         // Server responds back to client
-        final replyPacket = SiloSendPacket(
+        final replyPacket = VayuPacket(
           packetType: PacketType.chatDeliveryAck,
           packetId: 556,
           sourceDeviceId: devB,

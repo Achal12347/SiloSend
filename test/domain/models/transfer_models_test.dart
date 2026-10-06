@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
 
 void main() {
   group('TransferMetadata Tests', () {

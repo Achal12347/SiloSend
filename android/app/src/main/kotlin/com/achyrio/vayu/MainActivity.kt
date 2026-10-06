@@ -1,12 +1,12 @@
-package com.silosend
+package com.achyrio.vayu
 
 import android.content.Intent
-import com.silosend.battery.BatteryHandler
-import com.silosend.connection.BleConnectionHandler
-import com.silosend.discovery.BleDiscoveryHandler
-import com.silosend.file.FilePickerHandler
-import com.silosend.file.StorageHandler
-import com.silosend.platform.PlatformHandler
+import com.achyrio.vayu.battery.BatteryHandler
+import com.achyrio.vayu.connection.BleConnectionHandler
+import com.achyrio.vayu.discovery.BleDiscoveryHandler
+import com.achyrio.vayu.file.FilePickerHandler
+import com.achyrio.vayu.file.StorageHandler
+import com.achyrio.vayu.platform.PlatformHandler
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 

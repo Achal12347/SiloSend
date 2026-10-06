@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_connection.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/connection/ble_connection.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Manages a native Bluetooth Low Energy GATT Server accepting incoming peer connections.
 ///
@@ -10,10 +10,10 @@ import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
 /// instantiating [BleConnection] instances and forwarding ATT chunks.
 class BleConnectionServer {
   static const MethodChannel _methodChannel = MethodChannel(
-    'com.silosend/ble_connection',
+    'com.achyrio.vayu/ble_connection',
   );
   static const EventChannel _eventChannel = EventChannel(
-    'com.silosend/ble_connection_events',
+    'com.achyrio.vayu/ble_connection_events',
   );
 
   final Stream<dynamic>? customEventStream;

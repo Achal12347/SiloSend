@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/models/peer_device.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/models/peer_device.dart';
 
 void main() {
   group('PeerDevice Tests', () {

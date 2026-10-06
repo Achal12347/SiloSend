@@ -2,16 +2,16 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_destination.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_source.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
+import 'package:vayu/domain/transfer/payload_source.dart';
 
 void main() {
   group('Phase 7 PayloadSource & PayloadDestination Tests', () {
     late Directory tempDir;
 
     setUp(() {
-      tempDir = Directory.systemTemp.createTempSync('silosend_test_payload_');
+      tempDir = Directory.systemTemp.createTempSync('vayu_test_payload_');
     });
 
     tearDown(() {
@@ -113,7 +113,7 @@ void main() {
           targetFilePath: targetPath,
           totalBytes: totalBytes,
         );
-        final stagingFile = File('$targetPath.silosend.tmp');
+        final stagingFile = File('$targetPath.vayu.tmp');
 
         // Write out of order: chunk 1 first, then chunk 0, then chunk 2
         final chunk0 = rawData.sublist(0, 64 * 1024);
@@ -149,7 +149,7 @@ void main() {
           targetFilePath: targetPath,
           totalBytes: 100,
         );
-        final stagingFile = File('$targetPath.silosend.tmp');
+        final stagingFile = File('$targetPath.vayu.tmp');
 
         await dest.writeChunk(0, Uint8List.fromList([1, 2, 3, 4]));
         expect(stagingFile.existsSync(), isTrue);

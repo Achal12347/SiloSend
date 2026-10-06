@@ -1,9 +1,9 @@
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
+import 'package:vayu/core/constants/app_constants.dart';
 
-/// Represents the persistent local device identity for SiloSend.
+/// Represents the persistent local device identity for Vayu.
 ///
 /// Contains a 16-byte (128-bit) unique identifier generated on first launch
 /// that matches the wire packet framing requirements.
@@ -21,7 +21,7 @@ class LocalDeviceIdentity {
   /// Operating system / platform identifier.
   final String platform;
 
-  /// SiloSend protocol version supported by this identity.
+  /// Vayu protocol version supported by this identity.
   final int protocolVersion;
 
   /// Timestamp when this device identity was first created.

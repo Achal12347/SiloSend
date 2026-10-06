@@ -1,8 +1,8 @@
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_selector_contract.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
 
 /// Configurable decision policy and multi-criteria scoring algorithm for Smart Transport Selection.
 class TransportSelectionPolicy {

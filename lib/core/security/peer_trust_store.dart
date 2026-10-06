@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 /// Stored record representing a known peer's cryptographic identity and trust status.
 class PeerTrustRecord {

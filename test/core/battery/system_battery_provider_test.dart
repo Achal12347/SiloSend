@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/battery/system_battery_provider.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/battery/system_battery_provider.dart';
 
 void main() {
   group('BatterySnapshot Model Tests', () {

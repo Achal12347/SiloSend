@@ -1,4 +1,4 @@
-package com.silosend.battery
+package com.achyrio.vayu.battery
 
 import android.content.Context
 import android.content.Intent
@@ -12,7 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 class BatteryHandler(private val context: Context) : MethodChannel.MethodCallHandler {
 
     companion object {
-        private const val METHOD_CHANNEL = "com.silosend/battery"
+        private const val METHOD_CHANNEL = "com.achyrio.vayu/battery"
     }
 
     private var methodChannel: MethodChannel? = null

@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/utils/crc32.dart';
+import 'package:vayu/core/utils/crc32.dart';
 
 void main() {
   group('Crc32 Tests', () {
@@ -16,8 +16,8 @@ void main() {
     });
 
     test('computes consistent checksums for identical payloads', () {
-      final data1 = utf8.encode('SiloSend Offline Transfer');
-      final data2 = utf8.encode('SiloSend Offline Transfer');
+      final data1 = utf8.encode('Vayu Offline Transfer');
+      final data2 = utf8.encode('Vayu Offline Transfer');
       expect(Crc32.compute(data1), equals(Crc32.compute(data2)));
     });
 

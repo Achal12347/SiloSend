@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Pure Dart implementation of [TransportConnection] over an IPv4 TCP [Socket].
 class LanConnection implements TransportConnection {

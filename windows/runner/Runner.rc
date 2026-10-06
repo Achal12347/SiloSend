@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.silosend" "\0"
-            VALUE "FileDescription", "SiloSend" "\0"
+            VALUE "CompanyName", "com.achyrio.vayu" "\0"
+            VALUE "FileDescription", "Vayu" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "SiloSend" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.silosend. All rights reserved." "\0"
-            VALUE "OriginalFilename", "SiloSend.exe" "\0"
-            VALUE "ProductName", "SiloSend" "\0"
+            VALUE "InternalName", "Vayu" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.achyrio.vayu. All rights reserved." "\0"
+            VALUE "OriginalFilename", "Vayu.exe" "\0"
+            VALUE "ProductName", "Vayu" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

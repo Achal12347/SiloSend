@@ -1,17 +1,17 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/replay_protection_filter.dart';
-import 'package:silosend_datasharing_app/core/security/short_authentication_string.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/security/encrypted_envelope.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/replay_protection_filter.dart';
+import 'package:vayu/core/security/short_authentication_string.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/security/encrypted_envelope.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 /// Cryptographic keys and replay filter for a specific key epoch.
 class KeyEpochMaterial {
@@ -77,9 +77,9 @@ class SecureSessionImpl implements SecureSession {
   bool rekeyInProgress = false;
 
   late final Uint8List _sessionIdBytes;
-  final StreamController<SiloSendPacket> _decryptedPacketsController =
-      StreamController<SiloSendPacket>.broadcast();
-  StreamSubscription<SiloSendPacket>? _incomingPacketSub;
+  final StreamController<VayuPacket> _decryptedPacketsController =
+      StreamController<VayuPacket>.broadcast();
+  StreamSubscription<VayuPacket>? _incomingPacketSub;
   bool _isTerminated = false;
 
   /// Optional callback invoked when the session reaches its rekey threshold.
@@ -164,7 +164,7 @@ class SecureSessionImpl implements SecureSession {
 
   /// Stream of decrypted, integrity-verified application packets.
   @override
-  Stream<SiloSendPacket> get incomingDecryptedPackets =>
+  Stream<VayuPacket> get incomingDecryptedPackets =>
       _decryptedPacketsController.stream;
 
   void updateTrustLevel(TrustLevel newLevel) {
@@ -256,7 +256,7 @@ class SecureSessionImpl implements SecureSession {
     );
   }
 
-  Future<void> _handleIncomingRawPacket(SiloSendPacket packet) async {
+  Future<void> _handleIncomingRawPacket(VayuPacket packet) async {
     // Only decrypt application/data packets; skip raw authExchange or control frames
     if (packet.packetType == PacketType.authExchange ||
         packet.packetType == PacketType.ping ||
@@ -292,8 +292,8 @@ class SecureSessionImpl implements SecureSession {
 
       // Construct canonical 76-byte AAD from packet header + sessionId + nonce
       final aad = CryptoService.constructAad(
-        magic1: SiloSendPacket.magic1,
-        magic2: SiloSendPacket.magic2,
+        magic1: VayuPacket.magic1,
+        magic2: VayuPacket.magic2,
         protocolVersion: packet.version,
         packetTypeCode: packet.packetType.code,
         packetId: packet.packetId,
@@ -458,7 +458,7 @@ class SecureSessionImpl implements SecureSession {
 
   /// Wraps, encrypts, and sends [packet] over the active connection session.
   @override
-  Future<void> sendEncryptedPacket(SiloSendPacket packet) async {
+  Future<void> sendEncryptedPacket(VayuPacket packet) async {
     if (!isEstablished) {
       throw StateError('Cannot send encrypted packet on unestablished session');
     }
@@ -468,8 +468,8 @@ class SecureSessionImpl implements SecureSession {
     final nonce = _constructNonce(_activeEpoch.txSalt, _txSequence);
 
     final aad = CryptoService.constructAad(
-      magic1: SiloSendPacket.magic1,
-      magic2: SiloSendPacket.magic2,
+      magic1: VayuPacket.magic1,
+      magic2: VayuPacket.magic2,
       protocolVersion: packet.version,
       packetTypeCode: packet.packetType.code,
       packetId: packet.packetId,

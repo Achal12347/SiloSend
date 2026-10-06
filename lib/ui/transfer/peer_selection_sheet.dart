@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
-/// Modal bottom sheet allowing the user to select a discovered nearby SiloSend
+/// Modal bottom sheet allowing the user to select a discovered nearby Vayu
 /// peer to receive a pre-selected document or batch of documents.
 class PeerSelectionSheet extends StatefulWidget {
   final List<SelectedDocument> documents;
@@ -354,14 +354,14 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           ),
           const SizedBox(height: 14),
           Text(
-            'Looking for nearby SiloSend devices...',
+            'Looking for nearby Vayu devices...',
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            'Keep both devices close and ensure SiloSend is open on the other device.',
+            'Keep both devices close and ensure Vayu is open on the other device.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,

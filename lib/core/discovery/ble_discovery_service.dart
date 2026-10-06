@@ -2,19 +2,19 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/discovery/discovery_beacon.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/discovery/discovery_beacon.dart';
 
 /// Bluetooth Low Energy (BLE) peer discovery service.
 ///
-/// Discovers nearby SiloSend devices via BLE advertisements containing compact [DiscoveryBeacon] frames.
+/// Discovers nearby Vayu devices via BLE advertisements containing compact [DiscoveryBeacon] frames.
 /// Communicates with native platform channels on Android (and desktop platform adapters when available).
 class BleDiscoveryService implements DiscoveryService {
-  static const String channelName = 'com.silosend/ble_discovery';
-  static const String eventChannelName = 'com.silosend/ble_scan_events';
-  static const String silosendServiceUuid =
+  static const String channelName = 'com.achyrio.vayu/ble_discovery';
+  static const String eventChannelName = 'com.achyrio.vayu/ble_scan_events';
+  static const String vayuServiceUuid =
       '00005353-0000-1000-8000-00805f9b34fb';
 
   final String localDeviceId;
@@ -72,7 +72,7 @@ class BleDiscoveryService implements DiscoveryService {
     try {
       _startListeningToScanEvents();
       await _methodChannel.invokeMethod('startScan', {
-        'serviceUuid': silosendServiceUuid,
+        'serviceUuid': vayuServiceUuid,
         'batterySaver': _batterySaver,
       });
       _isScanning = true;
@@ -128,7 +128,7 @@ class BleDiscoveryService implements DiscoveryService {
       final beaconBytes = beacon.toBytes();
 
       await _methodChannel.invokeMethod('startAdvertising', {
-        'serviceUuid': silosendServiceUuid,
+        'serviceUuid': vayuServiceUuid,
         'beaconBytes': beaconBytes,
         'batterySaver': _batterySaver,
       });

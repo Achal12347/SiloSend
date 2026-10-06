@@ -1,4 +1,4 @@
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 
 /// Current operational status of a discovery service.
 enum DiscoveryStatus {
@@ -157,7 +157,7 @@ class DeviceAdvertisement {
   });
 }
 
-/// Abstract contract for discovering nearby SiloSend peers and broadcasting local presence.
+/// Abstract contract for discovering nearby Vayu peers and broadcasting local presence.
 abstract class DiscoveryService {
   /// The physical transport this discovery service operates on.
   TransportType get transportType;
@@ -165,7 +165,7 @@ abstract class DiscoveryService {
   /// Stream of peers discovered in proximity.
   Stream<DiscoveredPeer> get discoveredPeers;
 
-  /// Starts scanning for nearby SiloSend devices.
+  /// Starts scanning for nearby Vayu devices.
   Future<void> startDiscovery();
 
   /// Stops the active discovery scan.

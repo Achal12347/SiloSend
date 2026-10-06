@@ -1,4 +1,4 @@
-package com.silosend.file
+package com.achyrio.vayu.file
 
 import android.content.Context
 import android.media.MediaScannerConnection
@@ -14,7 +14,7 @@ import java.io.File
  */
 class StorageHandler(private val context: Context) : MethodChannel.MethodCallHandler {
     companion object {
-        const val CHANNEL = "com.silosend/storage"
+        const val CHANNEL = "com.achyrio.vayu/storage"
     }
 
     private var channel: MethodChannel? = null

@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Policy governing session retention after transfer completion and automatic
 /// idle disconnection.

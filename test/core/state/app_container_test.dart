@@ -3,13 +3,13 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:silosend_datasharing_app/core/identity/device_identity_manager.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
+import 'package:vayu/core/identity/device_identity_manager.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/platform/system_platform_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +21,7 @@ void main() {
 
     setUp(() async {
       tempDir = await Directory.systemTemp.createTemp(
-        'silosend_container_test_',
+        'vayu_container_test_',
       );
       storageFile = File('${tempDir.path}/identity.json');
       storage = FileIdentityStorage(storageFile);
@@ -44,7 +44,7 @@ void main() {
 
         expect(container.isInitialized, isTrue);
         expect(container.identity, isNotNull);
-        expect(container.identity!.displayName, startsWith('SiloSend-'));
+        expect(container.identity!.displayName, startsWith('Vayu-'));
         expect(container.identity!.idHex.length, equals(32));
         expect(container.capabilities.ble, equals(CapabilityStatus.unknown));
         expect(container.lifecycleState, equals(AppLifecycleState.resumed));

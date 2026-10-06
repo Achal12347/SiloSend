@@ -1,4 +1,4 @@
-package com.silosend.platform
+package com.achyrio.vayu.platform
 
 import android.Manifest
 import android.app.Activity
@@ -35,7 +35,7 @@ import java.net.NetworkInterface
  */
 class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
     companion object {
-        const val CHANNEL = "com.silosend/platform"
+        const val CHANNEL = "com.achyrio.vayu/platform"
         const val REQUEST_CODE_NEARBY_PERMISSIONS = 1001
         const val REQUEST_CODE_ENABLE_BLUETOOTH = 1002
         private const val PREFS_NAME = "silosend_platform_prefs"

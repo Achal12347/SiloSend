@@ -2,10 +2,10 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/widgets.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 /// User-facing action recommendation for capabilities.
 enum CapabilityActionType {
@@ -16,7 +16,7 @@ enum CapabilityActionType {
   openWifiSettings,
 }
 
-/// High-level operational readiness of device connectivity for SiloSend.
+/// High-level operational readiness of device connectivity for Vayu.
 enum CapabilityOperationalStatus {
   checking,
   readyBoth,
@@ -159,7 +159,7 @@ class EvaluatedCapabilityState {
 }
 
 /// Orchestrates real-time system capabilities, user recovery actions,
-/// and automatic lifecycle reconciliation upon returning to SiloSend.
+/// and automatic lifecycle reconciliation upon returning to Vayu.
 class CapabilityCoordinator {
   final PlatformService _platformService;
   final AppLifecycleManager lifecycleManager;

@@ -2,21 +2,21 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
-import 'package:silosend_datasharing_app/domain/security/encrypted_envelope.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/domain/security/encrypted_envelope.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 void main() {
   group('Phase 6 In-Band Rekeying & NFC Wire Commitment Tests', () {
@@ -112,7 +112,7 @@ void main() {
 
       // 1. Send packet in Epoch 0
       final dataEpoch0 = utf8.encode('Hello Epoch 0');
-      final packet0 = SiloSendPacket(
+      final packet0 = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: 1,
         sourceDeviceId: identityA.deviceId,
@@ -136,7 +136,7 @@ void main() {
 
       // 3. Send packet in Epoch 1 (A -> B)
       final dataEpoch1A = utf8.encode('Hello Epoch 1 from A');
-      final packet1A = SiloSendPacket(
+      final packet1A = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: 2,
         sourceDeviceId: identityA.deviceId,
@@ -151,7 +151,7 @@ void main() {
 
       // 4. Send packet in Epoch 1 (B -> A)
       final dataEpoch1B = utf8.encode('Hello Epoch 1 from B');
-      final packet1B = SiloSendPacket(
+      final packet1B = VayuPacket(
         packetType: PacketType.transferAck,
         packetId: 3,
         sourceDeviceId: identityB.deviceId,
@@ -234,7 +234,7 @@ void main() {
         signature: Uint8List(64)..fillRange(0, 64, 0x33),
       );
 
-      final forgedPacket = SiloSendPacket(
+      final forgedPacket = VayuPacket(
         packetType: PacketType.authExchange,
         packetId: 9999,
         sourceDeviceId: identityA.deviceId,
@@ -479,7 +479,7 @@ void main() {
           ..fillRange(0, 64, 0x99), // Corrupted signature!
       );
 
-      final forgedPacket = SiloSendPacket(
+      final forgedPacket = VayuPacket(
         packetType: PacketType.authExchange,
         packetId: 8888,
         sourceDeviceId: identityA.deviceId,
@@ -512,7 +512,7 @@ void main() {
 
       // Verify bidirectional encrypted data transmission in Epoch 1
       final dataFromA = utf8.encode('Data post-collision from A');
-      final packetA = SiloSendPacket(
+      final packetA = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: 201,
         sourceDeviceId: identityA.deviceId,

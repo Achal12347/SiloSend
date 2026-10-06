@@ -1,18 +1,18 @@
 import 'dart:async';
 
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/transfer/file_sharing_coordinator.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/discovery/discovery_coordinator.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/transfer/file_sharing_coordinator.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
 
 /// Conceptual operational lifecycle phases defined in Section 33 of
 /// SiloSend Real Device Integration Plan.
@@ -58,7 +58,7 @@ enum AppExplicitError {
   bool get hasError => this != AppExplicitError.none;
 }
 
-/// Unified, immutable snapshot of the centralized SiloSend application state.
+/// Unified, immutable snapshot of the centralized Vayu application state.
 class AppOrchestratorState {
   final AppOperationalPhase phase;
   final AppExplicitError explicitError;

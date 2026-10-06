@@ -1,5 +1,5 @@
-name: silosend_datasharing_app
-description: "A new Flutter project."
+name: vayu
+description: "Vayu by Achyrio - Resilient peer-to-peer data sharing application."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

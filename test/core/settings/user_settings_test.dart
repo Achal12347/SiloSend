@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
+import 'package:vayu/core/settings/user_settings.dart';
 
 void main() {
   group('UserSettings & SettingsStorage Tests', () {
@@ -50,7 +50,7 @@ void main() {
     });
 
     test('FileSettingsStorage persists and reads from disk', () async {
-      final tempDir = Directory.systemTemp.createTempSync('silosend_settings_test_');
+      final tempDir = Directory.systemTemp.createTempSync('vayu_settings_test_');
       final file = File('${tempDir.path}/test_settings.json');
 
       try {

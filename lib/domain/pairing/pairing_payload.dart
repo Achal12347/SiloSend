@@ -3,8 +3,8 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 
 /// Data payload exchanged out-of-band via NFC tap or QR code scan.
 ///
@@ -13,8 +13,9 @@ import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart'
 /// cryptographic identity commitments for out-of-band mutual authentication.
 class PairingPayload {
   static const int maxDisplayNameBytes = 32;
-  static const String ndefMimeType = 'application/vnd.silosend.pairing';
-  static const String uriScheme = 'silosend';
+  static const String ndefMimeType = 'application/vnd.vayu.pairing';
+  static const String uriScheme = 'vayu';
+  static const String legacyUriScheme = 'silosend';
   static const String uriHost = 'pair';
   static const String nfcCommitmentDomainTag = 'SiloSend-NFC-Commitment-v1:';
 
@@ -107,7 +108,7 @@ class PairingPayload {
   /// Sanitizes display name: strips control characters, clamps to max 32 UTF-8 bytes.
   static String sanitizeDisplayName(String name) {
     final stripped = name.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
-    final effective = stripped.isEmpty ? 'SiloSend-Device' : stripped;
+    final effective = stripped.isEmpty ? 'Vayu-Device' : stripped;
     final encoded = utf8.encode(effective);
     if (encoded.length <= maxDisplayNameBytes) {
       return effective;
@@ -245,7 +246,7 @@ class PairingPayload {
       );
     }
 
-    final displayName = json['displayName'] as String? ?? 'SiloSend-Device';
+    final displayName = json['displayName'] as String? ?? 'Vayu-Device';
     final token = json['pairingToken'] as String?;
     if (token == null || token.trim().isEmpty) {
       throw const FormatException(
@@ -317,11 +318,12 @@ class PairingPayload {
     return Uri(scheme: uriScheme, host: uriHost, queryParameters: queryParams);
   }
 
-  /// Deserializes from a `silosend://pair?...` URI.
+  /// Deserializes from a `vayu://pair?...` (or legacy `silosend://pair?...`) URI.
   factory PairingPayload.fromUri(Uri uri) {
-    if (uri.scheme.toLowerCase() != uriScheme) {
+    final scheme = uri.scheme.toLowerCase();
+    if (scheme != uriScheme && scheme != legacyUriScheme) {
       throw FormatException(
-        'Invalid URI scheme: ${uri.scheme}, expected $uriScheme',
+        'Invalid URI scheme: ${uri.scheme}, expected $uriScheme or $legacyUriScheme',
       );
     }
     if (uri.host.toLowerCase() != uriHost) {
@@ -343,7 +345,7 @@ class PairingPayload {
 
     final version =
         int.tryParse(params['v'] ?? '') ?? AppConstants.protocolVersion;
-    final displayName = params['name'] ?? 'SiloSend-Device';
+    final displayName = params['name'] ?? 'Vayu-Device';
     final timestamp =
         int.tryParse(params['t'] ?? '') ??
         DateTime.now().millisecondsSinceEpoch;

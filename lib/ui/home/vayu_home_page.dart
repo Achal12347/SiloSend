@@ -2,28 +2,28 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_scope.dart';
-import 'package:silosend_datasharing_app/ui/connection/active_connections_card.dart';
-import 'package:silosend_datasharing_app/ui/home/capability_setup_banner.dart';
-import 'package:silosend_datasharing_app/ui/home/discovered_peer_card.dart';
-import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
-import 'package:silosend_datasharing_app/ui/home/local_device_card.dart';
-import 'package:silosend_datasharing_app/ui/pairing/pairing_dialog.dart';
-import 'package:silosend_datasharing_app/ui/settings/settings_page.dart';
-import 'package:silosend_datasharing_app/ui/transfer/incoming_transfer_dialog.dart';
-import 'package:silosend_datasharing_app/ui/transfer/peer_selection_sheet.dart';
-import 'package:silosend_datasharing_app/ui/transfer/transfer_progress_card.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_scope.dart';
+import 'package:vayu/ui/connection/active_connections_card.dart';
+import 'package:vayu/ui/home/capability_setup_banner.dart';
+import 'package:vayu/ui/home/discovered_peer_card.dart';
+import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/ui/home/local_device_card.dart';
+import 'package:vayu/ui/pairing/pairing_dialog.dart';
+import 'package:vayu/ui/settings/settings_page.dart';
+import 'package:vayu/ui/transfer/incoming_transfer_dialog.dart';
+import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
+import 'package:vayu/ui/transfer/transfer_progress_card.dart';
 
-/// Primary production Home screen for SiloSend (Phase 14).
+/// Primary production Home screen for Vayu (Phase 14).
 ///
 /// Designed with product-first flow, dynamic capability UX, and cohesive state orchestration:
-/// 1. Header: SiloSend branding + live transport readiness indicator + pairing & refresh actions
+/// 1. Header: Vayu branding + live transport readiness indicator + pairing & refresh actions
 /// 2. Hero Section: "Send File" primary CTA leading to native SAF picker & peer selection
 /// 3. Dynamic Capability UX: Contextual permission & radio setup with 1-tap recovery
 /// 4. Nearby Devices: Live discovery radar with real transports, real peers, and actionable states
@@ -31,14 +31,14 @@ import 'package:silosend_datasharing_app/ui/transfer/transfer_progress_card.dart
 /// 6. Active Connections: Authenticated P2P sessions with Short Authentication String (SAS)
 /// 7. Your Device: Compact local identity, editable name, and cryptographic fingerprint
 /// 8. Footer: Privacy and offline encryption reassurance
-class SiloSendHomePage extends StatefulWidget {
-  const SiloSendHomePage({super.key});
+class VayuHomePage extends StatefulWidget {
+  const VayuHomePage({super.key});
 
   @override
-  State<SiloSendHomePage> createState() => _SiloSendHomePageState();
+  State<VayuHomePage> createState() => _VayuHomePageState();
 }
 
-class _SiloSendHomePageState extends State<SiloSendHomePage>
+class _VayuHomePageState extends State<VayuHomePage>
     with SingleTickerProviderStateMixin {
   late AnimationController _radarAnimController;
   late Animation<double> _pulseAnimation;
@@ -660,7 +660,7 @@ class _SiloSendHomePageState extends State<SiloSendHomePage>
               ),
               const SizedBox(height: 4),
               Text(
-                'Tap "Search" to find nearby SiloSend devices.',
+                'Tap "Search" to find nearby Vayu devices.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -695,14 +695,14 @@ class _SiloSendHomePageState extends State<SiloSendHomePage>
               ),
               const SizedBox(height: 8),
               Text(
-                'No SiloSend devices found nearby',
+                'No Vayu devices found nearby',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 4),
               Text(
-                'Make sure SiloSend is open on both devices and Wi-Fi or Bluetooth is enabled.',
+                'Make sure Vayu is open on both devices and Wi-Fi or Bluetooth is enabled.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -765,7 +765,7 @@ class _SiloSendHomePageState extends State<SiloSendHomePage>
             ),
             const SizedBox(height: 4),
             Text(
-              'Looking for active SiloSend beacons on local Wi-Fi and Bluetooth.',
+              'Looking for active Vayu beacons on local Wi-Fi and Bluetooth.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,

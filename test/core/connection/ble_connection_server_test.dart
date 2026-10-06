@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
+import 'package:vayu/core/connection/ble_connection_server.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 
 void main() {
   group('BleConnectionServer Event Dispatch Tests', () {

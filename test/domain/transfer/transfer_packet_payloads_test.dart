@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/domain/transfer/transfer_packet_payloads.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 void main() {
   group('Phase 7 Transfer Packet Payloads Tests', () {
@@ -118,7 +118,7 @@ void main() {
     group('TransferChunkPayload', () {
       test('Computes CRC32 and serializes/deserializes chunk cleanly', () {
         final chunkData = Uint8List.fromList(
-          utf8.encode('Hello, SiloSend Transfer Engine!'),
+          utf8.encode('Hello, Vayu Transfer Engine!'),
         );
         final chunk = TransferChunkPayload.create(
           transferId: sampleTransferId,

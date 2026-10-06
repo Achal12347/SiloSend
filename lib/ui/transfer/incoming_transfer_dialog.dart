@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 /// Recipient prompt dialog presented when an [IncomingTransferRequest] arrives.
 ///
@@ -183,7 +183,7 @@ class IncomingTransferDialog extends StatelessWidget {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    'Save to: Downloads/SiloSend/',
+                    'Save to: Downloads/Vayu/',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),

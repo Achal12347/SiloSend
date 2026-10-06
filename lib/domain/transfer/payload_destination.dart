@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 
 /// In-memory destination sink for received transfer payloads.
 class MemoryPayloadDestination implements PayloadDestination {
@@ -68,7 +68,7 @@ class MemoryPayloadDestination implements PayloadDestination {
 }
 
 /// Filesystem-backed destination sink writing to an atomic staging file
-/// (`<path>.silosend.tmp`) before moving to the target path upon integrity verification.
+/// (`<path>.vayu.tmp`) before moving to the target path upon integrity verification.
 class FilePayloadDestination implements PayloadDestination {
   final String targetFilePath;
 
@@ -87,7 +87,7 @@ class FilePayloadDestination implements PayloadDestination {
     if (totalBytes < 0) {
       throw ArgumentError.value(totalBytes, 'totalBytes', 'Cannot be negative');
     }
-    _tmpFile = File('$targetFilePath.silosend.tmp');
+    _tmpFile = File('$targetFilePath.vayu.tmp');
   }
 
   /// Path of the temporary staging file.

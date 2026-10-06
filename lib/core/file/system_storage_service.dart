@@ -1,13 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/contracts/storage_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/contracts/storage_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Concrete implementation of [StorageService] managing incoming downloads
-/// on Android (via `com.silosend/storage`) and desktop operating systems.
+/// on Android (via `com.achyrio.vayu/storage`) and desktop operating systems.
 class SystemStorageService implements StorageService {
-  static const MethodChannel _channel = MethodChannel('com.silosend/storage');
+  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/storage');
 
   final MethodChannel channel;
   final String? customDownloadsDirectory;
@@ -51,13 +51,13 @@ class SystemStorageService implements StorageService {
         Platform.environment['HOME'] ??
         Directory.systemTemp.path;
 
-    final fallback = Directory('$userHome/Downloads/SiloSend');
+    final fallback = Directory('$userHome/Downloads/Vayu');
     if (!fallback.existsSync()) {
       try {
         fallback.createSync(recursive: true);
       } catch (_) {
         // Fallback to temp if Downloads is not writable
-        final tempFallback = Directory('${Directory.systemTemp.path}/SiloSend');
+        final tempFallback = Directory('${Directory.systemTemp.path}/Vayu');
         if (!tempFallback.existsSync()) {
           tempFallback.createSync(recursive: true);
         }
@@ -77,12 +77,12 @@ class SystemStorageService implements StorageService {
         .split(RegExp(r'[/\\]'))
         .where((s) => s.isNotEmpty && s != '.' && s != '..')
         .toList();
-    var rawName = segments.isEmpty ? 'silosend_file' : segments.last;
+    var rawName = segments.isEmpty ? 'vayu_file' : segments.last;
     while (rawName.contains('..')) {
       rawName = rawName.replaceAll('..', '');
     }
     final cleanName = rawName.replaceAll(RegExp(r'^\.+'), '');
-    final safeName = cleanName.isEmpty ? 'silosend_file' : cleanName;
+    final safeName = cleanName.isEmpty ? 'vayu_file' : cleanName;
 
     final dotIndex = safeName.lastIndexOf('.');
     final String base;

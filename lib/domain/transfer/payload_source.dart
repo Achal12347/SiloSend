@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 
 /// In-memory payload source backed by a contiguous [Uint8List].
 class MemoryPayloadSource implements PayloadSource {

@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/utils/crc32.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
+import 'package:vayu/core/utils/crc32.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
 
-/// Standard binary wire frame for SiloSend device-to-device communication.
+/// Standard binary wire frame for Vayu device-to-device communication.
 ///
 /// Wire Format:
 /// - Magic: 2 bytes (0x53, 0x53 -> 'SS')
@@ -16,7 +16,7 @@ import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
 /// - Payload Length: 4 bytes (uint32)
 /// - Payload: N bytes
 /// - CRC32 Checksum: 4 bytes (IEEE 802.3 over Header + Payload)
-class SiloSendPacket {
+class VayuPacket {
   static const int magic1 = 0x53; // 'S'
   static const int magic2 = 0x53; // 'S'
   static const int currentProtocolVersion = 1;
@@ -32,7 +32,7 @@ class SiloSendPacket {
   final int ttl;
   final Uint8List payload;
 
-  SiloSendPacket({
+  VayuPacket({
     this.version = currentProtocolVersion,
     required this.packetType,
     required this.packetId,
@@ -98,8 +98,8 @@ class SiloSendPacket {
     return buffer;
   }
 
-  /// Deserializes a [SiloSendPacket] from raw [bytes] and validates header and CRC32 integrity.
-  static SiloSendPacket fromBytes(Uint8List bytes) {
+  /// Deserializes a [VayuPacket] from raw [bytes] and validates header and CRC32 integrity.
+  static VayuPacket fromBytes(Uint8List bytes) {
     if (bytes.length < minPacketSize) {
       throw FormatException(
         'Packet too short: received ${bytes.length} bytes, minimum expected is $minPacketSize',
@@ -164,7 +164,7 @@ class SiloSendPacket {
       bytes.sublist(headerSize, headerSize + payloadLength),
     );
 
-    return SiloSendPacket(
+    return VayuPacket(
       version: version,
       packetType: packetType,
       packetId: packetId,
@@ -176,7 +176,7 @@ class SiloSendPacket {
   }
 
   /// Returns a copy of this packet with optional modified fields (e.g. decremented TTL for relay forwarding).
-  SiloSendPacket copyWith({
+  VayuPacket copyWith({
     int? version,
     PacketType? packetType,
     int? packetId,
@@ -185,7 +185,7 @@ class SiloSendPacket {
     int? ttl,
     Uint8List? payload,
   }) {
-    return SiloSendPacket(
+    return VayuPacket(
       version: version ?? this.version,
       packetType: packetType ?? this.packetType,
       packetId: packetId ?? this.packetId,

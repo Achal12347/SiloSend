@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Manages application lifecycle transitions (foreground, inactive, background).
 ///

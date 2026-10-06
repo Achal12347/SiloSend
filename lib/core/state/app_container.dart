@@ -3,49 +3,49 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_connection_server.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/discovery/ble_discovery_service.dart';
-import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
-import 'package:silosend_datasharing_app/core/discovery/lan_discovery_service.dart';
-import 'package:silosend_datasharing_app/core/identity/device_identity_manager.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/pairing/nfc_pairing_service.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/battery/system_battery_provider.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_selector_contract.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/storage_contract.dart';
-import 'package:silosend_datasharing_app/core/file/system_file_picker_service.dart';
-import 'package:silosend_datasharing_app/core/file/system_storage_service.dart';
-import 'package:silosend_datasharing_app/core/session/session_lifecycle_policy.dart';
-import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
-import 'package:silosend_datasharing_app/core/transfer/file_sharing_coordinator.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_engine_impl.dart';
-import 'package:silosend_datasharing_app/core/transport/smart_transport_selector_impl.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
-import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/connection/ble_connection_server.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/discovery/ble_discovery_service.dart';
+import 'package:vayu/core/discovery/discovery_coordinator.dart';
+import 'package:vayu/core/discovery/lan_discovery_service.dart';
+import 'package:vayu/core/identity/device_identity_manager.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/pairing/nfc_pairing_service.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/battery/system_battery_provider.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/settings/user_settings.dart';
+import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/storage_contract.dart';
+import 'package:vayu/core/file/system_file_picker_service.dart';
+import 'package:vayu/core/file/system_storage_service.dart';
+import 'package:vayu/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/core/transfer/file_sharing_coordinator.dart';
+import 'package:vayu/core/transfer/transfer_engine_impl.dart';
+import 'package:vayu/core/transport/smart_transport_selector_impl.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/domain/security/crypto_identity_keypair.dart';
+import 'package:vayu/platform/platform_service.dart';
+import 'package:vayu/platform/system_platform_service.dart';
 
 /// Central dependency and service container for SiloSend core primitives.
 ///
@@ -516,7 +516,7 @@ class AppContainer {
     if (_isInitialized) return;
 
     try {
-      AppLogger.info('AppContainer', 'Initializing SiloSend core container...');
+      AppLogger.info('AppContainer', 'Initializing Vayu core container...');
 
       // 1. Start lifecycle observation
       lifecycleManager.start();
@@ -735,7 +735,7 @@ class AppContainer {
       _initError = null;
       AppLogger.info(
         'AppContainer',
-        'SiloSend core container initialized successfully for: ${identity?.displayName} (${identity?.idHex.substring(0, 8)}...)',
+        'Vayu core container initialized successfully for: ${identity?.displayName} (${identity?.idHex.substring(0, 8)}...)',
       );
     } catch (e, stack) {
       _initError = e;

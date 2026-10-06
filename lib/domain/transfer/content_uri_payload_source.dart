@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 
 class _DigestSink implements Sink<crypto.Digest> {
   final void Function(crypto.Digest digest) onDigest;

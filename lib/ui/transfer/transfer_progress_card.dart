@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_task_impl.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_destination.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/transfer/transfer_task_impl.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
 
 /// Renders active and recently completed file transfer tasks with live
 /// speed, ETA, progress bars, pause/resume, and cancellation controls.

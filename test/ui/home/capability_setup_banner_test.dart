@@ -2,13 +2,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
-import 'package:silosend_datasharing_app/ui/home/capability_setup_banner.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/platform/platform_service.dart';
+import 'package:vayu/ui/home/capability_setup_banner.dart';
 
 class _FakeBannerPlatformService extends PlatformService {
   SystemCapabilities caps;

@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Real platform battery provider communicating with native OS capabilities.
 ///
@@ -13,7 +13,7 @@ import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
 /// - In unprobed, test, or unsupported environments, explicitly returns null fields
 ///   via [BatterySnapshot.unknown()] rather than fabricating fake hardware state.
 class SystemBatteryProvider implements BatteryStateProvider {
-  static const MethodChannel _channel = MethodChannel('com.silosend/battery');
+  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/battery');
   static const Duration _cacheTtl = Duration(seconds: 10);
 
   final Future<Map<String, dynamic>?> Function()? customNativeProbe;

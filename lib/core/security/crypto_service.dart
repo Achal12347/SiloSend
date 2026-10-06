@@ -3,7 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
+import 'package:vayu/domain/security/crypto_identity_keypair.dart';
 
 /// Comprehensive cryptographic service providing reviewed, standard cryptographic primitives
 /// for device authentication (Ed25519), ephemeral key exchange (X25519),

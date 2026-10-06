@@ -2,14 +2,14 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
-import 'package:silosend_datasharing_app/ui/transfer/peer_selection_sheet.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/platform/system_platform_service.dart';
+import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
 
 void main() {
   testWidgets(
@@ -64,7 +64,7 @@ void main() {
 
       // Initially no peers -> shows empty searching state
       expect(
-        find.text('Looking for nearby SiloSend devices...'),
+        find.text('Looking for nearby Vayu devices...'),
         findsOneWidget,
       );
 

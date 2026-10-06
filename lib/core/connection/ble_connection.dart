@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_packet_slicer.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/connection/ble_packet_slicer.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
 /// Pluggable interface for invoking native BLE GATT transport operations.
 abstract class BleTransportAdapter {
@@ -15,7 +15,7 @@ abstract class BleTransportAdapter {
 /// Default implementation delegating to the native Flutter platform MethodChannel.
 class PlatformBleTransportAdapter implements BleTransportAdapter {
   static const MethodChannel _channel = MethodChannel(
-    'com.silosend/ble_connection',
+    'com.achyrio.vayu/ble_connection',
   );
 
   @override

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
-import 'package:silosend_datasharing_app/ui/pairing/pairing_dialog.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/platform/system_platform_service.dart';
+import 'package:vayu/ui/pairing/pairing_dialog.dart';
 
 void main() {
   group('PairingDialog Widget Tests', () {
@@ -97,7 +97,7 @@ void main() {
       // Error message should appear
       expect(
         find.textContaining(
-          'Please enter a valid silosend://pair URI or IP:Port',
+          'Please enter a valid vayu://pair URI or IP:Port',
         ),
         findsOneWidget,
       );

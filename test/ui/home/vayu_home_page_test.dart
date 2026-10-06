@@ -3,20 +3,20 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_scope.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
-import 'package:silosend_datasharing_app/ui/home/silosend_home_page.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/discovery/discovery_coordinator.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_scope.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/platform/system_platform_service.dart';
+import 'package:vayu/ui/home/vayu_home_page.dart';
 
 void main() {
-  group('SiloSendHomePage Product Flow & State Composition Tests', () {
+  group('VayuHomePage Product Flow & State Composition Tests', () {
     late LocalDeviceIdentity identity;
     late AppContainer container;
     late MockDiscoveryService lanDiscovery;
@@ -59,13 +59,13 @@ void main() {
     ) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: AppScope(container: container, child: const SiloSendHomePage()),
+          home: AppScope(container: container, child: const VayuHomePage()),
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
 
       // 1. Header Branding & Connectivity Chip
-      expect(find.text('SiloSend'), findsOneWidget);
+      expect(find.text('Vayu'), findsOneWidget);
       expect(find.text('Wi-Fi + BLE'), findsOneWidget);
 
       // 2. Hero Section
@@ -90,7 +90,7 @@ void main() {
           MaterialApp(
             home: AppScope(
               container: container,
-              child: const SiloSendHomePage(),
+              child: const VayuHomePage(),
             ),
           ),
         );
@@ -126,7 +126,7 @@ void main() {
     ) async {
       await tester.pumpWidget(
         MaterialApp(
-          home: AppScope(container: container, child: const SiloSendHomePage()),
+          home: AppScope(container: container, child: const VayuHomePage()),
         ),
       );
       await tester.pump(const Duration(milliseconds: 100));
@@ -141,7 +141,7 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('No SiloSend devices found nearby'), findsOneWidget);
+      expect(find.text('No Vayu devices found nearby'), findsOneWidget);
       expect(find.text('Search Again'), findsOneWidget);
 
       await container.stopDiscoveryAndAdvertising();

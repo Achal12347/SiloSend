@@ -1,10 +1,10 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 class _MockTestPlatformService extends PlatformService {
   SystemCapabilities currentCaps;

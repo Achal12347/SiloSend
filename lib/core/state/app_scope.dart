@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
+import 'package:vayu/core/state/app_container.dart';
 
 /// Provides [AppContainer] down the widget tree using standard Flutter mechanisms.
 class AppScope extends InheritedWidget {

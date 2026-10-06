@@ -2,20 +2,20 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/connection/ble_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/connection/handshake_payload.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/models/connection_session.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/ble_connection.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/connection/framed_transport_connection.dart';
+import 'package:vayu/core/connection/lan_connection.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/connection/handshake_payload.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/models/connection_session.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 /// Thrown when a remote peer explicitly rejects a handshake request.
 class HandshakeRejectedException implements Exception {
@@ -242,7 +242,7 @@ class ConnectionManager {
         ? _parseHexToBytes(targetDeviceId)
         : Uint8List(16); // Wildcard / unknown destination before handshake
 
-    final initPacket = SiloSendPacket(
+    final initPacket = VayuPacket(
       packetType: PacketType.handshakeInit,
       packetId: _nextPacketId(),
       sourceDeviceId: localIdentity.deviceId,
@@ -333,7 +333,7 @@ class ConnectionManager {
           rejectionReason: 'unsupported_protocol_version',
         );
 
-        final rejectPacket = SiloSendPacket(
+        final rejectPacket = VayuPacket(
           packetType: PacketType.handshakeResponse,
           packetId: _nextPacketId(),
           sourceDeviceId: localIdentity.deviceId,
@@ -360,7 +360,7 @@ class ConnectionManager {
         accepted: true,
       );
 
-      final acceptPacket = SiloSendPacket(
+      final acceptPacket = VayuPacket(
         packetType: PacketType.handshakeResponse,
         packetId: _nextPacketId(),
         sourceDeviceId: localIdentity.deviceId,

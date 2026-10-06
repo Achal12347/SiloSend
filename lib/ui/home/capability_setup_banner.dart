@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
 
 /// Contextual capability and permission setup card.
 ///
@@ -84,7 +84,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
 
     if (caps.isBluetoothOff && caps.lanState == NetworkState.disconnected) {
       title = 'No Transports Available';
-      explanation = 'SiloSend cannot discover nearby devices because Wi-Fi is disconnected and Bluetooth is turned off.';
+      explanation = 'Vayu cannot discover nearby devices because Wi-Fi is disconnected and Bluetooth is turned off.';
       actions.add(
         FilledButton.tonalIcon(
           onPressed: _isProcessing
@@ -108,7 +108,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
     } else if (caps.isNearbyPermissionMissing &&
         caps.lanState == NetworkState.disconnected) {
       title = 'Nearby Permission Required';
-      explanation = 'Wi-Fi is disconnected, and SiloSend requires Nearby device access to discover phones via Bluetooth.';
+      explanation = 'Wi-Fi is disconnected, and Vayu requires Nearby device access to discover phones via Bluetooth.';
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(
@@ -184,7 +184,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       );
     } else if (caps.isNearbyPermissionMissing) {
       title = 'Nearby Device Access';
-      explanation = 'Nearby device access allows SiloSend to discover phones over Bluetooth Low Energy. Your location is never tracked.';
+      explanation = 'Nearby device access allows Vayu to discover phones over Bluetooth Low Energy. Your location is never tracked.';
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(

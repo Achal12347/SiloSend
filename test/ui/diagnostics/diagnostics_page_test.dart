@@ -3,16 +3,16 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/discovery/discovery_coordinator.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/ui/diagnostics/diagnostics_page.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/discovery/discovery_coordinator.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/settings/user_settings.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
 
 void main() {
   group('DiagnosticsPage Widget Tests (UI11 & Section 32)', () {
@@ -122,7 +122,7 @@ void main() {
 
       expect(find.text('Diagnostics copied to clipboard'), findsOneWidget);
       expect(clipboardText, isNotNull);
-      expect(clipboardText, contains('# SiloSend Diagnostics Report'));
+      expect(clipboardText, contains('# Vayu Diagnostics Report'));
       expect(clipboardText, contains('Diagnostics-Device'));
       expect(clipboardText, contains('level=77%'));
     });

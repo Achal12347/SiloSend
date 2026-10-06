@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
 
 /// Supported transferable payload types.
 enum PayloadType {

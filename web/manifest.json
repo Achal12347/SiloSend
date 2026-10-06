@@ -1,11 +1,11 @@
 {
-    "name": "silosend_datasharing_app",
-    "short_name": "silosend_datasharing_app",
+    "name": "Vayu",
+    "short_name": "Vayu",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Vayu by Achyrio - Resilient peer-to-peer data sharing application.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

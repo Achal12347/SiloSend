@@ -1,8 +1,8 @@
 /// Abstract contract for managing local and public storage directories,
 /// ensuring safe destination paths across different operating systems.
 abstract class StorageService {
-  /// Returns the default directory path for incoming SiloSend transfers
-  /// (e.g. public Downloads/SiloSend on Android, %USERPROFILE%\Downloads\SiloSend on Windows).
+  /// Returns the default directory path for incoming Vayu transfers
+  /// (e.g. public Downloads/Vayu on Android, %USERPROFILE%\Downloads\SiloSend on Windows).
   Future<String> getDownloadsDirectory();
 
   /// Resolves a collision-safe destination file path in [baseDirectory] for [requestedFileName].

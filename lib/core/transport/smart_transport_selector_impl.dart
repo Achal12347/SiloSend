@@ -1,17 +1,17 @@
 import 'dart:async';
 
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/contracts/battery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_selector_contract.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/transport/transport_selection_policy.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/contracts/battery_contract.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/transport/transport_selection_policy.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 /// Intelligent, hardware-aware, and headless transport selection engine.
 ///

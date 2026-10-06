@@ -1,14 +1,14 @@
 import 'dart:developer' as developer;
 
-import 'package:silosend_datasharing_app/core/logging/security_logging_policy.dart';
+import 'package:vayu/core/logging/security_logging_policy.dart';
 
-/// Log levels for SiloSend application logging.
+/// Log levels for Vayu application logging.
 enum LogLevel { debug, info, warning, error }
 
 /// Secure, sanitized application logger.
 ///
 /// Ensures sensitive cryptographic keys, private data, and authentication
-/// secrets are never logged per SiloSend security and privacy requirements.
+/// secrets are never logged per Vayu security and privacy requirements.
 class AppLogger {
   AppLogger._();
 
@@ -22,7 +22,7 @@ class AppLogger {
   }) {
     // In production, sensitive data must never be logged.
     final sanitizedMessage = SecurityLoggingPolicy.sanitize(message);
-    final name = 'SiloSend.$tag';
+    final name = 'Vayu.$tag';
     developer.log(
       sanitizedMessage,
       name: name,

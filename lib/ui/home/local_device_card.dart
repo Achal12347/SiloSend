@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
 
 /// Renders the local device identity, cryptographic key fingerprint,
 /// and live transport readiness status (LAN & BLE).

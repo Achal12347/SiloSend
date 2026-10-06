@@ -2,12 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/ui/transfer/incoming_transfer_dialog.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/ui/transfer/incoming_transfer_dialog.dart';
 
 void main() {
   group('IncomingTransferDialog Widget Tests', () {

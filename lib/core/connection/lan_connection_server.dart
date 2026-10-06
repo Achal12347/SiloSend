@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:silosend_datasharing_app/core/connection/lan_connection.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
+import 'package:vayu/core/connection/lan_connection.dart';
+import 'package:vayu/core/logging/app_logger.dart';
 
-/// Manages an IPv4 TCP server socket accepting incoming connections from remote SiloSend peers.
+/// Manages an IPv4 TCP server socket accepting incoming connections from remote Vayu peers.
 class LanConnectionServer {
   static const int defaultPort = 53531;
 

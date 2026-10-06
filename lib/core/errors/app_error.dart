@@ -1,4 +1,4 @@
-/// Base class for all SiloSend application domain errors.
+/// Base class for all Vayu application domain errors.
 abstract class AppError implements Exception {
   final String message;
   final Object? cause;

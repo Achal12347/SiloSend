@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
-import 'package:silosend_datasharing_app/ui/connection/active_connections_card.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/security/trust_level.dart';
+import 'package:vayu/ui/connection/active_connections_card.dart';
 
 void main() {
   group('Connection Security UI & SAS Verification Tests', () {

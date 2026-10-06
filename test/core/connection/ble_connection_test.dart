@@ -1,11 +1,11 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/ble_connection.dart';
+import 'package:vayu/core/connection/framed_transport_connection.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 class _TestBleAdapter implements BleTransportAdapter {
   final List<Uint8List> sentChunks = [];
@@ -98,7 +98,7 @@ void main() {
       expect(received, equals(chunk));
     });
 
-    test('reconstructs SiloSendPacket seamlessly when wrapped in FramedTransportConnection', () async {
+    test('reconstructs VayuPacket seamlessly when wrapped in FramedTransportConnection', () async {
       final framed = FramedTransportConnection(connection);
 
       // Create a test packet
@@ -108,7 +108,7 @@ void main() {
         List.generate(80, (i) => (i * 3) % 256),
       );
 
-      final originalPacket = SiloSendPacket(
+      final originalPacket = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: 101,
         sourceDeviceId: sourceId,

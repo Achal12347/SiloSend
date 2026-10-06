@@ -7,26 +7,26 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/battery/system_battery_provider.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/file/system_file_picker_service.dart';
-import 'package:silosend_datasharing_app/core/file/system_storage_service.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/session/session_lifecycle_policy.dart';
-import 'package:silosend_datasharing_app/core/transfer/file_sharing_coordinator.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_engine_impl.dart';
-import 'package:silosend_datasharing_app/core/transport/smart_transport_selector_impl.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/transfer/content_uri_payload_source.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
+import 'package:vayu/core/battery/system_battery_provider.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/file/system_file_picker_service.dart';
+import 'package:vayu/core/file/system_storage_service.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/core/transfer/file_sharing_coordinator.dart';
+import 'package:vayu/core/transfer/transfer_engine_impl.dart';
+import 'package:vayu/core/transport/smart_transport_selector_impl.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/transfer/content_uri_payload_source.dart';
+import 'package:vayu/platform/system_platform_service.dart';
 
 void main() {
   group('Phase 9 FileSharingCoordinator End-to-End Tests', () {
@@ -50,8 +50,8 @@ void main() {
     late FileSharingCoordinator coordinatorB;
 
     setUp(() async {
-      tempDirA = Directory.systemTemp.createTempSync('silosend_coordinator_a_');
-      tempDirB = Directory.systemTemp.createTempSync('silosend_coordinator_b_');
+      tempDirA = Directory.systemTemp.createTempSync('vayu_coordinator_a_');
+      tempDirB = Directory.systemTemp.createTempSync('vayu_coordinator_b_');
 
       identityA = LocalDeviceIdentity.generate(
         displayName: 'Sender-Android-A',
@@ -181,7 +181,7 @@ void main() {
       final expectedSha256 = crypto.sha256.convert(rawData).toString();
 
       final selectedDoc = SelectedDocument(
-        identifier: 'content://com.silosend.provider/docs/report.pdf',
+        identifier: 'content://com.achyrio.vayu.provider/docs/report.pdf',
         name: 'report.pdf',
         sizeBytes: rawData.length,
         mimeType: 'application/pdf',

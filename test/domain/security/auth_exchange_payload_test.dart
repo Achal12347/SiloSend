@@ -1,9 +1,9 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
-import 'package:silosend_datasharing_app/domain/security/encrypted_envelope.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/domain/security/encrypted_envelope.dart';
 
 void main() {
   group('AuthExchangePayload and Wire Framing Audit Tests', () {

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/core/session/session_lifecycle_policy.dart';
 
 void main() {
   group('SessionLifecyclePolicy Tests', () {

@@ -1,19 +1,19 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
-/// StreamTransformer that reconstructs discrete [SiloSendPacket] frames
+/// StreamTransformer that reconstructs discrete [VayuPacket] frames
 /// from an arbitrary, fragmented stream of incoming byte chunks (e.g. TCP socket).
 class PacketStreamTransformer
-    extends StreamTransformerBase<Uint8List, SiloSendPacket> {
+    extends StreamTransformerBase<Uint8List, VayuPacket> {
   /// Maximum permitted payload size to prevent memory exhaustion attacks (16 MB).
   static const int maxPayloadLength = 16 * 1024 * 1024;
 
   @override
-  Stream<SiloSendPacket> bind(Stream<Uint8List> stream) {
-    return Stream<SiloSendPacket>.eventTransformed(
+  Stream<VayuPacket> bind(Stream<Uint8List> stream) {
+    return Stream<VayuPacket>.eventTransformed(
       stream,
       (sink) => _PacketSink(sink),
     );
@@ -21,7 +21,7 @@ class PacketStreamTransformer
 }
 
 class _PacketSink implements EventSink<Uint8List> {
-  final EventSink<SiloSendPacket> _outputSink;
+  final EventSink<VayuPacket> _outputSink;
   final List<int> _buffer = [];
 
   _PacketSink(this._outputSink);
@@ -33,12 +33,12 @@ class _PacketSink implements EventSink<Uint8List> {
   }
 
   void _processBuffer() {
-    while (_buffer.length >= SiloSendPacket.minPacketSize) {
+    while (_buffer.length >= VayuPacket.minPacketSize) {
       // 1. Locate magic bytes 0x53, 0x53
       int magicIndex = -1;
       for (int i = 0; i <= _buffer.length - 2; i++) {
-        if (_buffer[i] == SiloSendPacket.magic1 &&
-            _buffer[i + 1] == SiloSendPacket.magic2) {
+        if (_buffer[i] == VayuPacket.magic1 &&
+            _buffer[i + 1] == VayuPacket.magic2) {
           magicIndex = i;
           break;
         }
@@ -46,7 +46,7 @@ class _PacketSink implements EventSink<Uint8List> {
 
       if (magicIndex == -1) {
         // Keep only the last byte if it might be the first magic byte
-        if (_buffer.isNotEmpty && _buffer.last == SiloSendPacket.magic1) {
+        if (_buffer.isNotEmpty && _buffer.last == VayuPacket.magic1) {
           _buffer.removeRange(0, _buffer.length - 1);
         } else {
           _buffer.clear();
@@ -60,7 +60,7 @@ class _PacketSink implements EventSink<Uint8List> {
       }
 
       // Need at least header size (49 bytes) to inspect payload length
-      if (_buffer.length < SiloSendPacket.headerSize) {
+      if (_buffer.length < VayuPacket.headerSize) {
         return;
       }
 
@@ -81,9 +81,9 @@ class _PacketSink implements EventSink<Uint8List> {
       }
 
       final totalPacketSize =
-          SiloSendPacket.headerSize +
+          VayuPacket.headerSize +
           payloadLength +
-          SiloSendPacket.checksumSize;
+          VayuPacket.checksumSize;
 
       // Wait until the full packet arrives
       if (_buffer.length < totalPacketSize) {
@@ -97,7 +97,7 @@ class _PacketSink implements EventSink<Uint8List> {
 
       // 4. Validate and emit packet
       try {
-        final packet = SiloSendPacket.fromBytes(packetBytes);
+        final packet = VayuPacket.fromBytes(packetBytes);
         _buffer.removeRange(0, totalPacketSize);
         _outputSink.add(packet);
       } catch (e) {

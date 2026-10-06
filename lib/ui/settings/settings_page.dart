@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/settings/user_settings.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
-import 'package:silosend_datasharing_app/ui/diagnostics/diagnostics_page.dart';
-import 'package:silosend_datasharing_app/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/settings/user_settings.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
+import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
 
 /// Settings Screen (UI10, UI9, Section 30 & 31).
 ///
@@ -104,7 +104,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   _buildDiagnosticsCard(context, theme, container),
                   const SizedBox(height: 16),
 
-                  // 6. About SiloSend
+                  // 6. About Vayu
                   _buildSectionHeader(theme, 'About'),
                   _buildAboutCard(theme),
                   const SizedBox(height: 24),
@@ -136,7 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
     ThemeData theme,
     AppContainer container,
   ) {
-    final currentName = container.identity?.displayName ?? 'SiloSend-Device';
+    final currentName = container.identity?.displayName ?? 'Vayu-Device';
     final deviceId = container.identity?.idHex ?? '';
     final shortId = deviceId.length >= 8 ? deviceId.substring(0, 8) : deviceId;
 
@@ -266,7 +266,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              'SiloSend will reduce unnecessary background discovery and consider '
+              'Vayu will reduce unnecessary background discovery and consider '
               'battery usage when selecting transports. High-speed LAN is still chosen '
               'for large files to minimize radio active time.',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -328,7 +328,7 @@ class _SettingsPageState extends State<SettingsPage> {
               color: theme.colorScheme.primary,
             ),
             title: const Text('Permission Rationale'),
-            subtitle: const Text('Why SiloSend needs local radio access'),
+            subtitle: const Text('Why Vayu needs local radio access'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => PermissionsRationaleDialog.show(context),
           ),
@@ -401,7 +401,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 const Icon(Icons.lock_outline_rounded, size: 18),
                 const SizedBox(width: 8),
                 Text(
-                  AppConstants.appName,
+                  '${AppConstants.appName} by Achyrio',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -413,8 +413,8 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Local-first, encrypted peer-to-peer data sharing without intermediaries, '
-              'cloud servers, or account logins. Built for speed, privacy, and resilience.',
+              'Vayu is a product by Achyrio. Local-first, encrypted peer-to-peer data sharing '
+              'without intermediaries, cloud servers, or account logins. Built for speed, privacy, and resilience.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

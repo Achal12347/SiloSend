@@ -3,22 +3,22 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_engine_impl.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_source.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/transfer/transfer_engine_impl.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/domain/transfer/payload_source.dart';
 
 void main() {
   group('Phase 7 TransferEngine Real SecureSession Loopback Tests', () {
@@ -38,7 +38,7 @@ void main() {
 
     setUp(() async {
       tempDir = Directory.systemTemp.createTempSync(
-        'silosend_transfer_engine_test_',
+        'vayu_transfer_engine_test_',
       );
 
       identityA = LocalDeviceIdentity.generate(
@@ -259,7 +259,7 @@ void main() {
         expect(bobTask.status, equals(TransferStatus.cancelled));
 
         // Temporary staging file deleted
-        final stagingFile = File('$savePath.silosend.tmp');
+        final stagingFile = File('$savePath.vayu.tmp');
         expect(stagingFile.existsSync(), isFalse);
         expect(File(savePath).existsSync(), isFalse);
       },

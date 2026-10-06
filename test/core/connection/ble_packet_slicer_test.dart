@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_packet_slicer.dart';
+import 'package:vayu/core/connection/ble_packet_slicer.dart';
 
 void main() {
   group('BlePacketSlicer ATT-MTU Slicing & Reassembly Tests', () {

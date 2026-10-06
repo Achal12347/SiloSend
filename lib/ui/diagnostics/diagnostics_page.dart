@@ -2,19 +2,19 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
-import 'package:silosend_datasharing_app/core/capabilities/capability_coordinator.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_orchestrator.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
 
 /// Diagnostics & Live Telemetry Screen (UI11 & Section 32).
 ///
 /// Exposes truthful real-time hardware, network, cryptographic, and battery telemetry
 /// for troubleshooting and multi-device validation.
 ///
-/// Adheres strictly to the SiloSend No Mock Data rule:
+/// Adheres strictly to the Vayu No Mock Data rule:
 /// - Any unprobed or unsupported metrics are reported truthfully as "Unknown" or "Unavailable".
 /// - Private keys or sensitive cryptographic seeds are NEVER displayed.
 class DiagnosticsPage extends StatefulWidget {
@@ -265,7 +265,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                           : 'Unknown',
                     ),
                     _buildRow(
-                      'SiloSend Battery Mode',
+                      'Vayu Battery Mode',
                       container.userSettings.batterySaverMode.displayName,
                     ),
                     _buildRow(
@@ -392,7 +392,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     final caps = container.capabilityCoordinator.rawCapabilities;
 
     final buffer = StringBuffer();
-    buffer.writeln('# SiloSend Diagnostics Report');
+    buffer.writeln('# Vayu Diagnostics Report');
     buffer.writeln('- Timestamp: ${DateTime.now().toIso8601String()}');
     buffer.writeln('- OS: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})');
     buffer.writeln('- Device ID: ${container.identity?.idHex ?? "Unknown"}');
@@ -403,7 +403,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     buffer.writeln('- NFC: ${container.capabilities.nfc.name}');
     buffer.writeln('- Permissions: nearby=${caps.nearbyPermission.name}, locationRequired=${caps.locationRequiredForBle}, locationEnabled=${caps.locationEnabled}');
     buffer.writeln('- Battery: level=${_batterySnapshot.batteryLevel}%, charging=${_batterySnapshot.isCharging}, saver=${_batterySnapshot.isBatterySaverActive}');
-    buffer.writeln('- SiloSend Battery Mode: ${container.userSettings.batterySaverMode.displayName}');
+    buffer.writeln('- Vayu Battery Mode: ${container.userSettings.batterySaverMode.displayName}');
     buffer.writeln('- Operational Phase: ${orch.phase.name}');
     buffer.writeln('- Explicit Error: ${orch.explicitError.name}');
 

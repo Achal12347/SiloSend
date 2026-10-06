@@ -1,4 +1,4 @@
-import 'package:silosend_datasharing_app/core/battery/battery_snapshot.dart';
+import 'package:vayu/core/battery/battery_snapshot.dart';
 
 /// Abstract contract providing real-time device battery metrics.
 ///

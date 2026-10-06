@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_task_impl.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_destination.dart';
-import 'package:silosend_datasharing_app/domain/transfer/transfer_packet_payloads.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/transfer/transfer_task_impl.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 /// Concrete implementation of [TransferEngine] managing active, multiplexed file
 /// and data transfers end-to-end over authenticated [SecureSession] instances.
@@ -20,7 +20,7 @@ class TransferEngineImpl implements TransferEngine {
   final SecureSession? Function(String remoteDeviceId)? sessionResolver;
 
   final Map<String, TransferTask> _tasks = {};
-  final Map<String, StreamSubscription<SiloSendPacket>> _sessionSubscriptions =
+  final Map<String, StreamSubscription<VayuPacket>> _sessionSubscriptions =
       {};
   final StreamController<IncomingTransferRequest> _incomingRequestsController =
       StreamController<IncomingTransferRequest>.broadcast();
@@ -145,7 +145,7 @@ class TransferEngineImpl implements TransferEngine {
 
   Future<void> _handleIncomingPacket(
     SecureSession session,
-    SiloSendPacket packet,
+    VayuPacket packet,
   ) async {
     if (_isDisposed) return;
 
@@ -178,7 +178,7 @@ class TransferEngineImpl implements TransferEngine {
 
   Future<void> _handleMetadataPacket(
     SecureSession session,
-    SiloSendPacket packet,
+    VayuPacket packet,
   ) async {
     try {
       final metaPayload = TransferMetadataPayload.fromBytes(packet.payload);
@@ -220,7 +220,7 @@ class TransferEngineImpl implements TransferEngine {
             reason: TransferCancelReason.declined,
             message: reason ?? 'Declined by recipient',
           );
-          final cancelPacket = SiloSendPacket(
+          final cancelPacket = VayuPacket(
             packetType: PacketType.transferCancel,
             packetId: DateTime.now().microsecondsSinceEpoch,
             sourceDeviceId: parseIdTo16Bytes(localDeviceId),
@@ -276,7 +276,7 @@ class TransferEngineImpl implements TransferEngine {
       selectiveBitmap: Uint8List(0),
     );
 
-    final ackPacket = SiloSendPacket(
+    final ackPacket = VayuPacket(
       packetType: PacketType.transferAck,
       packetId: DateTime.now().microsecondsSinceEpoch,
       sourceDeviceId: parseIdTo16Bytes(localDeviceId),
@@ -299,7 +299,7 @@ class TransferEngineImpl implements TransferEngine {
     return inboundTask;
   }
 
-  void _handleChunkPacket(SiloSendPacket packet) {
+  void _handleChunkPacket(VayuPacket packet) {
     try {
       if (packet.payload.length < 16) return;
       final tIdBytes = packet.payload.sublist(0, 16);
@@ -317,7 +317,7 @@ class TransferEngineImpl implements TransferEngine {
     }
   }
 
-  void _handleAckPacket(SiloSendPacket packet) {
+  void _handleAckPacket(VayuPacket packet) {
     try {
       if (packet.payload.length < 16) return;
       final tIdBytes = packet.payload.sublist(0, 16);
@@ -335,7 +335,7 @@ class TransferEngineImpl implements TransferEngine {
     }
   }
 
-  void _handleNackPacket(SiloSendPacket packet) {
+  void _handleNackPacket(VayuPacket packet) {
     try {
       if (packet.payload.length < 16) return;
       final tIdBytes = packet.payload.sublist(0, 16);
@@ -353,7 +353,7 @@ class TransferEngineImpl implements TransferEngine {
     }
   }
 
-  Future<void> _handleCancelPacket(SiloSendPacket packet) async {
+  Future<void> _handleCancelPacket(VayuPacket packet) async {
     try {
       if (packet.payload.length < 16) return;
       final tIdBytes = packet.payload.sublist(0, 16);

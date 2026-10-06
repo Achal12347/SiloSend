@@ -1,8 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/identity/device_identity_manager.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
+import 'package:vayu/core/identity/device_identity_manager.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
 
 void main() {
   group('DeviceIdentityManager Tests', () {
@@ -111,7 +111,7 @@ void main() {
     late FileIdentityStorage fileStorage;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp('silosend_test_');
+      tempDir = await Directory.systemTemp.createTemp('vayu_test_');
       identityFile = File('${tempDir.path}/identity.json');
       fileStorage = FileIdentityStorage(identityFile);
     });

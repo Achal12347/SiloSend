@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/security/sas_word_list.dart';
+import 'package:vayu/core/security/sas_word_list.dart';
 
 /// Represents a user-verifiable Short Authentication String (SAS).
 ///

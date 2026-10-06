@@ -2,23 +2,23 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/security/short_authentication_string.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
-import 'package:silosend_datasharing_app/domain/security/crypto_identity_keypair.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/security/short_authentication_string.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/domain/security/crypto_identity_keypair.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 /// Represents an out-of-band NFC pairing record awaiting transport connection.
 class PendingNfcPairing {
@@ -50,7 +50,7 @@ class SecureSessionManager {
 
   final Map<String, SecureSessionImpl> _sessions = {};
   final Map<String, PendingNfcPairing> _pendingNfcPairings = {};
-  final Map<String, StreamSubscription<SiloSendPacket>> _rekeySubscriptions =
+  final Map<String, StreamSubscription<VayuPacket>> _rekeySubscriptions =
       {};
   final Map<String, Future<SecureSessionImpl>> _inFlightOutboundSecuring = {};
   final StreamController<SecureSessionImpl> _sessionController =
@@ -209,7 +209,7 @@ class SecureSessionManager {
       signature: sigA,
     );
 
-    final initPacket = SiloSendPacket(
+    final initPacket = VayuPacket(
       packetType: PacketType.authExchange,
       packetId: 1,
       sourceDeviceId: localIdentity.deviceId,
@@ -327,7 +327,7 @@ class SecureSessionManager {
       confirmMac: initConfirmMac,
     );
 
-    final confirmPacket = SiloSendPacket(
+    final confirmPacket = VayuPacket(
       packetType: PacketType.authExchange,
       packetId: 2,
       sourceDeviceId: localIdentity.deviceId,
@@ -487,7 +487,7 @@ class SecureSessionManager {
       confirmMac: respConfirmMac,
     );
 
-    final responsePacket = SiloSendPacket(
+    final responsePacket = VayuPacket(
       packetType: PacketType.authExchange,
       packetId: 1,
       sourceDeviceId: localIdentity.deviceId,
@@ -758,7 +758,7 @@ class SecureSessionManager {
           signature: sigA,
         );
 
-        final initPacket = SiloSendPacket(
+        final initPacket = VayuPacket(
           packetType: PacketType.authExchange,
           packetId: 1000 + targetEpoch,
           sourceDeviceId: localIdentity.deviceId,
@@ -883,7 +883,7 @@ class SecureSessionManager {
           confirmMac: initConfirmMac,
         );
 
-        final confirmPacket = SiloSendPacket(
+        final confirmPacket = VayuPacket(
           packetType: PacketType.authExchange,
           packetId: 2000 + targetEpoch,
           sourceDeviceId: localIdentity.deviceId,
@@ -1079,7 +1079,7 @@ class SecureSessionManager {
         confirmMac: respConfirmMac,
       );
 
-      final respPacket = SiloSendPacket(
+      final respPacket = VayuPacket(
         packetType: PacketType.authExchange,
         packetId: 1000 + targetEpoch,
         sourceDeviceId: localIdentity.deviceId,

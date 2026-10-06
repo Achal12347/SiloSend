@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-import 'package:silosend_datasharing_app/core/connection/connection_session.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_impl.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
-import 'package:silosend_datasharing_app/ui/security/sas_verification_dialog.dart';
+import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/security/secure_session_impl.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/security/trust_level.dart';
+import 'package:vayu/ui/security/sas_verification_dialog.dart';
 
 /// Renders real-time active point-to-point connection sessions and disconnect actions.
 class ActiveConnectionsCard extends StatelessWidget {

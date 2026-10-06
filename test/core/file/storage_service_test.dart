@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/file/system_storage_service.dart';
+import 'package:vayu/core/file/system_storage_service.dart';
 
 void main() {
   group('SystemStorageService Tests', () {
@@ -9,7 +9,7 @@ void main() {
     late SystemStorageService storageService;
 
     setUp(() {
-      tempDir = Directory.systemTemp.createTempSync('silosend_storage_test_');
+      tempDir = Directory.systemTemp.createTempSync('vayu_storage_test_');
       storageService = SystemStorageService(
         customDownloadsDirectory: tempDir.path,
       );

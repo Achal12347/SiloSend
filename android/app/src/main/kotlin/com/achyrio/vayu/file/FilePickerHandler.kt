@@ -1,4 +1,4 @@
-package com.silosend.file
+package com.achyrio.vayu.file
 
 import android.app.Activity
 import android.content.Intent
@@ -20,7 +20,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
     companion object {
-        const val CHANNEL = "com.silosend/file_picker"
+        const val CHANNEL = "com.achyrio.vayu/file_picker"
         const val REQUEST_CODE_PICK_FILE = 53532
     }
 

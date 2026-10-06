@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/security/replay_protection_filter.dart';
+import 'package:vayu/core/security/replay_protection_filter.dart';
 
 void main() {
   group('ReplayProtectionFilter Tests', () {

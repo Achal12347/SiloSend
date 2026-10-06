@@ -1,26 +1,26 @@
 import 'package:flutter/material.dart';
 
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/core/state/app_scope.dart';
-import 'package:silosend_datasharing_app/ui/home/silosend_home_page.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/core/state/app_scope.dart';
+import 'package:vayu/ui/home/vayu_home_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const SiloSendApp());
+  runApp(const VayuApp());
 }
 
-/// Root widget for the SiloSend application.
-class SiloSendApp extends StatefulWidget {
+/// Root widget for the Vayu application.
+class VayuApp extends StatefulWidget {
   final AppContainer? container;
 
-  const SiloSendApp({super.key, this.container});
+  const VayuApp({super.key, this.container});
 
   @override
-  State<SiloSendApp> createState() => _SiloSendAppState();
+  State<VayuApp> createState() => _VayuAppState();
 }
 
-class _SiloSendAppState extends State<SiloSendApp> {
+class _VayuAppState extends State<VayuApp> {
   late final AppContainer _container;
   late final Future<void> _initFuture;
 
@@ -51,7 +51,7 @@ class _SiloSendAppState extends State<SiloSendApp> {
         theme: ThemeData(
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFF1E88E5), // SiloSend blue
+            seedColor: const Color(0xFF1E88E5), // Vayu blue
             brightness: Brightness.light,
           ),
         ),
@@ -103,7 +103,7 @@ class _SiloSendAppState extends State<SiloSendApp> {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          'Unable to initialize SiloSend. Please try again.',
+                          'Unable to initialize Vayu. Please try again.',
                           textAlign: TextAlign.center,
                           style: TextStyle(color: Colors.red),
                         ),
@@ -113,7 +113,7 @@ class _SiloSendAppState extends State<SiloSendApp> {
                 ),
               );
             }
-            return const SiloSendHomePage();
+            return const VayuHomePage();
           },
         ),
       ),

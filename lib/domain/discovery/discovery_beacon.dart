@@ -1,9 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/utils/crc32.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/utils/crc32.dart';
 
 /// Compact binary wire beacon for wireless peer discovery.
 ///
@@ -194,7 +194,7 @@ class DiscoveryBeacon {
     // Strip control characters and sanitize
     final sanitized = name.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
     if (sanitized.isEmpty) {
-      return 'SiloSend-Device';
+      return 'Vayu-Device';
     }
     return sanitized;
   }

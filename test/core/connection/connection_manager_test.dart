@@ -2,12 +2,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 void main() {
   group('ConnectionManager Real LAN Loopback Tests', () {
@@ -93,9 +93,9 @@ void main() {
         final sessionB = await sessionBFuture;
 
         final messageBytes = Uint8List.fromList(
-          utf8.encode('Hello from SiloSend A!'),
+          utf8.encode('Hello from Vayu A!'),
         );
-        final packet = SiloSendPacket(
+        final packet = VayuPacket(
           packetType: PacketType.chatMessage,
           packetId: 42,
           sourceDeviceId: identityA.deviceId,
@@ -109,7 +109,7 @@ void main() {
         final receivedPacket = await receivedPacketFuture;
         expect(receivedPacket.packetType, PacketType.chatMessage);
         expect(receivedPacket.packetId, 42);
-        expect(utf8.decode(receivedPacket.payload), 'Hello from SiloSend A!');
+        expect(utf8.decode(receivedPacket.payload), 'Hello from Vayu A!');
 
         // Verify metrics tracked
         expect(sessionA.info.bytesSent, messageBytes.length);
@@ -188,7 +188,7 @@ void main() {
       await sessionBFuture;
 
       // Send a raw ping from A to B via framed connection
-      final pingPacket = SiloSendPacket(
+      final pingPacket = VayuPacket(
         packetType: PacketType.ping,
         packetId: 999,
         sourceDeviceId: identityA.deviceId,

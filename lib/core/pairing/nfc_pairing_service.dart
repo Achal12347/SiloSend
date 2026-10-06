@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 /// Lifecycle status of an NFC pairing operation.
 enum NfcOperationStatus {
@@ -53,7 +53,7 @@ abstract class NfcPlatformAdapter {
   Future<void> writeNdef(Uint8List ndefBytes);
 }
 
-/// Manages out-of-band NFC pairing exchanges for SiloSend.
+/// Manages out-of-band NFC pairing exchanges for Vayu.
 ///
 /// Strictly truthful:
 /// - Verifies real device capabilities before initiating NFC operations.

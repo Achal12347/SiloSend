@@ -29,7 +29,7 @@ class PermissionsRationaleDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'SiloSend operates entirely offline and peer-to-peer. '
+              'Vayu operates entirely offline and peer-to-peer. '
               'Permissions are used strictly for local device communication without any cloud tracking.',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -42,7 +42,7 @@ class PermissionsRationaleDialog extends StatelessWidget {
               title: 'Nearby Devices (Bluetooth)',
               description:
                   'Used to discover and establish direct peer-to-peer radio links with nearby devices. '
-                  'SiloSend never tracks your physical location.',
+                  'Vayu never tracks your physical location.',
             ),
             const SizedBox(height: 12),
             _buildPermissionItem(

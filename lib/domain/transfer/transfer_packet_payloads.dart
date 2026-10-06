@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/utils/crc32.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/utils/crc32.dart';
 
 /// Subtype / packet type codes for Phase 7 Transfer Wire Protocol.
 class TransferPacketSubtype {
@@ -159,7 +159,7 @@ class TransferMetadataPayload {
     clean = clean.replaceAll(RegExp(r'\.\.+'), '.');
     clean = clean.replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '').trim();
     if (clean.isEmpty) {
-      clean = 'silosend_file.bin';
+      clean = 'vayu_file.bin';
     }
     final encoded = utf8.encode(clean);
     if (encoded.length > maxNameLength) {

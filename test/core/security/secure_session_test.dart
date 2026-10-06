@@ -2,20 +2,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/connection/lan_connection_server.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/errors/app_error.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/core/security/peer_trust_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_key_store.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
-import 'package:silosend_datasharing_app/domain/security/encrypted_envelope.dart';
-import 'package:silosend_datasharing_app/domain/security/trust_level.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/errors/app_error.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/peer_trust_store.dart';
+import 'package:vayu/core/security/secure_key_store.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/domain/security/encrypted_envelope.dart';
+import 'package:vayu/domain/security/trust_level.dart';
 
 void main() {
   group('SecureSession & SecureSessionManager Real Loopback Tests', () {
@@ -150,7 +150,7 @@ void main() {
         final secretPayloadA = utf8.encode(
           'Super Confidential Document Chunk 001',
         );
-        final packetFromA = SiloSendPacket(
+        final packetFromA = VayuPacket(
           packetType: PacketType.transferChunk,
           packetId: 101,
           sourceDeviceId: identityA.deviceId,
@@ -173,7 +173,7 @@ void main() {
         final aReceivedPacketFuture = secureA.incomingDecryptedPackets.first;
 
         final secretReplyB = utf8.encode('Chunk 001 Acknowledged and Verified');
-        final replyFromB = SiloSendPacket(
+        final replyFromB = VayuPacket(
           packetType: PacketType.transferAck,
           packetId: 102,
           sourceDeviceId: identityB.deviceId,

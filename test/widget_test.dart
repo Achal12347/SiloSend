@@ -2,18 +2,18 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/identity/identity_storage.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/main.dart';
-import 'package:silosend_datasharing_app/platform/system_platform_service.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/main.dart';
+import 'package:vayu/platform/system_platform_service.dart';
 
 void main() {
   testWidgets(
-    'SiloSendApp mounts, initializes real identity, and renders truthful discovery & connection state',
+    'VayuApp mounts, initializes real identity, and renders truthful discovery & connection state',
     (WidgetTester tester) async {
       final identity = LocalDeviceIdentity(
         deviceId: Uint8List.fromList(List<int>.filled(16, 0x42)),
@@ -30,7 +30,7 @@ void main() {
       );
 
       await container.initialize();
-      await tester.pumpWidget(SiloSendApp(container: container));
+      await tester.pumpWidget(VayuApp(container: container));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 

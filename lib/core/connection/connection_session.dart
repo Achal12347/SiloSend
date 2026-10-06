@@ -1,16 +1,16 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/core/connection/framed_transport_connection.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
-import 'package:silosend_datasharing_app/domain/models/connection_session.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/framed_transport_connection.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/models/connection_session.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
-/// Manages an active, established transport connection session with a remote SiloSend peer.
+/// Manages an active, established transport connection session with a remote Vayu peer.
 ///
 /// Handles packet routing, automatic keepalive pings/pongs, inactivity detection,
 /// metrics tracking, and graceful session teardown.
@@ -28,12 +28,12 @@ class ConnectionSession {
   ConnectionSessionInfo _info;
   late final Uint8List _remoteDeviceIdBytes;
 
-  late final StreamController<SiloSendPacket> _incomingPacketsController;
-  final List<SiloSendPacket> _bufferedIncomingPackets = [];
+  late final StreamController<VayuPacket> _incomingPacketsController;
+  final List<VayuPacket> _bufferedIncomingPackets = [];
   final StreamController<ConnectionSessionInfo> _stateController =
       StreamController<ConnectionSessionInfo>.broadcast();
 
-  StreamSubscription<SiloSendPacket>? _packetSubscription;
+  StreamSubscription<VayuPacket>? _packetSubscription;
   Timer? _heartbeatTimer;
   DateTime _lastActivity;
   int _packetSequence = 1;
@@ -50,7 +50,7 @@ class ConnectionSession {
        _onClosedCallback = onClosed,
        _lastActivity = DateTime.now() {
     _remoteDeviceIdBytes = _parseHexToBytes(info.remoteDeviceId);
-    _incomingPacketsController = StreamController<SiloSendPacket>.broadcast(
+    _incomingPacketsController = StreamController<VayuPacket>.broadcast(
       onListen: _flushBufferedPackets,
     );
     _init();
@@ -75,7 +75,7 @@ class ConnectionSession {
       !_isDisposed;
   LinkMetrics get currentMetrics => connection.currentMetrics;
 
-  Stream<SiloSendPacket> get incomingPackets =>
+  Stream<VayuPacket> get incomingPackets =>
       _incomingPacketsController.stream;
   Stream<ConnectionSessionInfo> get stateChanges => _stateController.stream;
 
@@ -102,7 +102,7 @@ class ConnectionSession {
     _startHeartbeatTimer();
   }
 
-  void _handleIncomingPacket(SiloSendPacket packet) {
+  void _handleIncomingPacket(VayuPacket packet) {
     _lastActivity = DateTime.now();
     _updateMetrics(bytesReceivedDelta: packet.payload.length);
 
@@ -179,7 +179,7 @@ class ConnectionSession {
 
   Future<void> _sendPing() async {
     try {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.ping,
         packetId: _nextPacketId(),
         sourceDeviceId: localIdentity.deviceId,
@@ -197,7 +197,7 @@ class ConnectionSession {
 
   Future<void> _sendPong(int requestPacketId) async {
     try {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.pong,
         packetId: requestPacketId,
         sourceDeviceId: localIdentity.deviceId,
@@ -214,7 +214,7 @@ class ConnectionSession {
   }
 
   /// Sends a data packet across this session link.
-  Future<void> sendPacket(SiloSendPacket packet) async {
+  Future<void> sendPacket(VayuPacket packet) async {
     if (!isActive) {
       throw StateError(
         'Cannot send packet on inactive session $sessionId (state: $state)',
@@ -244,7 +244,7 @@ class ConnectionSession {
 
     if (sendTeardownPacket && connection.isConnected) {
       try {
-        final teardownPacket = SiloSendPacket(
+        final teardownPacket = VayuPacket(
           packetType: PacketType.sessionTeardown,
           packetId: _nextPacketId(),
           sourceDeviceId: localIdentity.deviceId,

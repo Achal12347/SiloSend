@@ -1,6 +1,6 @@
-/// Trust and authentication status for a peer device identity in SiloSend.
+/// Trust and authentication status for a peer device identity in Vayu.
 ///
-/// In accordance with the SiloSend security model:
+/// In accordance with the Vayu security model:
 /// - A signature proves possession of the private key corresponding to the presented public key
 ///   and that this key signed the claimed device ID.
 /// - It does NOT prove that a freshly generated device ID intrinsically belongs to that public key on first contact.

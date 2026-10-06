@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
 
 void main() {
   group('LocalDeviceIdentity Tests', () {

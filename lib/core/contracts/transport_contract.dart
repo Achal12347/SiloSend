@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-/// Enumerates the physical / radio transports supported by SiloSend.
+/// Enumerates the physical / radio transports supported by Vayu.
 enum TransportType { ble, wifiDirect, lan }
 
 /// Dynamic quality and speed metrics for an active transport link.

@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
 
 void main() {
   group('PairingPayload', () {
@@ -42,7 +42,7 @@ void main() {
       expect(restored.timestamp, 1700000000000);
     });
 
-    test('serializes to and from standard silosend://pair URI', () {
+    test('serializes to and from standard vayu://pair URI', () {
       final payload = PairingPayload(
         protocolVersion: 1,
         deviceIdHex: validHexId,
@@ -55,7 +55,7 @@ void main() {
       );
 
       final uri = payload.toUri();
-      expect(uri.scheme, 'silosend');
+      expect(uri.scheme, 'vayu');
       expect(uri.host, 'pair');
 
       final restored = PairingPayload.fromUri(uri);
@@ -156,7 +156,7 @@ void main() {
         pairingToken: validToken,
       );
 
-      expect(payload.displayName, 'SiloSend-Device');
+      expect(payload.displayName, 'Vayu-Device');
     });
 
     test('validates device ID hex format', () {
@@ -223,9 +223,15 @@ void main() {
           throwsFormatException,
         );
 
-        final missingToken = Uri.parse('silosend://pair?id=$validHexId');
+        final missingToken = Uri.parse('vayu://pair?id=$validHexId');
         expect(
           () => PairingPayload.fromUri(missingToken),
+          throwsFormatException,
+        );
+
+        final missingTokenLegacy = Uri.parse('silosend://pair?id=$validHexId');
+        expect(
+          () => PairingPayload.fromUri(missingTokenLegacy),
           throwsFormatException,
         );
       },

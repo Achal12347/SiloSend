@@ -1,4 +1,4 @@
-package com.silosend.discovery
+package com.achyrio.vayu.discovery
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
@@ -26,8 +26,8 @@ import java.util.UUID
 class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     companion object {
         private const val TAG = "SiloSend.BleDiscovery"
-        private const val METHOD_CHANNEL = "com.silosend/ble_discovery"
-        private const val EVENT_CHANNEL = "com.silosend/ble_scan_events"
+        private const val METHOD_CHANNEL = "com.achyrio.vayu/ble_discovery"
+        private const val EVENT_CHANNEL = "com.achyrio.vayu/ble_scan_events"
         private const val SILOSEND_SERVICE_UUID = "00005353-0000-1000-8000-00805f9b34fb"
     }
 

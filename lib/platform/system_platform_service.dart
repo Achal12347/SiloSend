@@ -2,9 +2,9 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
-import 'package:silosend_datasharing_app/platform/platform_service.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/platform/platform_service.dart';
 
 /// Real platform capability provider.
 ///
@@ -13,7 +13,7 @@ import 'package:silosend_datasharing_app/platform/platform_service.dart';
 /// - Unprobed radios and sensors are explicitly reported as [CapabilityStatus.unknown]
 ///   until real native platform channels or plugins are attached.
 class SystemPlatformService implements PlatformService {
-  static const MethodChannel _channel = MethodChannel('com.silosend/platform');
+  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/platform');
 
   final String? platformNameOverride;
   final Future<DeviceCapabilities> Function()? customProbe;

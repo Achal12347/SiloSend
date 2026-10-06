@@ -1,14 +1,14 @@
-/// Core application constants for SiloSend.
+/// Core application constants for Vayu.
 class AppConstants {
   AppConstants._();
 
   /// User-facing application name.
-  static const String appName = 'SiloSend';
+  static const String appName = 'Vayu';
 
   /// Application identifier.
-  static const String applicationId = 'com.silosend';
+  static const String applicationId = 'com.achyrio.vayu';
 
-  /// Protocol version for SiloSend device-to-device communication.
+  /// Protocol version for Vayu device-to-device communication.
   static const int protocolVersion = 1;
 
   /// Android minimum supported SDK version (Android 8.0 Oreo).

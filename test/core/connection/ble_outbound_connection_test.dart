@@ -1,10 +1,10 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/connection/ble_connection.dart';
-import 'package:silosend_datasharing_app/core/connection/connection_manager.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:vayu/core/connection/ble_connection.dart';
+import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
 
 class _MockBleTransportAdapter implements BleTransportAdapter {
   final List<Uint8List> sentChunks = [];

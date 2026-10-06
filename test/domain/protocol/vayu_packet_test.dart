@@ -2,11 +2,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 void main() {
-  group('SiloSendPacket Tests', () {
+  group('VayuPacket Tests', () {
     late Uint8List sourceId;
     late Uint8List destId;
     late Uint8List samplePayload;
@@ -14,11 +14,11 @@ void main() {
     setUp(() {
       sourceId = Uint8List.fromList(List.generate(16, (i) => i + 1));
       destId = Uint8List.fromList(List.generate(16, (i) => 200 - i));
-      samplePayload = Uint8List.fromList(utf8.encode('Hello SiloSend'));
+      samplePayload = Uint8List.fromList(utf8.encode('Hello Vayu'));
     });
 
     test('encodes and decodes packet correctly (roundtrip)', () {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.chatMessage,
         packetId: 1001,
         sourceDeviceId: sourceId,
@@ -30,11 +30,11 @@ void main() {
       final encoded = packet.toBytes();
       expect(
         encoded.length,
-        equals(SiloSendPacket.headerSize + samplePayload.length + 4),
+        equals(VayuPacket.headerSize + samplePayload.length + 4),
       );
 
-      final decoded = SiloSendPacket.fromBytes(encoded);
-      expect(decoded.version, equals(SiloSendPacket.currentProtocolVersion));
+      final decoded = VayuPacket.fromBytes(encoded);
+      expect(decoded.version, equals(VayuPacket.currentProtocolVersion));
       expect(decoded.packetType, equals(PacketType.chatMessage));
       expect(decoded.packetId, equals(1001));
       expect(decoded.sourceDeviceId, equals(sourceId));
@@ -44,7 +44,7 @@ void main() {
     });
 
     test('supports empty payload frames (e.g. Ping/Pong/Acks)', () {
-      final ackPacket = SiloSendPacket(
+      final ackPacket = VayuPacket(
         packetType: PacketType.ping,
         packetId: 42,
         sourceDeviceId: sourceId,
@@ -53,15 +53,15 @@ void main() {
       );
 
       final encoded = ackPacket.toBytes();
-      expect(encoded.length, equals(SiloSendPacket.minPacketSize));
+      expect(encoded.length, equals(VayuPacket.minPacketSize));
 
-      final decoded = SiloSendPacket.fromBytes(encoded);
+      final decoded = VayuPacket.fromBytes(encoded);
       expect(decoded.packetType, equals(PacketType.ping));
       expect(decoded.payload.length, equals(0));
     });
 
     test('rejects packet with invalid magic bytes', () {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.handshakeInit,
         packetId: 1,
         sourceDeviceId: sourceId,
@@ -73,7 +73,7 @@ void main() {
       bytes[0] = 0x00; // Corrupt magic
 
       expect(
-        () => SiloSendPacket.fromBytes(bytes),
+        () => VayuPacket.fromBytes(bytes),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -85,7 +85,7 @@ void main() {
     });
 
     test('rejects packet with unsupported protocol version', () {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.handshakeInit,
         packetId: 1,
         sourceDeviceId: sourceId,
@@ -97,7 +97,7 @@ void main() {
       bytes[2] = 99; // Corrupt version
 
       expect(
-        () => SiloSendPacket.fromBytes(bytes),
+        () => VayuPacket.fromBytes(bytes),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -109,7 +109,7 @@ void main() {
     });
 
     test('rejects packet with corrupted payload (CRC32 failure)', () {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: 50,
         sourceDeviceId: sourceId,
@@ -119,10 +119,10 @@ void main() {
 
       final bytes = packet.toBytes();
       // Flip a bit in the payload area
-      bytes[SiloSendPacket.headerSize] ^= 0xFF;
+      bytes[VayuPacket.headerSize] ^= 0xFF;
 
       expect(
-        () => SiloSendPacket.fromBytes(bytes),
+        () => VayuPacket.fromBytes(bytes),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -135,7 +135,7 @@ void main() {
 
     test('rejects truncated byte streams', () {
       expect(
-        () => SiloSendPacket.fromBytes(Uint8List(20)),
+        () => VayuPacket.fromBytes(Uint8List(20)),
         throwsA(
           isA<FormatException>().having(
             (e) => e.message,
@@ -147,7 +147,7 @@ void main() {
     });
 
     test('allows TTL modification via copyWith for relay forwarding', () {
-      final original = SiloSendPacket(
+      final original = VayuPacket(
         packetType: PacketType.chatMessage,
         packetId: 1,
         sourceDeviceId: sourceId,
@@ -162,13 +162,13 @@ void main() {
       expect(forwarded.destinationDeviceId, equals(destId));
 
       // Ensure newly encoded forwarded packet has valid CRC
-      final decoded = SiloSendPacket.fromBytes(forwarded.toBytes());
+      final decoded = VayuPacket.fromBytes(forwarded.toBytes());
       expect(decoded.ttl, equals(2));
     });
 
     test('validates 16-byte requirement for source and destination IDs', () {
       expect(
-        () => SiloSendPacket(
+        () => VayuPacket(
           packetType: PacketType.ping,
           packetId: 1,
           sourceDeviceId: Uint8List(15), // invalid

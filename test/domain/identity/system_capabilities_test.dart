@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/identity/system_capabilities.dart';
 
 void main() {
   group('SystemCapabilities Model Tests', () {

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/device_capabilities.dart';
 
 void main() {
   group('DeviceCapabilities Tests', () {

@@ -1,15 +1,15 @@
 import 'dart:async';
 import 'dart:math';
 
-import 'package:silosend_datasharing_app/core/contracts/discovery_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/file_picker_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/storage_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_selector_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/security/secure_session_manager.dart';
-import 'package:silosend_datasharing_app/core/session/session_lifecycle_policy.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/file_picker_contract.dart';
+import 'package:vayu/core/contracts/storage_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/secure_session_manager.dart';
+import 'package:vayu/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
 
 /// High-level coordinator orchestrating the full Phase 9 file sharing experience:
 /// file selection, smart transport connection, sliding-window streaming, recipient prompt,
@@ -294,7 +294,7 @@ class FileSharingCoordinator {
       final info = session.connectionSession.info;
       _knownPeers[request.senderDeviceId] = DiscoveredPeer(
         deviceId: request.senderDeviceId,
-        displayName: info.remoteDisplayName ?? 'SiloSend Peer',
+        displayName: info.remoteDisplayName ?? 'Vayu Peer',
         transportType: info.activeTransport,
         rssi: 0,
         endpointAddress:

@@ -1,6 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/lifecycle/app_lifecycle_manager.dart';
+import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

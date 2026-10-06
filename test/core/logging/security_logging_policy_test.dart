@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/core/logging/security_logging_policy.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/logging/security_logging_policy.dart';
 
 void main() {
   group('SecurityLoggingPolicy Tests', () {
@@ -24,7 +24,7 @@ void main() {
 
     test('preserves public fingerprints, sequence counters, and state names', () {
       const msg =
-          'Session session-123 transitioned to SessionState.secured at seq 42 with fingerprint SiloSend-Ed25519-Identity-v1:a1b2c3d4e5f6';
+          'Session session-123 transitioned to SessionState.secured at seq 42 with fingerprint Vayu-Ed25519-Identity-v1:a1b2c3d4e5f6';
       final sanitized = SecurityLoggingPolicy.sanitize(msg);
       expect(sanitized, equals(msg));
     });
@@ -44,7 +44,7 @@ void main() {
       );
       expect(
         SecurityLoggingPolicy.containsSensitivePatterns(
-          'Public fingerprint SiloSend-Ed25519-Identity-v1:abc',
+          'Public fingerprint Vayu-Ed25519-Identity-v1:abc',
         ),
         isFalse,
       );
@@ -56,12 +56,12 @@ void main() {
 
     test('formatPublicFingerprint truncates safely', () {
       const fp =
-          'SiloSend-Ed25519-Identity-v1:abcdef1234567890abcdef1234567890';
+          'Vayu-Ed25519-Identity-v1:abcdef1234567890abcdef1234567890';
       final truncated = SecurityLoggingPolicy.formatPublicFingerprint(
         fp,
         prefixLength: 20,
       );
-      expect(truncated, equals('SiloSend-Ed25519-Ide...'));
+      expect(truncated, equals('Vayu-Ed25519-Identit...'));
       expect(
         SecurityLoggingPolicy.formatPublicFingerprint(
           'short',

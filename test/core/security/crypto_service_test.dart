@@ -1,8 +1,8 @@
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/security/crypto_service.dart';
-import 'package:silosend_datasharing_app/domain/security/auth_exchange_payload.dart';
+import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/domain/security/auth_exchange_payload.dart';
 
 void main() {
   group('CryptoService Tests', () {
@@ -193,7 +193,7 @@ void main() {
         final key = Uint8List.fromList(List.generate(32, (i) => (i * 7) % 256));
         final nonce = Uint8List.fromList(List.generate(12, (i) => i));
         final plaintext = Uint8List.fromList(
-          'Hello SiloSend Confidential Wire!'.codeUnits,
+          'Hello Vayu Confidential Wire!'.codeUnits,
         );
 
         final aad = CryptoService.constructAad(

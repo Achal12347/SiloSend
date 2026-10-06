@@ -1,4 +1,4 @@
-package com.silosend.connection
+package com.achyrio.vayu.connection
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
@@ -32,8 +32,8 @@ class BleConnectionHandler(private val context: Context) :
 
     companion object {
         private const val TAG = "SiloSend.BleConnection"
-        private const val METHOD_CHANNEL = "com.silosend/ble_connection"
-        private const val EVENT_CHANNEL = "com.silosend/ble_connection_events"
+        private const val METHOD_CHANNEL = "com.achyrio.vayu/ble_connection"
+        private const val EVENT_CHANNEL = "com.achyrio.vayu/ble_connection_events"
 
         val SERVICE_UUID: UUID = UUID.fromString("00005353-0000-1000-8000-00805f9b34fb")
         val RX_CHAR_UUID: UUID = UUID.fromString("00005354-0000-1000-8000-00805f9b34fb")

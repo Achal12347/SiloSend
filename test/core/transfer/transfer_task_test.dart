@@ -3,15 +3,15 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/transfer/transfer_task_impl.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_destination.dart';
-import 'package:silosend_datasharing_app/domain/transfer/payload_source.dart';
-import 'package:silosend_datasharing_app/domain/transfer/transfer_packet_payloads.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/transfer/transfer_task_impl.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
+import 'package:vayu/domain/transfer/payload_source.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 class TestSecureSession implements SecureSession {
   @override
@@ -21,9 +21,9 @@ class TestSecureSession implements SecureSession {
   @override
   SessionState state = SessionState.secured;
 
-  final List<SiloSendPacket> sentPackets = [];
-  final StreamController<SiloSendPacket> _incomingController =
-      StreamController<SiloSendPacket>.broadcast();
+  final List<VayuPacket> sentPackets = [];
+  final StreamController<VayuPacket> _incomingController =
+      StreamController<VayuPacket>.broadcast();
 
   TestSecureSession({
     this.sessionId = '11111111111111111111111111111111',
@@ -34,15 +34,15 @@ class TestSecureSession implements SecureSession {
   bool get isEstablished => state == SessionState.secured;
 
   @override
-  Stream<SiloSendPacket> get incomingDecryptedPackets =>
+  Stream<VayuPacket> get incomingDecryptedPackets =>
       _incomingController.stream;
 
   @override
-  Future<void> sendEncryptedPacket(SiloSendPacket packet) async {
+  Future<void> sendEncryptedPacket(VayuPacket packet) async {
     sentPackets.add(packet);
   }
 
-  void deliverPacket(SiloSendPacket packet) {
+  void deliverPacket(VayuPacket packet) {
     _incomingController.add(packet);
   }
 
@@ -484,7 +484,7 @@ void main() {
       () async {
         final session = TestSecureSession();
         final tempDir = await Directory.systemTemp.createTemp(
-          'silosend_interrupt_',
+          'vayu_interrupt_',
         );
         final targetPath = '${tempDir.path}/interrupted.bin';
         final destination = FilePayloadDestination(

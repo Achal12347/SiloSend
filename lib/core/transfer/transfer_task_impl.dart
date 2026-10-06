@@ -4,13 +4,13 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:silosend_datasharing_app/core/contracts/security_contract.dart';
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/models/transfer_models.dart';
-import 'package:silosend_datasharing_app/domain/protocol/packet_type.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
-import 'package:silosend_datasharing_app/domain/transfer/transfer_packet_payloads.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/models/transfer_models.dart';
+import 'package:vayu/domain/protocol/packet_type.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 /// Helper to parse hex/UUID strings into 16-byte raw byte identifiers.
 Uint8List parseIdTo16Bytes(String id) {
@@ -149,7 +149,7 @@ class OutboundTransferTask implements TransferTask {
       extraMetadata: metadata.extraMetadata,
     );
 
-    final packet = SiloSendPacket(
+    final packet = VayuPacket(
       packetType: PacketType.transferMetadata,
       packetId: DateTime.now().microsecondsSinceEpoch,
       sourceDeviceId: _localIdBytes,
@@ -170,7 +170,7 @@ class OutboundTransferTask implements TransferTask {
     }
 
     // Window pump will be activated upon initial offerAccepted / resumeCheckpoint ACK
-    // or we can pre-prime window if immediate sending is desired. In SiloSend wire protocol,
+    // or we can pre-prime window if immediate sending is desired. In Vayu wire protocol,
     // receiver must accept the offer before sending chunks.
   }
 
@@ -216,7 +216,7 @@ class OutboundTransferTask implements TransferTask {
 
       _inFlightChunks[chunkIdx] = chunkPayload;
 
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: DateTime.now().microsecondsSinceEpoch,
         sourceDeviceId: _localIdBytes,
@@ -271,7 +271,7 @@ class OutboundTransferTask implements TransferTask {
     // Resend chunk
     final payload = _inFlightChunks[chunkIdx];
     if (payload != null) {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferChunk,
         packetId: DateTime.now().microsecondsSinceEpoch,
         sourceDeviceId: _localIdBytes,
@@ -395,7 +395,7 @@ class OutboundTransferTask implements TransferTask {
       _chunkRetryCounts[nack.chunkIndex] = retries;
       final payload = _inFlightChunks[nack.chunkIndex];
       if (payload != null) {
-        final packet = SiloSendPacket(
+        final packet = VayuPacket(
           packetType: PacketType.transferChunk,
           packetId: DateTime.now().microsecondsSinceEpoch,
           sourceDeviceId: _localIdBytes,
@@ -500,7 +500,7 @@ class OutboundTransferTask implements TransferTask {
     );
 
     try {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferCancel,
         packetId: DateTime.now().microsecondsSinceEpoch,
         sourceDeviceId: _localIdBytes,
@@ -548,7 +548,7 @@ class OutboundTransferTask implements TransferTask {
     );
 
     try {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferCancel,
         packetId: DateTime.now().microsecondsSinceEpoch,
         sourceDeviceId: _localIdBytes,
@@ -583,7 +583,7 @@ class OutboundTransferTask implements TransferTask {
     );
 
     try {
-      final packet = SiloSendPacket(
+      final packet = VayuPacket(
         packetType: PacketType.transferCancel,
         packetId: DateTime.now().microsecondsSinceEpoch,
         sourceDeviceId: _localIdBytes,
@@ -661,7 +661,7 @@ class OutboundTransferTask implements TransferTask {
 /// - SACK generation with selective bitmap lookahead.
 /// - Duplicate chunk detection and absorption.
 /// - Full-payload SHA-256 integrity verification against metadata hash.
-/// - Atomic promotion from staging file (`.silosend.tmp`) to final destination.
+/// - Atomic promotion from staging file (`.vayu.tmp`) to final destination.
 /// - Immediate cleanup and abort on cancel, hash mismatch, or storage error.
 class InboundTransferTask implements TransferTask {
   @override
@@ -1023,7 +1023,7 @@ class InboundTransferTask implements TransferTask {
   }
 
   Future<void> _sendPacket(PacketType type, Uint8List payload) async {
-    final packet = SiloSendPacket(
+    final packet = VayuPacket(
       packetType: type,
       packetId: DateTime.now().microsecondsSinceEpoch,
       sourceDeviceId: _localIdBytes,

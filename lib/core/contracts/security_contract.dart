@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 /// Lifecycle state of a cryptographic session between two devices.
 enum SessionState {
@@ -42,10 +42,10 @@ abstract class SecureSession {
   });
 
   /// Sends an encrypted, authenticated packet over the secure channel.
-  Future<void> sendEncryptedPacket(SiloSendPacket packet);
+  Future<void> sendEncryptedPacket(VayuPacket packet);
 
   /// Reactive stream of decrypted, integrity-verified application packets.
-  Stream<SiloSendPacket> get incomingDecryptedPackets;
+  Stream<VayuPacket> get incomingDecryptedPackets;
 
   /// Gracefully tears down the session and securely zeroes keys from memory.
   Future<void> terminate();

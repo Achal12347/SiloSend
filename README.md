@@ -1,6 +1,8 @@
-# SiloSend
+# Vayu
 
-**SiloSend** is a fast, secure, and completely offline device-to-device communication and data sharing app.
+**Vayu by Achyrio** is a fast, secure, and completely offline device-to-device communication and peer-to-peer data sharing app.
+
+*Note: Previously developed under the name SiloSend.*
 
 Share files, contacts, and messages directly with nearby devices—no internet connection, Wi-Fi router, cloud servers, or mobile data required.
 
@@ -33,7 +35,7 @@ Share files, contacts, and messages directly with nearby devices—no internet c
 - **Group Sharing:** Host a sharing session and send files simultaneously to multiple nearby friends or colleagues without repeating the transfer for each person.
 
 ### 🔄 Privacy-Preserving Mesh Relaying
-- **Extended Range:** Route messages and transfers through intermediate SiloSend devices when out of direct range.
+- **Extended Range:** Route messages and transfers through intermediate Vayu devices when out of direct range.
 - **Protected Forwarding:** Intermediate relay devices forward only encrypted data packets and can never inspect or view your private contents.
 
 ### 🛡️ End-to-End Security & Privacy

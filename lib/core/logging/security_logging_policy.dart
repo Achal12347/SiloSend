@@ -1,6 +1,6 @@
-/// Formal SiloSend Security Logging Policy and Sanitization Engine.
+/// Formal Vayu Security Logging Policy and Sanitization Engine.
 ///
-/// In accordance with SiloSend Privacy & Security Principles (TARGET.md §3.2, §3.3),
+/// In accordance with Vayu Privacy & Security Principles (TARGET.md §3.2, §3.3),
 /// sensitive cryptographic material and user plaintext must NEVER be logged or leaked
 /// to system diagnostics or logcat.
 ///
@@ -12,7 +12,7 @@
 /// - Plaintext user data payloads (messages, file contents)
 ///
 /// ### PERMITTED in Logs:
-/// - Public key fingerprints (e.g. `SiloSend-Ed25519-Identity-v1:a1b2...`)
+/// - Public key fingerprints (e.g. `Vayu-Ed25519-Identity-v1:a1b2...`)
 /// - Ephemeral public keys (publicly exchanged over the wire)
 /// - Monotonic packet sequence numbers and packet IDs
 /// - Session IDs and Device UUIDs

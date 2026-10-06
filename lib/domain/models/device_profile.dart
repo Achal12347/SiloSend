@@ -1,4 +1,4 @@
-/// Represents the verified identity of a SiloSend device.
+/// Represents the verified identity of a Vayu device.
 ///
 /// Per AI/AGENTS.md, this must always be populated with real device data,
 /// never mock or fabricated values.
@@ -9,7 +9,7 @@ class DeviceProfile {
   /// User-visible device display name.
   final String displayName;
 
-  /// Supported SiloSend protocol version.
+  /// Supported Vayu protocol version.
   final int protocolVersion;
 
   /// Underlying platform name (e.g. Android, Windows).

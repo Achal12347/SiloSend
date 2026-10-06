@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:silosend_datasharing_app/core/logging/app_logger.dart';
-import 'package:silosend_datasharing_app/domain/identity/local_device_identity.dart';
+import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/identity/local_device_identity.dart';
 
 /// Abstract persistence contract for storing and restoring local device identity.
 abstract class IdentityStorage {

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:silosend_datasharing_app/core/constants/app_constants.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/core/state/app_container.dart';
-import 'package:silosend_datasharing_app/domain/pairing/pairing_payload.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
 
 /// Modal dialog displaying local pairing parameters and direct out-of-band connection controls.
 class PairingDialog extends StatefulWidget {
@@ -82,7 +82,7 @@ class _PairingDialogState extends State<PairingDialog> {
     });
 
     try {
-      if (input.startsWith('silosend://pair')) {
+      if (input.startsWith('vayu://pair') || input.startsWith('silosend://pair')) {
         final payload = PairingPayload.fromUri(Uri.parse(input));
         if (payload.lanPort != null && payload.lanAddress != null) {
           await widget.container.connectionManager.connectToLanPeer(
@@ -107,7 +107,7 @@ class _PairingDialogState extends State<PairingDialog> {
         );
       } else {
         throw const FormatException(
-          'Please enter a valid silosend://pair URI or IP:Port (e.g. 192.168.1.50:53531)',
+          'Please enter a valid vayu://pair URI or IP:Port (e.g. 192.168.1.50:53531)',
         );
       }
 
@@ -267,7 +267,7 @@ class _PairingDialogState extends State<PairingDialog> {
               TextField(
                 controller: _uriController,
                 decoration: InputDecoration(
-                  hintText: 'Paste silosend://pair URI or IP:Port',
+                  hintText: 'Paste vayu://pair URI or IP:Port',
                   hintStyle: const TextStyle(fontSize: 12),
                   isDense: true,
                   border: const OutlineInputBorder(),

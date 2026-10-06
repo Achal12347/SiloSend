@@ -1,4 +1,4 @@
-import 'package:silosend_datasharing_app/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 
 /// Represents a document selected by the user via platform file selection.
 ///

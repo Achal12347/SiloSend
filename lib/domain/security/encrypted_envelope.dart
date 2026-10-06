@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-/// Encapsulates an encrypted payload frame transferred inside a SiloSendPacket.
+/// Encapsulates an encrypted payload frame transferred inside a VayuPacket.
 ///
 /// Binary Wire Layout:
 /// - Epoch: 1 byte (uint8, 0..255)

@@ -1,4 +1,4 @@
-/// Identifies the high-level intent of a binary SiloSend wire frame.
+/// Identifies the high-level intent of a binary Vayu wire frame.
 enum PacketType {
   handshakeInit(0x01),
   handshakeResponse(0x02),

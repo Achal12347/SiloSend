@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:silosend_datasharing_app/domain/transfer/content_uri_payload_source.dart';
+import 'package:vayu/domain/transfer/content_uri_payload_source.dart';
 
 void main() {
   group('ContentUriPayloadSource Tests', () {

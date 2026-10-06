@@ -1,13 +1,13 @@
 import 'dart:async';
 
-import 'package:silosend_datasharing_app/core/connection/packet_framing.dart';
-import 'package:silosend_datasharing_app/core/contracts/transport_contract.dart';
-import 'package:silosend_datasharing_app/domain/protocol/silosend_packet.dart';
+import 'package:vayu/core/connection/packet_framing.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/domain/protocol/vayu_packet.dart';
 
 /// Decorates a [TransportConnection] with typed packet stream framing and serialization.
 class FramedTransportConnection {
   final TransportConnection rawConnection;
-  late final Stream<SiloSendPacket> _packetStream;
+  late final Stream<VayuPacket> _packetStream;
 
   FramedTransportConnection(this.rawConnection) {
     _packetStream = rawConnection.incomingBytes
@@ -24,11 +24,11 @@ class FramedTransportConnection {
   String? get disconnectReason => rawConnection.disconnectReason;
   LinkMetrics get currentMetrics => rawConnection.currentMetrics;
 
-  /// Stream of discrete, CRC-verified [SiloSendPacket] objects received from the peer.
-  Stream<SiloSendPacket> get incomingPackets => _packetStream;
+  /// Stream of discrete, CRC-verified [VayuPacket] objects received from the peer.
+  Stream<VayuPacket> get incomingPackets => _packetStream;
 
-  /// Serializes and transmits a [SiloSendPacket] across the physical transport link.
-  Future<void> sendPacket(SiloSendPacket packet) async {
+  /// Serializes and transmits a [VayuPacket] across the physical transport link.
+  Future<void> sendPacket(VayuPacket packet) async {
     final bytes = packet.toBytes();
     await rawConnection.sendBytes(bytes);
   }
