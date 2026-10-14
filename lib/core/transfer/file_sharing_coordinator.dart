@@ -10,6 +10,7 @@ import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/security/secure_session_manager.dart';
 import 'package:vayu/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/core/transfer/receive_ticket.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
 import 'package:vayu/core/transfer/transfer_history.dart';
 import 'package:vayu/core/transfer/transfer_keep_alive_controller.dart';
@@ -53,6 +54,19 @@ class FileSharingCoordinator {
       StreamController<IncomingTransferRequest>.broadcast();
   final StreamController<IncomingBatchRequest> _incomingBatchesController =
       StreamController<IncomingBatchRequest>.broadcast();
+  final StreamController<TransferBatch> _autoAcceptedController =
+      StreamController<TransferBatch>.broadcast();
+
+  // Receiving side: the ticket shown on the Receive screen, while open.
+  String? _receiveTicket;
+  DateTime? _receiveUntil;
+
+  // Sending side: tickets scanned or tapped from receivers, by device ID.
+  final Map<String, (String, DateTime)> _ticketsFromReceivers = {};
+
+  /// How long a Receive ticket (shown or scanned) stays valid.
+  static const Duration receiveTicketLifetime = Duration(minutes: 10);
+
   late final StreamSubscription<IncomingTransferRequest> _engineRequestsSub;
   late final StreamSubscription<IncomingBatchRequest> _engineBatchesSub;
   bool _isDisposed = false;
@@ -71,11 +85,9 @@ class FileSharingCoordinator {
     _engineRequestsSub = transferEngine.incomingTransferRequests.listen(
       _onEngineRequest,
     );
-    _engineBatchesSub = transferEngine.incomingBatchRequests.listen((request) {
-      if (!_incomingBatchesController.isClosed) {
-        _incomingBatchesController.add(request);
-      }
-    });
+    _engineBatchesSub = transferEngine.incomingBatchRequests.listen(
+      _onEngineBatch,
+    );
   }
 
   void Function() _holdKeepAlive(String text) {
@@ -91,6 +103,96 @@ class FileSharingCoordinator {
   /// Incoming batch offers: one decision covers every file listed.
   Stream<IncomingBatchRequest> get incomingBatchRequests =>
       _incomingBatchesController.stream;
+
+  // ------------------------------------------------------------ receive
+
+  /// Batches accepted without a prompt because the sender proved it scanned
+  /// or tapped this phone's Receive ticket.
+  Stream<TransferBatch> get autoAcceptedBatches =>
+      _autoAcceptedController.stream;
+
+  /// True while a Receive screen's ticket is valid.
+  bool get isReceiving =>
+      _receiveTicket != null &&
+      _receiveUntil != null &&
+      DateTime.now().isBefore(_receiveUntil!);
+
+  /// When the current Receive session ends, if one is open.
+  DateTime? get receiveSessionEndsAt => isReceiving ? _receiveUntil : null;
+
+  /// Opens a Receive session for [ticketHex] (the secret in the code this
+  /// phone shows). Offers carrying a valid proof for it are accepted without
+  /// a prompt until [endReceiveSession] or the lifetime runs out.
+  void startReceiveSession(
+    String ticketHex, {
+    Duration lifetime = receiveTicketLifetime,
+  }) {
+    _receiveTicket = ticketHex.toLowerCase();
+    _receiveUntil = DateTime.now().add(lifetime);
+  }
+
+  void endReceiveSession() {
+    _receiveTicket = null;
+    _receiveUntil = null;
+  }
+
+  /// Sending side: remembers the ticket read from [deviceId]'s Receive code,
+  /// so files sent to it soon after carry a proof.
+  void rememberReceiveTicket(String deviceId, String ticketHex) {
+    _ticketsFromReceivers[deviceId.toLowerCase()] = (
+      ticketHex.toLowerCase(),
+      DateTime.now().add(receiveTicketLifetime),
+    );
+  }
+
+  /// Whether files sent to [deviceId] now would carry a Receive proof.
+  bool hasReceiveTicketFor(String deviceId) => _ticketFor(deviceId) != null;
+
+  String? _ticketFor(String deviceId) {
+    final entry = _ticketsFromReceivers[deviceId.toLowerCase()];
+    if (entry == null) return null;
+    if (DateTime.now().isAfter(entry.$2)) {
+      _ticketsFromReceivers.remove(deviceId.toLowerCase());
+      return null;
+    }
+    return entry.$1;
+  }
+
+  Future<void> _onEngineBatch(IncomingBatchRequest request) async {
+    if (_isDisposed) return;
+    final ticket = _receiveTicket;
+    final proof = request.receiveProof;
+    final proven =
+        isReceiving &&
+        ticket != null &&
+        proof != null &&
+        ReceiveTicket.verify(
+          ticketHex: ticket,
+          senderDeviceId: request.senderDeviceId,
+          batchId: request.batchId,
+          proofHex: proof,
+        );
+    if (proven) {
+      AppLogger.info(
+        'FileSharingCoordinator',
+        'Accepting ${request.files.length} file(s) from a sender holding our Receive ticket',
+      );
+      try {
+        final batch = await acceptIncomingBatch(request);
+        if (!_autoAcceptedController.isClosed) {
+          _autoAcceptedController.add(batch);
+        }
+      } catch (e) {
+        // acceptIncomingBatch already declined with the real reason
+        // (for example not enough space).
+        AppLogger.warning('FileSharingCoordinator', 'Auto-accept failed: $e');
+      }
+      return;
+    }
+    if (!_incomingBatchesController.isClosed) {
+      _incomingBatchesController.add(request);
+    }
+  }
 
   /// The batch [transferId] belongs to, if any.
   TransferBatch? batchForTask(String transferId) {
@@ -451,8 +553,9 @@ class FileSharingCoordinator {
 
     // One consent for the whole batch when the receiver's build supports it;
     // otherwise each file is offered (and prompted) on its own as before.
+    final ticket = _ticketFor(peer.deviceId);
     final offerAsBatch =
-        documents.length > 1 &&
+        (documents.length > 1 || ticket != null) &&
         documents.every((d) => d.sizeBytes >= 0) &&
         documents.length <= TransferBatchOfferPayload.maxFiles &&
         transferEngine.supportsBatchOffers(peer.deviceId);
@@ -485,6 +588,13 @@ class FileSharingCoordinator {
                 mimeType: d.mimeType ?? 'application/octet-stream',
               ),
           ],
+          receiveProof: ticket == null
+              ? null
+              : ReceiveTicket.proof(
+                  ticketHex: ticket,
+                  senderDeviceId: secureSessionManager.localIdentity.idHex,
+                  batchId: batch.batchId,
+                ),
         );
       } catch (e) {
         batch.state = e is TransferBatchDeclinedException
@@ -851,6 +961,7 @@ class FileSharingCoordinator {
     _engineRequestsSub.cancel();
     _engineBatchesSub.cancel();
     _activeTransfersController.close();
+    _autoAcceptedController.close();
     _incomingRequestsController.close();
     _incomingBatchesController.close();
   }

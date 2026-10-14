@@ -66,6 +66,7 @@ class TransferDetailPage extends StatefulWidget {
     AppContainer container, {
     String? transferId,
     String? peerDeviceId,
+    String? batchId,
     TransferTask? task,
   }) {
     return Navigator.of(context).push(
@@ -74,6 +75,7 @@ class TransferDetailPage extends StatefulWidget {
           container: container,
           transferId: transferId,
           peerDeviceId: peerDeviceId,
+          batchId: batchId,
           task: task,
         ),
       ),

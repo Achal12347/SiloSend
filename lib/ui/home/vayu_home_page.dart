@@ -14,7 +14,6 @@ import 'package:vayu/ui/connection/active_connections_card.dart';
 import 'package:vayu/ui/home/capability_setup_banner.dart';
 import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/ui/home/local_device_card.dart';
-import 'package:vayu/ui/pairing/pairing_page.dart';
 import 'package:vayu/platform/contact_picker.dart';
 import 'package:vayu/platform/nfc_card_inbox.dart';
 import 'package:vayu/platform/share_intent_service.dart';
@@ -34,6 +33,7 @@ import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/contacts/vayu_card.dart';
 import 'package:vayu/ui/card/my_card_page.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
+import 'package:vayu/ui/receive/receive_page.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/route_observer.dart';
 
@@ -311,11 +311,6 @@ class _VayuHomePageState extends State<VayuHomePage>
         actions: [
           ProfileButton(container: container),
           IconButton(
-            icon: const Icon(Icons.qr_code_2_rounded),
-            tooltip: 'Pair with QR or NFC',
-            onPressed: () => PairingPage.open(context, container),
-          ),
-          IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: 'Settings',
             onPressed: () {
@@ -406,32 +401,55 @@ class _VayuHomePageState extends State<VayuHomePage>
                   ),
                 ),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: FilledButton.icon(
-                    onPressed: _isPickingHeroFile
-                        ? null
-                        : () => _onHeroSendFilePressed(container),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: palette.onHero,
-                      foregroundColor: const Color(0xFF1A1B1E),
-                      disabledBackgroundColor: palette.onHero.withValues(
-                        alpha: 0.6,
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: 56,
+                        child: FilledButton.icon(
+                          onPressed: _isPickingHeroFile
+                              ? null
+                              : () => _onHeroSendFilePressed(container),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: palette.onHero,
+                            foregroundColor: const Color(0xFF1A1B1E),
+                            disabledBackgroundColor: palette.onHero.withValues(
+                              alpha: 0.6,
+                            ),
+                            textStyle: theme.textTheme.titleMedium,
+                          ),
+                          icon: _isPickingHeroFile
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                  ),
+                                )
+                              : const Icon(Icons.north_east_rounded),
+                          label: const Text('Send'),
+                        ),
                       ),
-                      textStyle: theme.textTheme.titleMedium,
                     ),
-                    icon: _isPickingHeroFile
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2.4),
-                          )
-                        : const Icon(Icons.north_east_rounded),
-                    label: Text(
-                      _isPickingHeroFile ? 'Choosing files…' : 'Send files',
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SizedBox(
+                        height: 56,
+                        child: OutlinedButton.icon(
+                          onPressed: () => ReceivePage.open(context, container),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: palette.onHero,
+                            side: BorderSide(
+                              color: palette.onHero.withValues(alpha: 0.4),
+                            ),
+                            textStyle: theme.textTheme.titleMedium,
+                          ),
+                          icon: const Icon(Icons.south_west_rounded),
+                          label: const Text('Receive'),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Center(
@@ -441,7 +459,7 @@ class _VayuHomePageState extends State<VayuHomePage>
                       foregroundColor: palette.onHeroMuted,
                     ),
                     icon: const Icon(Icons.person_outline_rounded, size: 18),
-                    label: const Text('Share a contact'),
+                    label: const Text('Send a contact'),
                   ),
                 ),
               ],

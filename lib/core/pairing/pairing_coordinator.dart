@@ -130,6 +130,50 @@ class PairingCoordinator {
     );
   }
 
+  /// For the Receive screen: a code on the shared Wi-Fi, or, when this phone
+  /// has no shared network (or [forceHotspot]), on a phone-hosted hotspot.
+  /// Returns the payload (null if none could be made) and the hotspot error,
+  /// if starting it failed.
+  Future<(PairingPayload?, HotspotStartError?)> prepareShowableCode({
+    bool forceHotspot = false,
+  }) async {
+    var payload = await buildLocalPayload();
+    if (payload.lanAddress == null || forceHotspot) {
+      final started = await startHotspot();
+      if (!started.isSuccess) {
+        return (payload.lanAddress == null ? null : payload, started.error);
+      }
+      payload = await buildLocalPayload(
+        hotspotCredentials: started.credentials,
+      );
+    }
+    return (payload, null);
+  }
+
+  /// Sending side: joins the phone whose code was scanned or tapped and
+  /// remembers its Receive ticket, so files sent to it next carry a proof
+  /// (accepted without a prompt if that phone is on its Receive screen).
+  Future<DiscoveredPeer> joinToSend(PairingPayload payload) async {
+    final peer = await join(payload);
+    fileSharingCoordinator.rememberReceiveTicket(
+      peer.deviceId,
+      payload.pairingToken,
+    );
+    return peer;
+  }
+
+  /// [joinToSend] from scanned text (a `vayu://pair` link).
+  Future<DiscoveredPeer> joinToSendFromText(String text) {
+    final input = text.trim();
+    try {
+      return joinToSend(PairingPayload.fromUri(Uri.parse(input)));
+    } on FormatException {
+      throw const PairingException(
+        "That is not a Vayu code. Scan the code on the other phone's Receive screen.",
+      );
+    }
+  }
+
   /// Parses a pasted or scanned `vayu://pair` link (or `IP:port`) and joins.
   Future<DiscoveredPeer> joinFromText(String text) {
     final input = text.trim();
