@@ -9,7 +9,8 @@ import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 /// "Writing" a payload serves it through host card emulation until
 /// [stopServing]; "listening" runs NFC reader mode and reports the payload a
 /// tapped Vayu phone serves.
-class AndroidNfcPlatformAdapter implements NfcPlatformAdapter {
+class AndroidNfcPlatformAdapter
+    implements NfcPlatformAdapter, CardSharingNfcAdapter {
   static const MethodChannel _methods = MethodChannel('com.achyrio.vayu/nfc');
   static const EventChannel _events = EventChannel(
     'com.achyrio.vayu/nfc_events',
@@ -58,6 +59,12 @@ class AndroidNfcPlatformAdapter implements NfcPlatformAdapter {
   @override
   Future<void> writeNdef(Uint8List ndefBytes) async {
     await _methods.invokeMethod<bool>('serve', {'bytes': ndefBytes});
+  }
+
+  /// Shares [vcard] both to Vayu readers and as a standard NFC tag.
+  @override
+  Future<void> serveCard(Uint8List vcard) async {
+    await _methods.invokeMethod<bool>('serveCard', {'bytes': vcard});
   }
 
   @override
