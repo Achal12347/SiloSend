@@ -61,9 +61,7 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: DiagnosticsPage(container: container),
-        ),
+        MaterialApp(home: DiagnosticsPage(container: container)),
       );
       await tester.pumpAndSettle();
 
@@ -110,9 +108,7 @@ void main() {
       );
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: DiagnosticsPage(container: container),
-        ),
+        MaterialApp(home: DiagnosticsPage(container: container)),
       );
       await tester.pumpAndSettle();
 

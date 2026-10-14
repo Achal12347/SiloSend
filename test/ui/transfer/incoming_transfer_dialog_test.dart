@@ -70,7 +70,7 @@ void main() {
       );
 
       // Verify title and file metadata rendered
-      expect(find.text('Incoming File Transfer'), findsOneWidget);
+      expect(find.text('Incoming file'), findsOneWidget);
       expect(find.text('confidential_project.pdf'), findsOneWidget);
       expect(find.text('5.0 MB'), findsOneWidget);
 

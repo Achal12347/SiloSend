@@ -28,7 +28,7 @@ import java.net.NetworkInterface
  * Handles system hardware capabilities, runtime permissions, Bluetooth lifecycle,
  * system settings navigation, and document viewing.
  *
- * Adheres strictly to the SiloSend principle:
+ * Adheres strictly to the Vayu principle:
  * - Never forces unnecessary system settings or permissions.
  * - Distinguishes between Android 12+ (API 31+) and legacy Android versions.
  * - Does not loop or block discovery across transports.
@@ -38,7 +38,7 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
         const val CHANNEL = "com.achyrio.vayu/platform"
         const val REQUEST_CODE_NEARBY_PERMISSIONS = 1001
         const val REQUEST_CODE_ENABLE_BLUETOOTH = 1002
-        private const val PREFS_NAME = "silosend_platform_prefs"
+        private const val PREFS_NAME = "vayu_platform_prefs"
         private const val KEY_REQUESTED_NEARBY = "has_requested_nearby_permissions"
     }
 
@@ -322,10 +322,13 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
                 }
             }
 
-            // Fallback: check if any non-loopback IPv4 address exists on active network interfaces
+            // Fallback for links ConnectivityManager does not report as active: a Wi-Fi
+            // network without internet (Android keeps mobile data as the default), a
+            // hotspot this phone hosts, or USB tethering. Only local-link interfaces
+            // count; cellular (rmnet, ccmni, ...) addresses cannot reach LAN peers.
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return false
             for (iface in interfaces) {
-                if (iface.isUp && !iface.isLoopback && !iface.name.contains("dummy")) {
+                if (iface.isUp && !iface.isLoopback && isLocalLinkInterface(iface.name)) {
                     for (addr in iface.inetAddresses) {
                         if (addr is Inet4Address && !addr.isLoopbackAddress && !addr.isAnyLocalAddress) {
                             return true
@@ -335,6 +338,13 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
             }
         } catch (_: Exception) {}
         return false
+    }
+
+    private fun isLocalLinkInterface(name: String): Boolean {
+        val lower = name.lowercase()
+        return listOf("wlan", "swlan", "ap", "softap", "eth", "rndis", "usb", "p2p").any {
+            lower.startsWith(it)
+        }
     }
 
     private fun openFileWithIntent(filePath: String, mimeType: String, result: MethodChannel.Result) {
@@ -368,7 +378,7 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
         try {
             if (multicastLock == null) {
                 val wifiMgr = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-                multicastLock = wifiMgr?.createMulticastLock("silosend_multicast_lock")?.apply {
+                multicastLock = wifiMgr?.createMulticastLock("vayu_multicast_lock")?.apply {
                     setReferenceCounted(true)
                 }
             }
@@ -381,9 +391,9 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
             if (wifiLock == null) {
                 val wifiMgr = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 wifiLock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    wifiMgr?.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "silosend_wifi_lock")
+                    wifiMgr?.createWifiLock(WifiManager.WIFI_MODE_FULL_LOW_LATENCY, "vayu_wifi_lock")
                 } else {
-                    wifiMgr?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "silosend_wifi_lock")
+                    wifiMgr?.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "vayu_wifi_lock")
                 }?.apply {
                     setReferenceCounted(true)
                 }

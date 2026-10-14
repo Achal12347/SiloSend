@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/errors/app_error.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/trust_record_storage.dart';
 import 'package:vayu/domain/security/trust_level.dart';
 
 /// Stored record representing a known peer's cryptographic identity and trust status.
@@ -66,6 +67,34 @@ class NfcCommitmentMismatchException extends SecurityError {
 /// Manages Trust-On-First-Use (TOFU), SAS verifications, and NFC cryptographic commitments.
 class PeerTrustStore {
   final Map<String, PeerTrustRecord> _records = {};
+
+  /// Optional persistence. Only wired where the local identity key also
+  /// persists; otherwise a peer restart would look like a key conflict.
+  final TrustRecordStorage? storage;
+  Future<void> _saveChain = Future<void>.value();
+
+  PeerTrustStore({this.storage});
+
+  /// Loads persisted records. Records already learned this run take precedence.
+  Future<void> load() async {
+    final persisted = await storage?.load() ?? const <PeerTrustRecord>[];
+    for (final record in persisted) {
+      _records.putIfAbsent(record.deviceIdHex, () => record);
+    }
+  }
+
+  // Saves run one after another so an older snapshot never overwrites a newer one.
+  Future<void> _persist() {
+    final target = storage;
+    if (target == null) return Future<void>.value();
+    final snapshot = _records.values.toList();
+    _saveChain = _saveChain.then((_) => target.save(snapshot)).catchError((
+      Object e,
+    ) {
+      AppLogger.warning('PeerTrustStore', 'Failed to persist trust store: $e');
+    });
+    return _saveChain;
+  }
 
   /// Current in-memory trust records indexed by lowercase device ID hex.
   Map<String, PeerTrustRecord> get records => Map.unmodifiable(_records);
@@ -146,6 +175,7 @@ class PeerTrustStore {
         firstSeen: now,
         lastSeen: now,
       );
+      await _persist();
 
       return initialLevel;
     }
@@ -156,6 +186,7 @@ class PeerTrustStore {
         trustLevel: TrustLevel.keyConflict,
         lastSeen: now,
       );
+      await _persist();
 
       final existingHex = _toHex(existing.identityPubKey);
       final presentedHex = _toHex(presentedIdentityPubKey);
@@ -184,6 +215,7 @@ class PeerTrustStore {
       trustLevel: effectiveLevel,
       lastSeen: now,
     );
+    await _persist();
 
     return effectiveLevel;
   }
@@ -202,6 +234,7 @@ class PeerTrustStore {
       trustLevel: newLevel,
       lastSeen: DateTime.now(),
     );
+    await _persist();
 
     AppLogger.info(
       'PeerTrustStore',
@@ -232,6 +265,7 @@ class PeerTrustStore {
         lastSeen: now,
       );
     }
+    await _persist();
 
     AppLogger.info(
       'PeerTrustStore',

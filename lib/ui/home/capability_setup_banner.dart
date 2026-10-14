@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
@@ -148,10 +149,10 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
 
     return _buildContainer(
       theme: theme,
-      borderColor: Colors.red.shade300,
-      backgroundColor: Colors.red.shade50,
+      borderColor: VayuPalette.fromTheme(theme).dangerContainer,
+      backgroundColor: VayuPalette.fromTheme(theme).dangerContainer,
       icon: Icons.signal_cellular_connected_no_internet_0_bar_rounded,
-      iconColor: Colors.red.shade700,
+      iconColor: VayuPalette.fromTheme(theme).danger,
       title: title,
       explanation: explanation,
       actions: actions,
@@ -221,10 +222,10 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
 
     return _buildContainer(
       theme: theme,
-      borderColor: Colors.amber.shade300,
-      backgroundColor: Colors.amber.shade50,
+      borderColor: VayuPalette.fromTheme(theme).warningContainer,
+      backgroundColor: VayuPalette.fromTheme(theme).warningContainer,
       icon: Icons.info_outline_rounded,
-      iconColor: Colors.amber.shade900,
+      iconColor: VayuPalette.fromTheme(theme).warning,
       title: title,
       explanation: explanation,
       actions: actions,
@@ -238,10 +239,10 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
   ) {
     return _buildContainer(
       theme: theme,
-      borderColor: Colors.blue.shade200,
-      backgroundColor: Colors.blue.shade50,
+      borderColor: theme.colorScheme.primaryContainer,
+      backgroundColor: theme.colorScheme.primaryContainer,
       icon: Icons.wifi_off_rounded,
-      iconColor: Colors.blue.shade800,
+      iconColor: theme.colorScheme.primary,
       title: 'Local Wi-Fi Disconnected',
       explanation: 'Bluetooth discovery is active. Connecting to the same Wi-Fi network enables high-speed transfers.',
       actions: [

@@ -1,6 +1,6 @@
 /// Immutable snapshot of device battery state.
 ///
-/// Strictly adheres to the SiloSend No Mock Data principle:
+/// Strictly adheres to the Vayu No Mock Data principle:
 /// When running on unsupported platforms (e.g. desktop), unprobed hardware,
 /// or in headless test environments without platform channels, fields are explicitly
 /// `null` rather than fabricated with fake numbers or simulated charging states.
@@ -55,13 +55,12 @@ class BatterySnapshot {
     bool? isCharging,
     bool? isBatterySaverActive,
     DateTime? timestamp,
-  }) =>
-      BatterySnapshot(
-        batteryLevel: batteryLevel ?? this.batteryLevel,
-        isCharging: isCharging ?? this.isCharging,
-        isBatterySaverActive: isBatterySaverActive ?? this.isBatterySaverActive,
-        timestamp: timestamp ?? this.timestamp,
-      );
+  }) => BatterySnapshot(
+    batteryLevel: batteryLevel ?? this.batteryLevel,
+    isCharging: isCharging ?? this.isCharging,
+    isBatterySaverActive: isBatterySaverActive ?? this.isBatterySaverActive,
+    timestamp: timestamp ?? this.timestamp,
+  );
 
   @override
   String toString() =>

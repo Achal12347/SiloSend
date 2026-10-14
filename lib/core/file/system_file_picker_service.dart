@@ -17,15 +17,24 @@ class SystemFilePickerService implements FilePickerService {
     'com.achyrio.vayu/file_picker',
   );
 
+  // Served on a native background task queue so reads and hashing never block
+  // the Android main thread.
+  static const MethodChannel _ioChannel = MethodChannel(
+    'com.achyrio.vayu/file_io',
+  );
+
   final MethodChannel channel;
+  final MethodChannel ioChannel;
   final Future<SelectedDocument?> Function()? testPickerHandler;
   final Future<List<SelectedDocument>> Function()? testMultiPickerHandler;
 
   SystemFilePickerService({
     MethodChannel? channel,
+    MethodChannel? ioChannel,
     this.testPickerHandler,
     this.testMultiPickerHandler,
-  }) : channel = channel ?? _channel;
+  }) : channel = channel ?? _channel,
+       ioChannel = ioChannel ?? _ioChannel;
 
   @override
   Future<SelectedDocument?> pickDocument() async {
@@ -114,37 +123,22 @@ class SystemFilePickerService implements FilePickerService {
 
   @override
   PayloadSource createPayloadSource(SelectedDocument document) {
-    // If identifier starts with content://, use ContentUriPayloadSource
-    if (document.identifier.startsWith('content://')) {
-      return ContentUriPayloadSource(
-        uri: document.identifier,
-        length: document.sizeBytes,
-        readChunkCallback: (uri, offset, length) async {
-          final result = await channel.invokeMethod<Uint8List>('readChunk', {
-            'uri': uri,
-            'offset': offset,
-            'length': length,
-          });
-          return result ?? Uint8List(0);
-        },
-        closeCallback: (uri) async {
-          await channel.invokeMethod('closeFile', {'uri': uri});
-        },
-      );
+    // Direct filesystem paths (desktop, tests) are read with dart:io.
+    if (!document.identifier.startsWith('content://')) {
+      final file = File(document.identifier);
+      if (file.existsSync()) {
+        return FilePayloadSource(file);
+      }
     }
+    return _contentUriSource(document);
+  }
 
-    // Direct filesystem path fallback
-    final file = File(document.identifier);
-    if (file.existsSync()) {
-      return FilePayloadSource(file);
-    }
-
-    // Default fallback to content URI source
+  ContentUriPayloadSource _contentUriSource(SelectedDocument document) {
     return ContentUriPayloadSource(
       uri: document.identifier,
       length: document.sizeBytes,
       readChunkCallback: (uri, offset, length) async {
-        final result = await channel.invokeMethod<Uint8List>('readChunk', {
+        final result = await ioChannel.invokeMethod<Uint8List>('readChunk', {
           'uri': uri,
           'offset': offset,
           'length': length,
@@ -152,7 +146,20 @@ class SystemFilePickerService implements FilePickerService {
         return result ?? Uint8List(0);
       },
       closeCallback: (uri) async {
-        await channel.invokeMethod('closeFile', {'uri': uri});
+        await ioChannel.invokeMethod('closeFile', {'uri': uri});
+      },
+      sha256Callback: (uri) async {
+        final result = await ioChannel.invokeMapMethod<String, dynamic>(
+          'sha256',
+          {'uri': uri},
+        );
+        if (result == null) {
+          throw StateError('Platform returned no digest for $uri');
+        }
+        return (
+          sha256: result['sha256'] as String,
+          size: (result['size'] as num).toInt(),
+        );
       },
     );
   }

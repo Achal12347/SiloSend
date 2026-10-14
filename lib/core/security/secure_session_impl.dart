@@ -77,8 +77,23 @@ class SecureSessionImpl implements SecureSession {
   bool rekeyInProgress = false;
 
   late final Uint8List _sessionIdBytes;
-  final StreamController<VayuPacket> _decryptedPacketsController =
-      StreamController<VayuPacket>.broadcast();
+
+  // Packets decrypted before anyone listens are held, not dropped. The peer may
+  // send its first application packet (e.g. a transfer offer) in the same burst
+  // as the final handshake message, before the transfer engine has subscribed;
+  // a plain broadcast stream silently discarded it and the sender waited forever.
+  static const int _maxUndelivered = 256;
+  final List<VayuPacket> _undelivered = [];
+  late final StreamController<VayuPacket> _decryptedPacketsController =
+      StreamController<VayuPacket>.broadcast(onListen: _flushUndelivered);
+
+  void _flushUndelivered() {
+    if (_undelivered.isEmpty) return;
+    final pending = List<VayuPacket>.of(_undelivered);
+    _undelivered.clear();
+    pending.forEach(_decryptedPacketsController.add);
+  }
+
   StreamSubscription<VayuPacket>? _incomingPacketSub;
   bool _isTerminated = false;
 
@@ -241,9 +256,34 @@ class SecureSessionImpl implements SecureSession {
     });
   }
 
+  // Inbound packets are decrypted strictly in arrival order, so a transfer offer is
+  // always delivered before the chunks that follow it.
+  Future<void> _rxChain = Future<void>.value();
+
+  void _enqueueInbound(VayuPacket packet) {
+    _rxChain = _rxChain
+        .then((_) => _handleIncomingRawPacket(packet))
+        .catchError((Object _) {});
+  }
+
+  /// Processes application packets that reached the responder while it was still
+  /// verifying the initiator's AuthConfirm. The initiator is secured one message
+  /// earlier and may send its first packet immediately; without this replay that
+  /// packet was dropped and the sender waited forever for a reply.
+  void replayEarlyPackets(List<VayuPacket> packets) {
+    packets.forEach(_enqueueInbound);
+  }
+
+  /// Packet types that never carry encrypted application data.
+  static bool isControlPacket(VayuPacket packet) =>
+      packet.packetType == PacketType.authExchange ||
+      packet.packetType == PacketType.ping ||
+      packet.packetType == PacketType.pong ||
+      packet.packetType == PacketType.sessionTeardown;
+
   void _initPacketPipeline() {
     _incomingPacketSub = connectionSession.incomingPackets.listen(
-      _handleIncomingRawPacket,
+      _enqueueInbound,
       onError: (e) {
         AppLogger.warning('SecureSession', 'Transport packet error: $e');
         if (!_decryptedPacketsController.isClosed) {
@@ -258,10 +298,7 @@ class SecureSessionImpl implements SecureSession {
 
   Future<void> _handleIncomingRawPacket(VayuPacket packet) async {
     // Only decrypt application/data packets; skip raw authExchange or control frames
-    if (packet.packetType == PacketType.authExchange ||
-        packet.packetType == PacketType.ping ||
-        packet.packetType == PacketType.pong ||
-        packet.packetType == PacketType.sessionTeardown) {
+    if (isControlPacket(packet)) {
       return;
     }
 
@@ -312,7 +349,16 @@ class SecureSessionImpl implements SecureSession {
       final decryptedPacket = packet.copyWith(payload: decryptedBytes);
 
       if (!_decryptedPacketsController.isClosed) {
-        _decryptedPacketsController.add(decryptedPacket);
+        if (_decryptedPacketsController.hasListener) {
+          _decryptedPacketsController.add(decryptedPacket);
+        } else if (_undelivered.length < _maxUndelivered) {
+          _undelivered.add(decryptedPacket);
+        } else {
+          AppLogger.warning(
+            'SecureSession',
+            'Dropping packet ${packet.packetId}: no listener and buffer full',
+          );
+        }
       }
     } catch (e, stack) {
       AppLogger.warning(

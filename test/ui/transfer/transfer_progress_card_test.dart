@@ -38,7 +38,7 @@ void main() {
         ),
       );
 
-      expect(find.text('File Transfers'), findsNothing);
+      expect(find.text('Transfers'), findsNothing);
       expect(find.byType(Card), findsNothing);
     });
 
@@ -92,53 +92,55 @@ void main() {
       await tester.pump();
 
       expect(find.text('recorded_video.mp4'), findsOneWidget);
-      expect(find.text('1 Active'), findsOneWidget);
-      expect(find.text('File Transfers'), findsOneWidget);
-      expect(find.byIcon(Icons.close_rounded), findsOneWidget);
+      expect(find.text('1 active'), findsOneWidget);
+      expect(find.text('Transfers'), findsOneWidget);
+      // Real engine numbers: 50%, 1 MB/s, 5 seconds remaining
+      expect(find.text('50% · 1.0 MB/s · 5s left'), findsOneWidget);
+      expect(find.byTooltip('Cancel transfer'), findsOneWidget);
 
       await progressController.close();
     });
 
-    testWidgets('renders completed transfer with Verified successfully, Share again, and Done (UI7 & UI8)', (
-      tester,
-    ) async {
-      final metadata = TransferMetadata(
-        transferId: 'completed_task_1',
-        fileName: 'vacation_photo.jpg',
-        totalBytes: 2 * 1024 * 1024,
-        chunkSize: 64 * 1024,
-        sha256Checksum:
-            'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899',
-        mimeType: 'image/jpeg',
-      );
+    testWidgets(
+      'renders completed transfer with Verified successfully, Share again, and Done (UI7 & UI8)',
+      (tester) async {
+        final metadata = TransferMetadata(
+          transferId: 'completed_task_1',
+          fileName: 'vacation_photo.jpg',
+          totalBytes: 2 * 1024 * 1024,
+          chunkSize: 64 * 1024,
+          sha256Checksum: 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899',
+          mimeType: 'image/jpeg',
+        );
 
-      final completedTask = _MockTransferTask(
-        metadata: metadata,
-        progressStream: const Stream.empty(),
-      ).._status = TransferStatus.completed;
+        final completedTask = _MockTransferTask(
+          metadata: metadata,
+          progressStream: const Stream.empty(),
+        ).._status = TransferStatus.completed;
 
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: TransferProgressCard(
-              container: container,
-              initialTransfers: [completedTask],
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: TransferProgressCard(
+                container: container,
+                initialTransfers: [completedTask],
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pump();
+        );
+        await tester.pump();
 
-      expect(find.text('vacation_photo.jpg'), findsOneWidget);
-      expect(find.text('Completed'), findsOneWidget);
-      expect(find.text('Verified successfully'), findsOneWidget);
-      expect(find.text('Share again'), findsOneWidget);
-      expect(find.text('Done'), findsOneWidget);
+        expect(find.text('vacation_photo.jpg'), findsOneWidget);
+        expect(find.text('Verified successfully'), findsOneWidget);
+        expect(find.byTooltip('Cancel transfer'), findsNothing);
+        expect(find.text('Share again'), findsOneWidget);
+        expect(find.text('Done'), findsOneWidget);
 
-      // Tap Done button
-      await tester.tap(find.text('Done'));
-      await tester.pump();
-    });
+        // Tap Done button
+        await tester.tap(find.text('Done'));
+        await tester.pump();
+      },
+    );
   });
 }
 

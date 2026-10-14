@@ -50,8 +50,7 @@ class SecureSessionManager {
 
   final Map<String, SecureSessionImpl> _sessions = {};
   final Map<String, PendingNfcPairing> _pendingNfcPairings = {};
-  final Map<String, StreamSubscription<VayuPacket>> _rekeySubscriptions =
-      {};
+  final Map<String, StreamSubscription<VayuPacket>> _rekeySubscriptions = {};
   final Map<String, Future<SecureSessionImpl>> _inFlightOutboundSecuring = {};
   final StreamController<SecureSessionImpl> _sessionController =
       StreamController<SecureSessionImpl>.broadcast();
@@ -96,11 +95,7 @@ class SecureSessionManager {
 
     final storedSeed = await secureKeyStore.loadIdentitySeed();
     if (storedSeed != null) {
-      final kp = await cryptoService.generateIdentityKeypair();
-      _localKeypair = CryptoIdentityKeypair(
-        publicKey: kp.publicKey,
-        privateKeySeed: storedSeed,
-      );
+      _localKeypair = await cryptoService.identityKeypairFromSeed(storedSeed);
       AppLogger.info(
         'SecureSessionManager',
         'Loaded persistent Ed25519 identity key (${_localKeypair!.fingerprintHex.substring(0, 16)}...)',
@@ -495,21 +490,38 @@ class SecureSessionManager {
       payload: responsePayload.toBytes(),
     );
 
-    await connectionSession.sendPacket(responsePacket);
+    // The initiator becomes secured as soon as it sends AuthConfirm and may send
+    // application data right behind it. Hold those packets until our session exists.
+    const maxEarlyPackets = 256;
+    final earlyPackets = <VayuPacket>[];
+    final earlySubscription = connectionSession.incomingPackets.listen((p) {
+      if (!SecureSessionImpl.isControlPacket(p) &&
+          earlyPackets.length < maxEarlyPackets) {
+        earlyPackets.add(p);
+      }
+    }, onError: (_) {});
 
-    // 10. Await AuthConfirmPayload (49 bytes) from Initiator
-    final confirmPacket = await connectionSession.incomingPackets
-        .where(
-          (p) =>
-              p.packetType == PacketType.authExchange &&
-              p.payload.length == AuthConfirmPayload.payloadSize,
-        )
-        .first
-        .timeout(
-          timeout,
-          onTimeout: () =>
-              throw SecurityError('Handshake timed out awaiting AuthConfirm'),
-        );
+    final VayuPacket confirmPacket;
+    try {
+      await connectionSession.sendPacket(responsePacket);
+
+      // 10. Await AuthConfirmPayload (49 bytes) from Initiator
+      confirmPacket = await connectionSession.incomingPackets
+          .where(
+            (p) =>
+                p.packetType == PacketType.authExchange &&
+                p.payload.length == AuthConfirmPayload.payloadSize,
+          )
+          .first
+          .timeout(
+            timeout,
+            onTimeout: () =>
+                throw SecurityError('Handshake timed out awaiting AuthConfirm'),
+          );
+    } catch (_) {
+      await earlySubscription.cancel();
+      rethrow;
+    }
 
     final confirmPayload = AuthConfirmPayload.fromBytes(confirmPacket.payload);
 
@@ -521,6 +533,7 @@ class SecureSessionManager {
     );
 
     if (!_bytesEqual(expectedInitMac, confirmPayload.confirmMac)) {
+      await earlySubscription.cancel();
       throw SecurityError(
         'Initiator confirmation MAC mismatch on session ${connectionSession.sessionId}',
       );
@@ -541,6 +554,10 @@ class SecureSessionManager {
       isInitiator: false,
       initialTrustLevel: trustLevel,
     );
+
+    // The session's own pipeline is subscribed now; hand over what arrived early.
+    await earlySubscription.cancel();
+    secureSession.replayEarlyPackets(earlyPackets);
 
     _registerSession(secureSession);
     return secureSession;

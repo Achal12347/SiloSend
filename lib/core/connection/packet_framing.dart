@@ -22,53 +22,92 @@ class PacketStreamTransformer
 
 class _PacketSink implements EventSink<Uint8List> {
   final EventSink<VayuPacket> _outputSink;
-  final List<int> _buffer = [];
+
+  // Contiguous byte buffer with a read cursor. The previous List<int> stored one
+  // boxed element per byte and shifted the whole remainder on every packet, which
+  // made reassembly cost grow with the amount of data in flight.
+  Uint8List _buffer = Uint8List(256 * 1024);
+  int _start = 0;
+  int _end = 0;
 
   _PacketSink(this._outputSink);
 
+  int get _available => _end - _start;
+
   @override
   void add(Uint8List chunk) {
-    _buffer.addAll(chunk);
+    _append(chunk);
     _processBuffer();
   }
 
+  void _append(Uint8List chunk) {
+    if (_end + chunk.length > _buffer.length) {
+      final needed = _available + chunk.length;
+      if (needed <= _buffer.length) {
+        // Enough room once consumed bytes are dropped: compact in place.
+        _buffer.setRange(0, _available, _buffer, _start);
+      } else {
+        var capacity = _buffer.length * 2;
+        while (capacity < needed) {
+          capacity *= 2;
+        }
+        final grown = Uint8List(capacity)
+          ..setRange(0, _available, _buffer, _start);
+        _buffer = grown;
+      }
+      _end = _available;
+      _start = 0;
+    }
+    _buffer.setRange(_end, _end + chunk.length, chunk);
+    _end += chunk.length;
+  }
+
+  void _consume(int count) {
+    _start += count;
+    if (_start == _end) {
+      _start = 0;
+      _end = 0;
+    }
+  }
+
   void _processBuffer() {
-    while (_buffer.length >= VayuPacket.minPacketSize) {
+    while (_available >= VayuPacket.minPacketSize) {
       // 1. Locate magic bytes 0x53, 0x53
       int magicIndex = -1;
-      for (int i = 0; i <= _buffer.length - 2; i++) {
+      for (int i = _start; i <= _end - 2; i++) {
         if (_buffer[i] == VayuPacket.magic1 &&
             _buffer[i + 1] == VayuPacket.magic2) {
-          magicIndex = i;
+          magicIndex = i - _start;
           break;
         }
       }
 
       if (magicIndex == -1) {
         // Keep only the last byte if it might be the first magic byte
-        if (_buffer.isNotEmpty && _buffer.last == VayuPacket.magic1) {
-          _buffer.removeRange(0, _buffer.length - 1);
+        if (_buffer[_end - 1] == VayuPacket.magic1) {
+          _consume(_available - 1);
         } else {
-          _buffer.clear();
+          _consume(_available);
         }
         return;
       }
 
       // Discard any garbage preceding the magic bytes
       if (magicIndex > 0) {
-        _buffer.removeRange(0, magicIndex);
+        _consume(magicIndex);
       }
 
       // Need at least header size (49 bytes) to inspect payload length
-      if (_buffer.length < VayuPacket.headerSize) {
+      if (_available < VayuPacket.headerSize) {
         return;
       }
 
       // 2. Read payload length at offset 45 (uint32 big-endian)
-      final byteData = ByteData.sublistView(
-        Uint8List.fromList(_buffer.sublist(45, 49)),
-      );
-      final payloadLength = byteData.getUint32(0, Endian.big);
+      final payloadLength = ByteData.sublistView(
+        _buffer,
+        _start + 45,
+        _start + 49,
+      ).getUint32(0, Endian.big);
 
       // Bounds check payload length
       if (payloadLength > PacketStreamTransformer.maxPayloadLength) {
@@ -76,39 +115,34 @@ class _PacketSink implements EventSink<Uint8List> {
           'PacketFraming',
           'Payload length $payloadLength exceeds limit; dropping corrupt magic header',
         );
-        _buffer.removeRange(0, 1); // Discard 1 byte and re-scan
+        _consume(1); // Discard 1 byte and re-scan
         continue;
       }
 
       final totalPacketSize =
-          VayuPacket.headerSize +
-          payloadLength +
-          VayuPacket.checksumSize;
+          VayuPacket.headerSize + payloadLength + VayuPacket.checksumSize;
 
       // Wait until the full packet arrives
-      if (_buffer.length < totalPacketSize) {
+      if (_available < totalPacketSize) {
         return;
       }
 
-      // 3. Extract exact packet bytes
+      // 3. Copy out exact packet bytes; the buffer is reused for later data.
       final packetBytes = Uint8List.fromList(
-        _buffer.sublist(0, totalPacketSize),
+        Uint8List.sublistView(_buffer, _start, _start + totalPacketSize),
       );
 
       // 4. Validate and emit packet
       try {
         final packet = VayuPacket.fromBytes(packetBytes);
-        _buffer.removeRange(0, totalPacketSize);
+        _consume(totalPacketSize);
         _outputSink.add(packet);
       } catch (e) {
         AppLogger.warning(
           'PacketFraming',
           'Dropped corrupted frame or false magic header: $e',
         );
-        _buffer.removeRange(
-          0,
-          1,
-        ); // Advance by 1 byte to find real magic header
+        _consume(1); // Advance by 1 byte to find real magic header
       }
     }
   }
@@ -120,7 +154,8 @@ class _PacketSink implements EventSink<Uint8List> {
 
   @override
   void close() {
-    _buffer.clear();
+    _start = 0;
+    _end = 0;
     _outputSink.close();
   }
 }

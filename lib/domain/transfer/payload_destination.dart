@@ -4,6 +4,20 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/utils/file_hash.dart';
+
+// ENOSPC is 28 on Linux/Android and macOS; ERROR_DISK_FULL is 112 on Windows.
+const _outOfSpaceErrorCodes = {28, 112};
+
+/// True when [error] is the OS reporting that the disk is full.
+bool isOutOfSpaceError(Object error) {
+  if (error is TransferStorageException) return error.outOfSpace;
+  if (error is FileSystemException) {
+    final code = error.osError?.errorCode;
+    return code != null && _outOfSpaceErrorCodes.contains(code);
+  }
+  return false;
+}
 
 /// In-memory destination sink for received transfer payloads.
 class MemoryPayloadDestination implements PayloadDestination {
@@ -138,10 +152,13 @@ class FilePayloadDestination implements PayloadDestination {
       }
       await _raf!.setPosition(offset);
       await _raf!.writeFrom(data);
+    } on TransferStorageException {
+      rethrow;
     } catch (e) {
       throw TransferStorageException(
         '',
         'Failed to write chunk at offset $offset: $e',
+        outOfSpace: isOutOfSpaceError(e),
       );
     } finally {
       c.complete();
@@ -176,9 +193,7 @@ class FilePayloadDestination implements PayloadDestination {
       );
     }
     try {
-      final stream = _tmpFile.openRead(0, totalBytes);
-      final digest = await crypto.sha256.bind(stream).first;
-      return digest.toString();
+      return await sha256OfFile(_tmpFile.path, length: totalBytes);
     } catch (e) {
       throw TransferStorageException('', 'Failed to hash staging file: $e');
     }
@@ -206,6 +221,7 @@ class FilePayloadDestination implements PayloadDestination {
       throw TransferStorageException(
         '',
         'Failed to promote staging file to $targetFilePath: $e',
+        outOfSpace: isOutOfSpaceError(e),
       );
     }
   }

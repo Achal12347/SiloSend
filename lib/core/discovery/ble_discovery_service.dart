@@ -14,8 +14,7 @@ import 'package:vayu/domain/discovery/discovery_beacon.dart';
 class BleDiscoveryService implements DiscoveryService {
   static const String channelName = 'com.achyrio.vayu/ble_discovery';
   static const String eventChannelName = 'com.achyrio.vayu/ble_scan_events';
-  static const String vayuServiceUuid =
-      '00005353-0000-1000-8000-00805f9b34fb';
+  static const String vayuServiceUuid = '00005353-0000-1000-8000-00805f9b34fb';
 
   final String localDeviceId;
   final MethodChannel _methodChannel;

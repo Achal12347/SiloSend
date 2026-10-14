@@ -17,6 +17,10 @@ class DiscoveryCoordinator {
   final Duration reaperInterval;
 
   final Map<String, DiscoveredPeer> _discoveredPeers = {};
+
+  /// Peers added out of band (QR, link, NFC) send no beacons, so stale eviction
+  /// skips them until this time.
+  final Map<String, DateTime> _pinnedUntil = {};
   final List<StreamSubscription> _subscriptions = [];
 
   final _peersController = StreamController<List<DiscoveredPeer>>.broadcast();
@@ -284,7 +288,9 @@ class DiscoveryCoordinator {
     final now = DateTime.now();
     final initialCount = _discoveredPeers.length;
 
+    _pinnedUntil.removeWhere((_, until) => now.isAfter(until));
     _discoveredPeers.removeWhere((id, peer) {
+      if (_pinnedUntil.containsKey(id)) return false;
       final isStale = now.difference(peer.lastSeen) > staleTimeout;
       if (isStale) {
         AppLogger.debug(
@@ -309,6 +315,18 @@ class DiscoveryCoordinator {
     if (!_operationalStateController.isClosed) {
       _operationalStateController.add(operationalState);
     }
+  }
+
+  /// Adds a peer learned out of band (QR code, pairing link, NFC tap).
+  ///
+  /// It is a real device the user just paired with, so it is listed like a
+  /// discovered peer and kept for [pinFor] even without beacons.
+  void addPairedPeer(
+    DiscoveredPeer peer, {
+    Duration pinFor = const Duration(minutes: 15),
+  }) {
+    _pinnedUntil[peer.deviceId.toLowerCase()] = DateTime.now().add(pinFor);
+    _handleDiscoveredPeer(peer);
   }
 
   /// Manually injects a peer (primarily for unit tests and local simulations).

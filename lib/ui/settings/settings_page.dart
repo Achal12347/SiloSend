@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/settings/user_settings.dart';
 import 'package:vayu/core/state/app_container.dart';
@@ -57,9 +58,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final container = widget.container;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
+      appBar: AppBar(title: const Text('Settings')),
       body: StreamBuilder<UserSettings>(
         stream: container.userSettingsStream,
         initialData: container.userSettings,
@@ -82,6 +81,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   // 1. Device Profile & Display Name
                   _buildSectionHeader(theme, 'Device Identity'),
                   _buildProfileCard(context, theme, container),
+                  const SizedBox(height: 16),
+
+                  _buildSectionHeader(theme, 'Appearance'),
+                  _buildAppearanceCard(theme, container, settings),
                   const SizedBox(height: 16),
 
                   // 2. Battery Saver UI (UI9 & Section 30)
@@ -117,6 +120,47 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildAppearanceCard(
+    ThemeData theme,
+    AppContainer container,
+    UserSettings settings,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Theme', style: theme.textTheme.titleSmall),
+            const SizedBox(height: 12),
+            SegmentedButton<AppThemePreference>(
+              segments: const [
+                ButtonSegment(
+                  value: AppThemePreference.system,
+                  icon: Icon(Icons.brightness_auto_rounded),
+                  label: Text('System'),
+                ),
+                ButtonSegment(
+                  value: AppThemePreference.light,
+                  icon: Icon(Icons.light_mode_rounded),
+                  label: Text('Light'),
+                ),
+                ButtonSegment(
+                  value: AppThemePreference.dark,
+                  icon: Icon(Icons.dark_mode_rounded),
+                  label: Text('Dark'),
+                ),
+              ],
+              selected: {settings.themePreference},
+              onSelectionChanged: (selection) =>
+                  container.setThemePreference(selection.first),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionHeader(ThemeData theme, String title) {
     return Padding(
       padding: const EdgeInsets.only(left: 4.0, bottom: 6.0),
@@ -141,14 +185,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final shortId = deviceId.length >= 8 ? deviceId.substring(0, 8) : deviceId;
 
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: ListTile(
         leading: CircleAvatar(
           backgroundColor: theme.colorScheme.primaryContainer,
@@ -177,14 +213,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final isThrottled = orchState.isBatterySaverActive;
 
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -200,7 +228,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           ? Icons.battery_saver_rounded
                           : Icons.battery_std_rounded,
                       color: isThrottled
-                          ? Colors.orange.shade800
+                          ? VayuPalette.fromTheme(theme).warning
                           : theme.colorScheme.primary,
                     ),
                     const SizedBox(width: 8),
@@ -217,8 +245,8 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                   decoration: BoxDecoration(
                     color: isThrottled
-                        ? Colors.orange.shade100
-                        : Colors.green.shade100,
+                        ? VayuPalette.fromTheme(theme).warningContainer
+                        : VayuPalette.fromTheme(theme).successContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
@@ -227,8 +255,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       color: isThrottled
-                          ? Colors.orange.shade900
-                          : Colors.green.shade900,
+                          ? VayuPalette.fromTheme(theme).warning
+                          : VayuPalette.fromTheme(theme).success,
                     ),
                   ),
                 ),
@@ -237,14 +265,8 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
             SegmentedButton<BatterySaverMode>(
               segments: const [
-                ButtonSegment(
-                  value: BatterySaverMode.off,
-                  label: Text('Off'),
-                ),
-                ButtonSegment(
-                  value: BatterySaverMode.on,
-                  label: Text('On'),
-                ),
+                ButtonSegment(value: BatterySaverMode.off, label: Text('Off')),
+                ButtonSegment(value: BatterySaverMode.on, label: Text('On')),
                 ButtonSegment(
                   value: BatterySaverMode.system,
                   label: Text('Follow System'),
@@ -282,14 +304,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildStorageCard(ThemeData theme) {
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: ListTile(
         leading: Icon(Icons.folder_rounded, color: theme.colorScheme.primary),
         title: const Text(
@@ -312,14 +326,6 @@ class _SettingsPageState extends State<SettingsPage> {
     AppContainer container,
   ) {
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: Column(
         children: [
           ListTile(
@@ -354,16 +360,11 @@ class _SettingsPageState extends State<SettingsPage> {
     AppContainer container,
   ) {
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: ListTile(
-        leading: Icon(Icons.analytics_outlined, color: theme.colorScheme.primary),
+        leading: Icon(
+          Icons.analytics_outlined,
+          color: theme.colorScheme.primary,
+        ),
         title: const Text(
           'Diagnostics & Telemetry',
           style: TextStyle(fontWeight: FontWeight.w600),
@@ -383,14 +384,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildAboutCard(ThemeData theme) {
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: Padding(
         padding: const EdgeInsets.all(14.0),
         child: Column(

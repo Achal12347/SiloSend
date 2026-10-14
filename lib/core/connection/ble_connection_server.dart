@@ -12,9 +12,6 @@ class BleConnectionServer {
   static const MethodChannel _methodChannel = MethodChannel(
     'com.achyrio.vayu/ble_connection',
   );
-  static const EventChannel _eventChannel = EventChannel(
-    'com.achyrio.vayu/ble_connection_events',
-  );
 
   final Stream<dynamic>? customEventStream;
   final BleTransportAdapter? customAdapter;
@@ -42,8 +39,9 @@ class BleConnectionServer {
         await _methodChannel.invokeMethod('startServer');
       }
 
-      final stream =
-          customEventStream ?? _eventChannel.receiveBroadcastStream();
+      // Shared stream: a separate receiveBroadcastStream() would replace the
+      // native sink and starve outbound links.
+      final stream = customEventStream ?? BlePlatformEvents.stream;
       _eventSubscription = stream.listen(
         _handlePlatformEvent,
         onError: (e) {
@@ -70,6 +68,8 @@ class BleConnectionServer {
   void _handlePlatformEvent(dynamic rawEvent) {
     if (rawEvent is! Map) return;
     final event = Map<String, dynamic>.from(rawEvent);
+    // Outbound (client) links route their own events.
+    if (event['role'] == 'client') return;
     final type = event['type'] as String?;
     final connectionId = event['connectionId'] as String?;
 

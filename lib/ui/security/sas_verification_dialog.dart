@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/security/secure_session_impl.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/crypto_identity_keypair.dart';
@@ -62,7 +63,7 @@ class _SasVerificationDialogState extends State<SasVerificationDialog> {
           Icon(
             Icons.verified_user_rounded,
             color: isAlreadyVerified
-                ? Colors.green.shade700
+                ? VayuPalette.fromTheme(theme).success
                 : theme.colorScheme.primary,
           ),
           const SizedBox(width: 8),
@@ -231,7 +232,9 @@ class _SasVerificationDialogState extends State<SasVerificationDialog> {
                     );
                   }
                 },
-          style: TextButton.styleFrom(foregroundColor: Colors.red.shade700),
+          style: TextButton.styleFrom(
+            foregroundColor: VayuPalette.fromTheme(theme).danger,
+          ),
           child: const Text('Mismatch / Abort'),
         ),
         FilledButton.icon(
@@ -283,16 +286,17 @@ class _SasVerificationDialogState extends State<SasVerificationDialog> {
   }
 
   Color _trustLevelColor(TrustLevel level) {
+    final theme = Theme.of(context);
     switch (level) {
       case TrustLevel.sasVerified:
       case TrustLevel.nfcAuthenticated:
-        return Colors.green.shade800;
+        return VayuPalette.fromTheme(theme).success;
       case TrustLevel.trustedTOFU:
-        return Colors.blue.shade800;
+        return theme.colorScheme.primary;
       case TrustLevel.unverifiedTOFU:
-        return Colors.amber.shade900;
+        return VayuPalette.fromTheme(theme).warning;
       case TrustLevel.keyConflict:
-        return Colors.red.shade800;
+        return VayuPalette.fromTheme(theme).danger;
     }
   }
 }

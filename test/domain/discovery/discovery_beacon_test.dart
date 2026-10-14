@@ -188,19 +188,16 @@ void main() {
       expect(beacon.displayName, equals('DeviceName'));
     });
 
-    test(
-      'defaults empty or whitespace-only display name to Vayu-Device',
-      () {
-        final beacon = DiscoveryBeacon(
-          deviceId: sampleDeviceId,
-          port: 53531,
-          supportedTransports: {TransportType.lan},
-          displayName: '   ',
-        );
+    test('defaults empty or whitespace-only display name to Vayu-Device', () {
+      final beacon = DiscoveryBeacon(
+        deviceId: sampleDeviceId,
+        port: 53531,
+        supportedTransports: {TransportType.lan},
+        displayName: '   ',
+      );
 
-        expect(beacon.displayName, equals('Vayu-Device'));
-      },
-    );
+      expect(beacon.displayName, equals('Vayu-Device'));
+    });
 
     test('preserves unicode characters safely in display name', () {
       final beacon = DiscoveryBeacon(

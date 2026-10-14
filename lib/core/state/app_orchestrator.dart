@@ -15,7 +15,7 @@ import 'package:vayu/domain/identity/system_capabilities.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 
 /// Conceptual operational lifecycle phases defined in Section 33 of
-/// SiloSend Real Device Integration Plan.
+/// Vayu Real Device Integration Plan.
 enum AppOperationalPhase {
   initializing,
   ready,
@@ -43,7 +43,7 @@ enum AppOperationalPhase {
 }
 
 /// Explicit domain error states required by Section 33.
-/// SiloSend prohibits overloading a generic error code.
+/// Vayu prohibits overloading a generic error code.
 enum AppExplicitError {
   none,
   permissionRequired,
@@ -211,7 +211,8 @@ class AppOrchestrator {
 
     // 1. Evaluate explicit errors (Permissions & Radios)
     final isAndroid = rawCaps.platformName.toLowerCase() == 'android';
-    final isNearbyPermissionRequired = isAndroid &&
+    final isNearbyPermissionRequired =
+        isAndroid &&
         rawCaps.nearbyPermission != PermissionStatus.notRequired &&
         rawCaps.nearbyPermission != PermissionStatus.unknown;
 
@@ -313,10 +314,9 @@ class AppOrchestrator {
       activeTransport: transport,
       activeTransferProgress: transferProgress,
       discoveredPeersCount: peers.length,
-      isBatterySaverActive:
-          isBatterySaverActiveEvaluator != null
-              ? isBatterySaverActiveEvaluator!(_batterySnapshot)
-              : (_batterySnapshot.isBatterySaverActive == true),
+      isBatterySaverActive: isBatterySaverActiveEvaluator != null
+          ? isBatterySaverActiveEvaluator!(_batterySnapshot)
+          : (_batterySnapshot.isBatterySaverActive == true),
       timestamp: DateTime.now(),
     );
 

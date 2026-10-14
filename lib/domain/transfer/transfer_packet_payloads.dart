@@ -60,7 +60,11 @@ enum TransferCancelReason {
   declined(0x03),
   checksumMismatch(0x04),
   storageFull(0x05),
-  connectionClosed(0x06);
+  connectionClosed(0x06),
+  // The receiver could not write or promote the file for a reason other than space.
+  ioError(0x07),
+  // The sender could not read its own source file.
+  sourceUnreadable(0x08);
 
   final int code;
   const TransferCancelReason(this.code);

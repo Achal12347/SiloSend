@@ -15,7 +15,7 @@ class SessionLifecyclePolicy {
 
   /// Grace period after all transfers on a session have concluded before tearing down the session.
   ///
-  /// Per SiloSend Real Device Integration Plan (R13), transfers have a ~5-second grace period
+  /// Per the Vayu Real Device Integration Plan (R13), transfers have a ~5-second grace period
   /// after integrity verification before automatic session teardown and transport disconnect.
   /// Set to `null` to disable post-transfer grace teardown and use [idleTimeout] instead.
   final Duration? postTransferGracePeriod;

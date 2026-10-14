@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/utils/file_hash.dart';
 
 /// In-memory payload source backed by a contiguous [Uint8List].
 class MemoryPayloadSource implements PayloadSource {
@@ -105,11 +106,7 @@ class FilePayloadSource implements PayloadSource {
   }
 
   @override
-  Future<String> computeSha256() async {
-    final stream = file.openRead();
-    final digest = await crypto.sha256.bind(stream).first;
-    return digest.toString();
-  }
+  Future<String> computeSha256() => sha256OfFile(file.path);
 
   @override
   Future<void> close() async {

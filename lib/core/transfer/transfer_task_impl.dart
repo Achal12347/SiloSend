@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -7,9 +8,11 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/protocol/packet_type.dart';
 import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 /// Helper to parse hex/UUID strings into 16-byte raw byte identifiers.
@@ -45,8 +48,9 @@ Uint8List parseSha256HexToBytes(String hex) {
 /// Features:
 /// - Pipelined sliding window of unacknowledged chunks (default W=8).
 /// - Dynamic cumulative and selective acknowledgment handling (SACK).
-/// - Per-chunk timer with configurable retry threshold (default 3 retries, 5s timeout).
-/// - Fast retransmit upon receiving CRC NACKs.
+/// - Per-chunk timer with configurable retry threshold (default 5 retries, 10s timeout).
+/// - Fast retransmit upon receiving CRC NACKs; window-rejected chunks are re-queued.
+/// - Reports completion only after the receiver confirms SHA-256 verification.
 /// - Speed calculation and ETA estimation.
 /// - Cooperative pause, resume, and cancellation.
 class OutboundTransferTask implements TransferTask {
@@ -68,10 +72,31 @@ class OutboundTransferTask implements TransferTask {
   final Duration chunkTimeout;
   final int maxRetries;
 
+  /// Base wait for the receiver's verification result once every chunk is
+  /// acknowledged; [_verificationTimeout] adds time proportional to file size.
+  final Duration verificationTimeout;
+
   TransferStatus _status = TransferStatus.idle;
   final StreamController<TransferProgress> _progressController =
       StreamController<TransferProgress>.broadcast();
   final Completer<void> _doneCompleter = Completer<void>();
+
+  // Serializes window filling. Every ACK requests a pump; without this, overlapping
+  // pumps each saw a stale in-flight count during the async chunk read and pushed
+  // chunks past the receiver's horizon.
+  bool _pumping = false;
+  bool _pumpRequested = false;
+
+  /// Chunks the receiver rejected as beyond its window, resent before new chunks.
+  final SplayTreeSet<int> _retransmitQueue = SplayTreeSet<int>();
+  Timer? _verificationTimer;
+
+  bool _offerAccepted = false;
+
+  /// True after the offer is sent and before the receiver accepts it. The task
+  /// status is already `transferring` then, so UIs use this to say "waiting".
+  bool get awaitingAcceptance =>
+      !_offerAccepted && _status == TransferStatus.transferring;
 
   late final Uint8List _transferIdBytes;
   late final Uint8List _localIdBytes;
@@ -94,6 +119,21 @@ class OutboundTransferTask implements TransferTask {
   DateTime _lastSampleTime = DateTime.now();
   double _currentSpeed = 0.0;
 
+  /// Receives a timing summary once the transfer ends (speed diagnostics).
+  final void Function(TransferStats stats)? onStats;
+
+  /// Chunks read ahead of the one being sent, so disk/bridge reads overlap
+  /// with encryption and the socket write instead of running one after another.
+  final int readAhead;
+  final Map<int, Future<Uint8List>> _prefetched = {};
+
+  final Stopwatch _elapsed = Stopwatch();
+  Duration _readTime = Duration.zero;
+  Duration _sendTime = Duration.zero;
+  int _retransmits = 0;
+  int _acksReceived = 0;
+  bool _statsReported = false;
+
   OutboundTransferTask({
     required this.transferId,
     required this.localDeviceId,
@@ -102,8 +142,13 @@ class OutboundTransferTask implements TransferTask {
     required this.source,
     required this.metadata,
     this.windowSize = 8,
-    this.chunkTimeout = const Duration(seconds: 5),
-    this.maxRetries = 3,
+    // TCP already retransmits lost segments, so a chunk timeout means the path or
+    // the peer stalled. Generous limits ride out GC pauses and slow storage.
+    this.chunkTimeout = const Duration(seconds: 10),
+    this.maxRetries = 5,
+    this.verificationTimeout = const Duration(seconds: 30),
+    this.onStats,
+    this.readAhead = 2,
   }) {
     _transferIdBytes = parseIdTo16Bytes(transferId);
     _localIdBytes = parseIdTo16Bytes(localDeviceId);
@@ -111,11 +156,20 @@ class OutboundTransferTask implements TransferTask {
     _doneCompleter.future.ignore();
   }
 
+  // The receiver hashes the whole file before confirming; allow ~10 MB/s on slow phones.
+  Duration get _verificationTimeout =>
+      verificationTimeout +
+      Duration(milliseconds: metadata.totalBytes ~/ (10 * 1024));
+
   @override
   TransferStatus get status => _status;
 
   @override
   Stream<TransferProgress> get progressStream => _progressController.stream;
+
+  /// Most recent progress snapshot. The progress stream does not replay, so a
+  /// screen opened after an update (or after completion) starts from this.
+  TransferProgress? lastProgress;
 
   /// Future completing when the transfer completes successfully or with error.
   @override
@@ -126,6 +180,7 @@ class OutboundTransferTask implements TransferTask {
     if (_status != TransferStatus.idle) return;
     _status = TransferStatus.transferring;
     _transferStartTime = DateTime.now();
+    _elapsed.start();
     _lastSampleTime = DateTime.now();
 
     _emitProgress();
@@ -174,10 +229,40 @@ class OutboundTransferTask implements TransferTask {
     // receiver must accept the offer before sending chunks.
   }
 
-  /// Pushes unacknowledged chunks within the sliding window.
+  bool _isChunkAcked(int chunkIdx) =>
+      _ackedChunks.contains(chunkIdx) ||
+      (_highestContiguousAcked != -1 && chunkIdx <= _highestContiguousAcked);
+
+  /// Pushes unacknowledged chunks within the sliding window, one pump at a time.
   Future<void> _pumpWindow() async {
+    if (_pumping) {
+      _pumpRequested = true;
+      return;
+    }
+    _pumping = true;
+    try {
+      do {
+        _pumpRequested = false;
+        await _pumpOnce();
+      } while (_pumpRequested);
+    } finally {
+      _pumping = false;
+    }
+  }
+
+  Future<void> _pumpOnce() async {
     if (_isPaused || _status != TransferStatus.transferring || _isDisposed) {
       return;
+    }
+
+    while (_inFlightChunks.length < windowSize && _retransmitQueue.isNotEmpty) {
+      final chunkIdx = _retransmitQueue.first;
+      _retransmitQueue.remove(chunkIdx);
+      if (_isChunkAcked(chunkIdx) || _inFlightChunks.containsKey(chunkIdx)) {
+        continue;
+      }
+      await _sendChunk(chunkIdx);
+      if (_status != TransferStatus.transferring) return;
     }
 
     while (_inFlightChunks.length < windowSize &&
@@ -192,7 +277,32 @@ class OutboundTransferTask implements TransferTask {
       }
 
       _nextChunkToSend++;
+      _prefetchFrom(_nextChunkToSend);
       await _sendChunk(chunkIdx);
+    }
+  }
+
+  Future<Uint8List> _readChunkAt(int chunkIdx) {
+    final offset = chunkIdx * metadata.chunkSize;
+    final remaining = metadata.totalBytes - offset;
+    final length = remaining > metadata.chunkSize
+        ? metadata.chunkSize
+        : remaining;
+    return source.readChunk(offset, length);
+  }
+
+  /// Starts reads for up to [readAhead] chunks from [first] that are neither
+  /// acknowledged nor already being read.
+  void _prefetchFrom(int first) {
+    for (
+      var idx = first;
+      idx < metadata.chunkCount && idx < first + readAhead;
+      idx++
+    ) {
+      if (_prefetched.containsKey(idx) || _isChunkAcked(idx)) continue;
+      // ignore(): a read never awaited (task cancelled) must not surface as
+      // an unhandled error; awaiting it later still reports the failure.
+      _prefetched[idx] = _readChunkAt(idx)..ignore();
     }
   }
 
@@ -200,39 +310,66 @@ class OutboundTransferTask implements TransferTask {
     if (_status != TransferStatus.transferring || _isDisposed) return;
 
     final offset = chunkIdx * metadata.chunkSize;
-    final remaining = metadata.totalBytes - offset;
-    final length = remaining > metadata.chunkSize
-        ? metadata.chunkSize
-        : remaining;
 
+    final Uint8List chunkBytes;
+    final readClock = Stopwatch()..start();
     try {
-      final chunkBytes = await source.readChunk(offset, length);
-      final chunkPayload = TransferChunkPayload.create(
-        transferId: _transferIdBytes,
-        chunkIndex: chunkIdx,
-        chunkOffset: offset,
-        chunkData: chunkBytes,
-      );
-
-      _inFlightChunks[chunkIdx] = chunkPayload;
-
-      final packet = VayuPacket(
-        packetType: PacketType.transferChunk,
-        packetId: DateTime.now().microsecondsSinceEpoch,
-        sourceDeviceId: _localIdBytes,
-        destinationDeviceId: _remoteIdBytes,
-        payload: chunkPayload.toBytes(),
-      );
-
-      await secureSession.sendEncryptedPacket(packet);
-      _startChunkTimer(chunkIdx);
+      chunkBytes =
+          await (_prefetched.remove(chunkIdx) ?? _readChunkAt(chunkIdx));
+      _readTime += readClock.elapsed;
     } catch (e) {
       AppLogger.error(
         'OutboundTransferTask',
-        'Failed to read/send chunk $chunkIdx',
+        'Failed to read chunk $chunkIdx',
         error: e,
       );
-      _failWithStorage('Failed to read chunk $chunkIdx: $e');
+      _failWithSourceError('Failed to read chunk $chunkIdx: $e');
+      return;
+    }
+    if (_status != TransferStatus.transferring || _isDisposed) return;
+
+    final chunkPayload = TransferChunkPayload.create(
+      transferId: _transferIdBytes,
+      chunkIndex: chunkIdx,
+      chunkOffset: offset,
+      chunkData: chunkBytes,
+    );
+    _inFlightChunks[chunkIdx] = chunkPayload;
+    await _transmitChunk(chunkIdx, chunkPayload);
+  }
+
+  /// Sends [payload] and arms its retransmit timer.
+  ///
+  /// A failed send is a connection problem, never a storage one: the chunk
+  /// stays in flight so its timer retransmits it, and the task fails only when
+  /// the session itself is gone (or retries run out).
+  Future<void> _transmitChunk(
+    int chunkIdx,
+    TransferChunkPayload payload,
+  ) async {
+    final packet = VayuPacket(
+      packetType: PacketType.transferChunk,
+      packetId: DateTime.now().microsecondsSinceEpoch,
+      sourceDeviceId: _localIdBytes,
+      destinationDeviceId: _remoteIdBytes,
+      payload: payload.toBytes(),
+    );
+    final sendClock = Stopwatch()..start();
+    try {
+      await secureSession.sendEncryptedPacket(packet);
+      _sendTime += sendClock.elapsed;
+    } catch (e) {
+      AppLogger.warning(
+        'OutboundTransferTask',
+        'Sending chunk $chunkIdx failed, will retry: $e',
+      );
+      if (!secureSession.isEstablished) {
+        handleSessionClosed('Connection lost while sending: $e');
+        return;
+      }
+    }
+    if (_status == TransferStatus.transferring && !_isDisposed) {
+      _startChunkTimer(chunkIdx);
     }
   }
 
@@ -271,35 +408,57 @@ class OutboundTransferTask implements TransferTask {
     // Resend chunk
     final payload = _inFlightChunks[chunkIdx];
     if (payload != null) {
-      final packet = VayuPacket(
-        packetType: PacketType.transferChunk,
-        packetId: DateTime.now().microsecondsSinceEpoch,
-        sourceDeviceId: _localIdBytes,
-        destinationDeviceId: _remoteIdBytes,
-        payload: payload.toBytes(),
+      _retransmits++;
+      await _transmitChunk(chunkIdx, payload);
+    }
+  }
+
+  /// Every byte is delivered; wait for the receiver to confirm its SHA-256 check.
+  void _awaitReceiverVerification() {
+    if (_status == TransferStatus.verifying) return;
+    for (final timer in _chunkTimers.values) {
+      timer.cancel();
+    }
+    _chunkTimers.clear();
+    _inFlightChunks.clear();
+    _status = TransferStatus.verifying;
+    _emitProgress();
+    _verificationTimer?.cancel();
+    _verificationTimer = Timer(_verificationTimeout, () {
+      if (_status != TransferStatus.verifying) return;
+      AppLogger.warning(
+        'OutboundTransferTask',
+        'Receiver did not confirm verification of $transferId in time',
       );
-      try {
-        await secureSession.sendEncryptedPacket(packet);
-        _startChunkTimer(chunkIdx);
-      } catch (e) {
-        AppLogger.warning(
-          'OutboundTransferTask',
-          'Error resending chunk $chunkIdx: $e',
+      _cleanupTimers();
+      _status = TransferStatus.failed;
+      _emitProgress();
+      _closeControllers();
+      if (!_doneCompleter.isCompleted) {
+        _doneCompleter.completeError(
+          TransferVerificationTimeoutException(transferId),
         );
       }
-    }
+    });
   }
 
   /// Handles incoming ACK packets routed to this transfer.
   void handleAck(TransferAckPayload ack) {
+    _acksReceived++;
     if (_status != TransferStatus.transferring &&
-        _status != TransferStatus.idle) {
+        _status != TransferStatus.idle &&
+        _status != TransferStatus.verifying) {
+      return;
+    }
+    if (_status == TransferStatus.verifying &&
+        ack.ackType != TransferAckType.transferCompleted) {
       return;
     }
 
     if (ack.ackType == TransferAckType.offerAccepted ||
         ack.ackType == TransferAckType.resumeCheckpoint) {
       _status = TransferStatus.transferring;
+      _offerAccepted = true;
 
       if (ack.highestContiguousChunkIndex != TransferAckPayload.noneAcked) {
         _highestContiguousAcked = ack.highestContiguousChunkIndex;
@@ -363,14 +522,19 @@ class OutboundTransferTask implements TransferTask {
       _bytesAcked = max(_bytesAcked, ack.bytesReceived);
       _emitProgress();
 
-      // 3. Completion check
+      // 3. Completion: only the receiver's verified confirmation is success.
+      if (ack.ackType == TransferAckType.transferCompleted) {
+        _finishSuccess();
+        return;
+      }
+
       final allAcked =
           (metadata.chunkCount == 0) ||
           (_highestContiguousAcked >= metadata.chunkCount - 1) ||
           (_ackedChunks.length >= metadata.chunkCount);
 
-      if (allAcked || ack.ackType == TransferAckType.transferCompleted) {
-        _finishSuccess();
+      if (allAcked) {
+        _awaitReceiverVerification();
       } else {
         _pumpWindow();
       }
@@ -395,24 +559,46 @@ class OutboundTransferTask implements TransferTask {
       _chunkRetryCounts[nack.chunkIndex] = retries;
       final payload = _inFlightChunks[nack.chunkIndex];
       if (payload != null) {
-        final packet = VayuPacket(
-          packetType: PacketType.transferChunk,
-          packetId: DateTime.now().microsecondsSinceEpoch,
-          sourceDeviceId: _localIdBytes,
-          destinationDeviceId: _remoteIdBytes,
-          payload: payload.toBytes(),
-        );
-        await secureSession.sendEncryptedPacket(packet);
-        _startChunkTimer(nack.chunkIndex);
+        _retransmits++;
+        await _transmitChunk(nack.chunkIndex, payload);
       }
+    } else if (nack.reason == TransferNackReason.outOfOrderWindowExceeded) {
+      // The receiver dropped this chunk because it arrived too far ahead.
+      // Queue it for resend once the window advances; it is not a delivery failure.
+      final idx = nack.chunkIndex;
+      _chunkTimers.remove(idx)?.cancel();
+      _inFlightChunks.remove(idx);
+      if (!_isChunkAcked(idx)) {
+        _retransmitQueue.add(idx);
+      }
+      _pumpWindow();
     } else if (nack.reason == TransferNackReason.storageFull ||
         nack.reason == TransferNackReason.ioError) {
-      _failWithStorage('Remote receiver storage error: ${nack.details}');
+      _failWithStorage(
+        'Receiver could not save the file: ${nack.details}',
+        outOfSpace: nack.reason == TransferNackReason.storageFull,
+        notifyPeer: false,
+      );
     }
   }
 
   /// Handles incoming Cancel packets from the receiver.
   void handleCancel(TransferCancelPayload cancel) {
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
+    // Storage problems on the receiver keep their real meaning for the UI.
+    if (cancel.reason == TransferCancelReason.storageFull ||
+        cancel.reason == TransferCancelReason.ioError) {
+      _failWithStorage(
+        cancel.message.isNotEmpty ? cancel.message : cancel.reason.name,
+        outOfSpace: cancel.reason == TransferCancelReason.storageFull,
+        notifyPeer: false,
+      );
+      return;
+    }
     _cleanupTimers();
     _status =
         (cancel.reason == TransferCancelReason.userCancelled ||
@@ -520,7 +706,28 @@ class OutboundTransferTask implements TransferTask {
     }
   }
 
+  void _reportStats(bool succeeded) {
+    if (_statsReported || onStats == null) return;
+    _statsReported = true;
+    _elapsed.stop();
+    onStats!(
+      TransferStats(
+        outbound: true,
+        bytes: succeeded ? metadata.totalBytes : _bytesAcked,
+        chunkSize: metadata.chunkSize,
+        windowChunks: windowSize,
+        elapsed: _elapsed.elapsed,
+        ioTime: _readTime,
+        sendTime: _sendTime,
+        retransmits: _retransmits,
+        acks: _acksReceived,
+        succeeded: succeeded,
+      ),
+    );
+  }
+
   void _finishSuccess() {
+    _reportStats(true);
     _cleanupTimers();
     _bytesAcked = metadata.totalBytes;
     _status = TransferStatus.completed;
@@ -538,6 +745,7 @@ class OutboundTransferTask implements TransferTask {
   }
 
   void _failWithTimeout(int chunkIdx, int retries) {
+    _reportStats(false);
     _cleanupTimers();
     _status = TransferStatus.failed;
 
@@ -572,17 +780,54 @@ class OutboundTransferTask implements TransferTask {
     }
   }
 
-  void _failWithStorage(String message) {
+  /// Fails because the receiver reported it could not save the file. The
+  /// receiver already knows, so no cancel is sent back unless [notifyPeer].
+  void _failWithStorage(
+    String message, {
+    required bool outOfSpace,
+    bool notifyPeer = true,
+  }) {
+    _fail(
+      TransferStorageException(transferId, message, outOfSpace: outOfSpace),
+      notifyReason: notifyPeer
+          ? (outOfSpace
+                ? TransferCancelReason.storageFull
+                : TransferCancelReason.ioError)
+          : null,
+      message: message,
+    );
+  }
+
+  /// Fails because this device could not read its own file; tells the
+  /// receiver so it discards the partial file with an accurate reason.
+  void _failWithSourceError(String message) {
+    _fail(
+      TransferSourceException(transferId, message),
+      notifyReason: TransferCancelReason.sourceUnreadable,
+      message: 'The sender could not read the file',
+    );
+  }
+
+  void _fail(
+    TransferException error, {
+    TransferCancelReason? notifyReason,
+    required String message,
+  }) {
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
+    _reportStats(false);
     _cleanupTimers();
     _status = TransferStatus.failed;
 
-    final cancelPayload = TransferCancelPayload(
-      transferId: _transferIdBytes,
-      reason: TransferCancelReason.storageFull,
-      message: message,
-    );
-
-    try {
+    if (notifyReason != null) {
+      final cancelPayload = TransferCancelPayload(
+        transferId: _transferIdBytes,
+        reason: notifyReason,
+        message: message,
+      );
       final packet = VayuPacket(
         packetType: PacketType.transferCancel,
         packetId: DateTime.now().microsecondsSinceEpoch,
@@ -590,16 +835,14 @@ class OutboundTransferTask implements TransferTask {
         destinationDeviceId: _remoteIdBytes,
         payload: cancelPayload.toBytes(),
       );
-      secureSession.sendEncryptedPacket(packet);
-    } catch (_) {}
+      secureSession.sendEncryptedPacket(packet).catchError((_) {});
+    }
 
     _emitProgress();
     _closeControllers();
 
     if (!_doneCompleter.isCompleted) {
-      _doneCompleter.completeError(
-        TransferStorageException(transferId, message),
-      );
+      _doneCompleter.completeError(error);
     }
   }
 
@@ -608,6 +851,9 @@ class OutboundTransferTask implements TransferTask {
       timer.cancel();
     }
     _chunkTimers.clear();
+    _prefetched.clear();
+    _verificationTimer?.cancel();
+    _verificationTimer = null;
   }
 
   void _closeControllers() {
@@ -640,16 +886,16 @@ class OutboundTransferTask implements TransferTask {
         ? 0
         : _highestContiguousAcked + 1;
 
-    _progressController.add(
-      TransferProgress(
-        transferId: transferId,
-        bytesTransferred: _bytesAcked,
-        totalBytes: metadata.totalBytes,
-        currentChunkIndex: currentChunk,
-        speedBytesPerSecond: _currentSpeed > 0 ? _currentSpeed : 0.0,
-        etaSeconds: etaSeconds,
-      ),
+    final progress = TransferProgress(
+      transferId: transferId,
+      bytesTransferred: _bytesAcked,
+      totalBytes: metadata.totalBytes,
+      currentChunkIndex: currentChunk,
+      speedBytesPerSecond: _currentSpeed > 0 ? _currentSpeed : 0.0,
+      etaSeconds: etaSeconds,
     );
+    lastProgress = progress;
+    _progressController.add(progress);
   }
 }
 
@@ -680,6 +926,16 @@ class InboundTransferTask implements TransferTask {
 
   final int windowSize;
 
+  /// In-order chunks acknowledged together. Every ACK is an encrypted packet
+  /// (a native bridge call on Android), so acking every chunk wasted time.
+  /// Kept small so an older sender with an 8-chunk window never stalls.
+  final int ackEvery;
+
+  /// Longest an in-order chunk waits for its ACK to be batched.
+  final Duration ackDelay;
+  int _unackedChunks = 0;
+  Timer? _ackTimer;
+
   TransferStatus _status = TransferStatus.transferring;
   final StreamController<TransferProgress> _progressController =
       StreamController<TransferProgress>.broadcast();
@@ -699,6 +955,12 @@ class InboundTransferTask implements TransferTask {
   DateTime _lastSampleTime = DateTime.now();
   double _currentSpeed = 0.0;
 
+  /// Receives a timing summary once the transfer ends (speed diagnostics).
+  final void Function(TransferStats stats)? onStats;
+  final Stopwatch _elapsed = Stopwatch()..start();
+  Duration _writeTime = Duration.zero;
+  int _acksSent = 0;
+
   InboundTransferTask({
     required this.transferId,
     required this.localDeviceId,
@@ -709,6 +971,9 @@ class InboundTransferTask implements TransferTask {
     this.windowSize = 8,
     int initialContiguousChunkIndex = -1,
     int initialBytesReceived = 0,
+    this.onStats,
+    this.ackEvery = 2,
+    this.ackDelay = const Duration(milliseconds: 15),
   }) {
     _transferIdBytes = parseIdTo16Bytes(transferId);
     _localIdBytes = parseIdTo16Bytes(localDeviceId);
@@ -726,13 +991,34 @@ class InboundTransferTask implements TransferTask {
   @override
   Stream<TransferProgress> get progressStream => _progressController.stream;
 
+  /// Most recent progress snapshot. The progress stream does not replay, so a
+  /// screen opened after an update (or after completion) starts from this.
+  TransferProgress? lastProgress;
+
   /// Future completing when receiving completes and passes SHA-256 verification.
   @override
   Future<void> get done => _doneCompleter.future;
 
-  /// Handles incoming chunk packet.
-  Future<void> handleChunk(TransferChunkPayload chunk) async {
-    if (_status != TransferStatus.transferring || _isDisposed) return;
+  // Chunks are processed strictly one at a time. The engine does not await
+  // handlers, and overlapping handlers used to run the final verification
+  // twice (the second one found the staging file already renamed and failed a
+  // finished transfer) and to write retransmitted duplicates twice.
+  Future<void> _chunkQueue = Future<void>.value();
+  bool _finalizing = false;
+
+  /// Handles an incoming chunk packet. Calls are queued and run in order.
+  Future<void> handleChunk(TransferChunkPayload chunk) {
+    final next = _chunkQueue.then((_) => _processChunk(chunk));
+    _chunkQueue = next.catchError((Object e) {
+      AppLogger.warning('InboundTransferTask', 'Chunk handling failed: $e');
+    });
+    return _chunkQueue;
+  }
+
+  Future<void> _processChunk(TransferChunkPayload chunk) async {
+    if (_status != TransferStatus.transferring || _isDisposed || _finalizing) {
+      return;
+    }
 
     // 1. Verify CRC32
     if (!chunk.verifyCrc()) {
@@ -755,12 +1041,17 @@ class InboundTransferTask implements TransferTask {
         (_highestContiguousChunkIndex != -1 &&
             chunk.chunkIndex <= _highestContiguousChunkIndex)) {
       // Re-send ACK so sender knows chunk was accepted
-      await _sendAck(TransferAckType.chunkReceived);
+      _sendAckQuietly(TransferAckType.chunkReceived);
       return;
     }
 
-    // 3. Out-of-order window check
-    if (chunk.chunkIndex > _highestContiguousChunkIndex + (windowSize * 4)) {
+    // 3. Out-of-order window check. The horizon covers at least 16 MiB so a
+    // sender using a larger window for big chunks is never rejected.
+    final horizon = max(
+      windowSize * 4,
+      (16 * 1024 * 1024) ~/ max(1, metadata.chunkSize),
+    );
+    if (chunk.chunkIndex > _highestContiguousChunkIndex + horizon) {
       AppLogger.warning(
         'InboundTransferTask',
         'Chunk ${chunk.chunkIndex} exceeds sliding window boundary ($windowSize * 4). Sending NACK...',
@@ -776,20 +1067,35 @@ class InboundTransferTask implements TransferTask {
     }
 
     // 4. Write chunk to destination
+    final writeClock = Stopwatch()..start();
     try {
       await destination.writeChunk(chunk.chunkOffset, chunk.chunkData);
+      _writeTime += writeClock.elapsed;
       _receivedChunks.add(chunk.chunkIndex);
       _bytesReceived += chunk.chunkLength;
     } catch (e) {
-      AppLogger.error('InboundTransferTask', 'Storage write error: $e');
+      // A cancel or session close may have aborted the destination meanwhile.
+      if (_status != TransferStatus.transferring || _isDisposed) return;
+      final outOfSpace = isOutOfSpaceError(e);
+      AppLogger.error(
+        'InboundTransferTask',
+        'Storage write error (outOfSpace=$outOfSpace): $e',
+      );
       final nack = TransferNackPayload(
         transferId: _transferIdBytes,
         chunkIndex: chunk.chunkIndex,
-        reason: TransferNackReason.storageFull,
-        details: e.toString(),
+        reason: outOfSpace
+            ? TransferNackReason.storageFull
+            : TransferNackReason.ioError,
+        details: outOfSpace ? 'Not enough storage space' : 'Write failed',
       );
-      await _sendPacket(PacketType.transferNack, nack.toBytes());
-      await abortWithStorageError('Failed to write chunk: $e');
+      try {
+        await _sendPacket(PacketType.transferNack, nack.toBytes());
+      } catch (_) {}
+      await abortWithStorageError(
+        'Failed to write chunk: $e',
+        outOfSpace: outOfSpace,
+      );
       return;
     }
 
@@ -798,18 +1104,45 @@ class InboundTransferTask implements TransferTask {
       _highestContiguousChunkIndex++;
     }
 
-    // 6. Send cumulative + selective ACK
-    await _sendAck(TransferAckType.chunkReceived);
-    _emitProgress();
-
     // 7. Check if all chunks received
     final isDone =
         (metadata.chunkCount == 0) ||
         (_highestContiguousChunkIndex >= metadata.chunkCount - 1);
 
+    // 6. Cumulative + selective ACK, batched for in-order chunks. A gap (a
+    // chunk the sender must resend) or the last chunk is acknowledged at once.
+    final hasGap = _receivedChunks.length > _highestContiguousChunkIndex + 1;
+    _unackedChunks++;
+    if (isDone || hasGap || _unackedChunks >= ackEvery) {
+      _flushAck();
+    } else {
+      _ackTimer ??= Timer(ackDelay, _flushAck);
+    }
+    _emitProgress();
+
     if (isDone) {
       await _verifyAndFinalize();
     }
+  }
+
+  void _flushAck() {
+    _ackTimer?.cancel();
+    _ackTimer = null;
+    if (_unackedChunks == 0) return;
+    _unackedChunks = 0;
+    if (_status != TransferStatus.transferring &&
+        _status != TransferStatus.verifying) {
+      return;
+    }
+    // Built from the current state synchronously; delivery does not hold up
+    // the next chunk.
+    _sendAckQuietly(TransferAckType.chunkReceived);
+  }
+
+  void _sendAckQuietly(TransferAckType type) {
+    _sendAck(type).catchError((Object e) {
+      AppLogger.warning('InboundTransferTask', 'Sending ACK failed: $e');
+    });
   }
 
   /// For zero-byte payloads, immediately verifies and finalizes.
@@ -841,6 +1174,7 @@ class InboundTransferTask implements TransferTask {
       }
     }
 
+    _acksSent++;
     final ack = TransferAckPayload(
       transferId: _transferIdBytes,
       ackType: ackType,
@@ -857,6 +1191,8 @@ class InboundTransferTask implements TransferTask {
 
   /// Verifies full-payload SHA-256 and promotes to target destination.
   Future<void> _verifyAndFinalize() async {
+    if (_finalizing) return;
+    _finalizing = true;
     _status = TransferStatus.verifying;
     _emitProgress();
 
@@ -864,6 +1200,23 @@ class InboundTransferTask implements TransferTask {
       'InboundTransferTask',
       'All chunks received for $transferId. Computing SHA-256...',
     );
+
+    final verifyClock = Stopwatch()..start();
+    void report(bool succeeded) {
+      _elapsed.stop();
+      onStats?.call(
+        TransferStats(
+          outbound: false,
+          bytes: _bytesReceived,
+          chunkSize: metadata.chunkSize,
+          elapsed: _elapsed.elapsed,
+          ioTime: _writeTime,
+          verifyTime: verifyClock.elapsed,
+          acks: _acksSent,
+          succeeded: succeeded,
+        ),
+      );
+    }
 
     try {
       final computedSha = await destination.computeSha256();
@@ -882,6 +1235,7 @@ class InboundTransferTask implements TransferTask {
         );
         await _sendPacket(PacketType.transferCancel, cancel.toBytes());
         await destination.abortAndCleanup();
+        report(false);
 
         _status = TransferStatus.failed;
         _emitProgress();
@@ -901,6 +1255,7 @@ class InboundTransferTask implements TransferTask {
 
       // Checksum verified! Finalize destination
       await destination.finalize();
+      report(true);
       await _sendAck(TransferAckType.transferCompleted);
 
       _status = TransferStatus.completed;
@@ -920,28 +1275,53 @@ class InboundTransferTask implements TransferTask {
       }
     } catch (e) {
       AppLogger.error('InboundTransferTask', 'Finalization error: $e');
-      await abortWithStorageError('Finalization error: $e');
+      final outOfSpace = isOutOfSpaceError(e);
+      // Tell the sender now; otherwise it waits for a verification timeout and
+      // reports a generic failure.
+      final cancel = TransferCancelPayload(
+        transferId: _transferIdBytes,
+        reason: outOfSpace
+            ? TransferCancelReason.storageFull
+            : TransferCancelReason.ioError,
+        message: outOfSpace
+            ? 'Not enough storage space on the receiving device'
+            : 'The receiving device could not save the file',
+      );
+      try {
+        await _sendPacket(PacketType.transferCancel, cancel.toBytes());
+      } catch (_) {}
+      await abortWithStorageError(
+        'Finalization error: $e',
+        outOfSpace: outOfSpace,
+      );
     }
   }
 
   /// Handles incoming Cancel packets from sender.
   Future<void> handleCancel(TransferCancelPayload cancel) async {
-    await destination.abortAndCleanup();
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
     _status =
         (cancel.reason == TransferCancelReason.userCancelled ||
             cancel.reason == TransferCancelReason.declined)
         ? TransferStatus.cancelled
         : TransferStatus.failed;
+    await destination.abortAndCleanup();
 
     _emitProgress();
     _closeControllers();
 
+    final message = cancel.message.isNotEmpty
+        ? cancel.message
+        : cancel.reason.name;
     if (!_doneCompleter.isCompleted) {
       _doneCompleter.completeError(
-        TransferCancelledException(
-          transferId,
-          cancel.message.isNotEmpty ? cancel.message : cancel.reason.name,
-        ),
+        cancel.reason == TransferCancelReason.sourceUnreadable
+            ? TransferSourceException(transferId, message)
+            : TransferCancelledException(transferId, message),
       );
     }
   }
@@ -954,8 +1334,9 @@ class InboundTransferTask implements TransferTask {
       return;
     }
 
-    await destination.abortAndCleanup();
+    // Status first, so a queued chunk handler sees the task is over.
     _status = TransferStatus.failed;
+    await destination.abortAndCleanup();
     _emitProgress();
     _closeControllers();
 
@@ -966,15 +1347,23 @@ class InboundTransferTask implements TransferTask {
     }
   }
 
-  Future<void> abortWithStorageError(String message) async {
-    await destination.abortAndCleanup();
+  Future<void> abortWithStorageError(
+    String message, {
+    bool outOfSpace = false,
+  }) async {
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
     _status = TransferStatus.failed;
+    await destination.abortAndCleanup();
     _emitProgress();
     _closeControllers();
 
     if (!_doneCompleter.isCompleted) {
       _doneCompleter.completeError(
-        TransferStorageException(transferId, message),
+        TransferStorageException(transferId, message, outOfSpace: outOfSpace),
       );
     }
   }
@@ -1006,12 +1395,12 @@ class InboundTransferTask implements TransferTask {
       message: reason ?? 'Cancelled by receiver',
     );
 
+    _status = TransferStatus.cancelled;
     try {
       await _sendPacket(PacketType.transferCancel, cancelPayload.toBytes());
     } catch (_) {}
 
     await destination.abortAndCleanup();
-    _status = TransferStatus.cancelled;
     _emitProgress();
     _closeControllers();
 
@@ -1035,6 +1424,8 @@ class InboundTransferTask implements TransferTask {
 
   void _closeControllers() {
     _isDisposed = true;
+    _ackTimer?.cancel();
+    _ackTimer = null;
     if (!_progressController.isClosed) {
       _progressController.close();
     }
@@ -1062,15 +1453,15 @@ class InboundTransferTask implements TransferTask {
         ? 0
         : _highestContiguousChunkIndex + 1;
 
-    _progressController.add(
-      TransferProgress(
-        transferId: transferId,
-        bytesTransferred: _bytesReceived,
-        totalBytes: metadata.totalBytes,
-        currentChunkIndex: currentChunk,
-        speedBytesPerSecond: _currentSpeed > 0 ? _currentSpeed : 0.0,
-        etaSeconds: etaSeconds,
-      ),
+    final progress = TransferProgress(
+      transferId: transferId,
+      bytesTransferred: _bytesReceived,
+      totalBytes: metadata.totalBytes,
+      currentChunkIndex: currentChunk,
+      speedBytesPerSecond: _currentSpeed > 0 ? _currentSpeed : 0.0,
+      etaSeconds: etaSeconds,
     );
+    lastProgress = progress;
+    _progressController.add(progress);
   }
 }

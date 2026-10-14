@@ -37,25 +37,47 @@ enum BatterySaverMode {
   }
 }
 
+/// Appearance preference; [system] follows the phone's dark-mode setting.
+enum AppThemePreference {
+  system,
+  light,
+  dark;
+
+  String get displayName {
+    switch (this) {
+      case AppThemePreference.system:
+        return 'Follow System';
+      case AppThemePreference.light:
+        return 'Light';
+      case AppThemePreference.dark:
+        return 'Dark';
+    }
+  }
+}
+
 /// User application settings.
 class UserSettings {
   final BatterySaverMode batterySaverMode;
+  final AppThemePreference themePreference;
   final String? customDisplayName;
   final String? customDownloadsPath;
 
   const UserSettings({
     this.batterySaverMode = BatterySaverMode.system,
+    this.themePreference = AppThemePreference.system,
     this.customDisplayName,
     this.customDownloadsPath,
   });
 
   UserSettings copyWith({
     BatterySaverMode? batterySaverMode,
+    AppThemePreference? themePreference,
     String? customDisplayName,
     String? customDownloadsPath,
   }) {
     return UserSettings(
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
+      themePreference: themePreference ?? this.themePreference,
       customDisplayName: customDisplayName ?? this.customDisplayName,
       customDownloadsPath: customDownloadsPath ?? this.customDownloadsPath,
     );
@@ -63,6 +85,7 @@ class UserSettings {
 
   Map<String, dynamic> toJson() => {
     'batterySaverMode': batterySaverMode.name,
+    'themePreference': themePreference.name,
     if (customDisplayName != null) 'customDisplayName': customDisplayName,
     if (customDownloadsPath != null) 'customDownloadsPath': customDownloadsPath,
   };
@@ -78,8 +101,17 @@ class UserSettings {
         mode = BatterySaverMode.system;
       }
     }
+    var theme = AppThemePreference.system;
+    final rawTheme = json['themePreference'];
+    if (rawTheme is String) {
+      theme = AppThemePreference.values.firstWhere(
+        (t) => t.name == rawTheme,
+        orElse: () => AppThemePreference.system,
+      );
+    }
     return UserSettings(
       batterySaverMode: mode,
+      themePreference: theme,
       customDisplayName: json['customDisplayName'] as String?,
       customDownloadsPath: json['customDownloadsPath'] as String?,
     );

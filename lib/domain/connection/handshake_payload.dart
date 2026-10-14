@@ -23,6 +23,9 @@ class HandshakePayload {
   final String? rejectionReason;
   final int timestamp;
 
+  /// Optional features the sender understands (see [AppConstants.protocolFeatures]).
+  final Set<String> features;
+
   HandshakePayload({
     this.protocolVersion = AppConstants.protocolVersion,
     required this.sessionId,
@@ -33,6 +36,7 @@ class HandshakePayload {
     this.accepted = true,
     this.rejectionReason,
     int? timestamp,
+    this.features = AppConstants.protocolFeatures,
   }) : displayName = sanitizeDisplayName(displayName),
        timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch {
     if (sessionId.trim().isEmpty) {
@@ -83,6 +87,7 @@ class HandshakePayload {
     'accepted': accepted,
     if (rejectionReason != null) 'rejectionReason': rejectionReason,
     'timestamp': timestamp,
+    'features': features.toList(),
   };
 
   factory HandshakePayload.fromJson(Map<String, dynamic> json) {
@@ -117,6 +122,10 @@ class HandshakePayload {
     final rejectionReason = json['rejectionReason'] as String?;
     final timestamp =
         json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
+    // Absent on older builds: they support no optional features.
+    final features = (json['features'] as List<dynamic>? ?? const [])
+        .map((f) => f.toString())
+        .toSet();
 
     return HandshakePayload(
       protocolVersion: version,
@@ -128,6 +137,7 @@ class HandshakePayload {
           ? const {TransportType.lan}
           : transports,
       accepted: accepted,
+      features: features,
       rejectionReason: rejectionReason,
       timestamp: timestamp,
     );
@@ -162,6 +172,7 @@ class HandshakePayload {
     bool? accepted,
     String? rejectionReason,
     int? timestamp,
+    Set<String>? features,
   }) {
     return HandshakePayload(
       protocolVersion: protocolVersion ?? this.protocolVersion,
@@ -173,6 +184,7 @@ class HandshakePayload {
       accepted: accepted ?? this.accepted,
       rejectionReason: rejectionReason ?? this.rejectionReason,
       timestamp: timestamp ?? this.timestamp,
+      features: features ?? this.features,
     );
   }
 }

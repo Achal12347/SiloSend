@@ -57,9 +57,11 @@ class CryptoIdentityKeypair {
     return blocks.join(':');
   }
 
-  /// Canonical prefixed fingerprint string: `SiloSend-Ed25519-Identity-v1:<HEX>`
-  String get canonicalFingerprint =>
-      'SiloSend-Ed25519-Identity-v1:$fingerprintHex';
+  /// User-facing fingerprint string: `Vayu-Ed25519-Identity-v1:<HEX>`.
+  ///
+  /// The hash itself keeps the original `SiloSend-` domain label above: it is a
+  /// protocol constant, and changing it would change every peer's fingerprint.
+  String get canonicalFingerprint => 'Vayu-Ed25519-Identity-v1:$fingerprintHex';
 
   /// Formats public key as a 64-character lowercase hex string.
   String get publicKeyHex =>

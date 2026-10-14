@@ -7,7 +7,9 @@ import 'package:vayu/core/logging/app_logger.dart';
 /// Concrete implementation of [StorageService] managing incoming downloads
 /// on Android (via `com.achyrio.vayu/storage`) and desktop operating systems.
 class SystemStorageService implements StorageService {
-  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/storage');
+  static const MethodChannel _channel = MethodChannel(
+    'com.achyrio.vayu/storage',
+  );
 
   final MethodChannel channel;
   final String? customDownloadsDirectory;
@@ -110,6 +112,26 @@ class SystemStorageService implements StorageService {
         return candidate;
       }
       counter++;
+    }
+  }
+
+  @override
+  Future<int?> getFreeBytes(String directory) async {
+    // dart:io has no free-space API; only Android answers natively.
+    if (!Platform.isAndroid) return null;
+    try {
+      final free = await channel.invokeMethod<int>('getFreeBytes', {
+        'path': directory,
+      });
+      return free;
+    } on PlatformException catch (e) {
+      AppLogger.warning(
+        'SystemStorageService',
+        'Free space query failed: ${e.message}',
+      );
+      return null;
+    } on MissingPluginException {
+      return null;
     }
   }
 

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:vayu/core/identity/device_name_generator.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
@@ -28,8 +29,16 @@ class DeviceIdentityManager {
       return _currentIdentity!;
     }
 
-    final stored = await _storage.loadIdentity();
+    var stored = await _storage.loadIdentity();
     if (stored != null) {
+      // Installs from before generated names all share the legacy name, so
+      // two such phones looked identical; give them their own once.
+      if (stored.displayName == DeviceNameGenerator.legacyDefaultName) {
+        stored = stored.copyWith(
+          displayName: DeviceNameGenerator.forDeviceId(stored.deviceId),
+        );
+        await _storage.saveIdentity(stored);
+      }
       _currentIdentity = stored;
       _identityController.add(stored);
       AppLogger.info(
@@ -40,10 +49,15 @@ class DeviceIdentityManager {
     }
 
     // First boot: mint fresh cryptographic 16-byte UUID identity
-    final minted = LocalDeviceIdentity.generate(
+    var minted = LocalDeviceIdentity.generate(
       displayName: defaultDisplayName,
       platform: platform,
     );
+    if (defaultDisplayName == DeviceNameGenerator.legacyDefaultName) {
+      minted = minted.copyWith(
+        displayName: DeviceNameGenerator.forDeviceId(minted.deviceId),
+      );
+    }
 
     await _storage.saveIdentity(minted);
     _currentIdentity = minted;
@@ -57,7 +71,7 @@ class DeviceIdentityManager {
 
   /// Loads or mints identity with optional default display name and platform.
   Future<LocalDeviceIdentity> getOrCreateIdentity({
-    String defaultDisplayName = 'Vayu-Device',
+    String defaultDisplayName = DeviceNameGenerator.legacyDefaultName,
     String platform = 'generic',
   }) {
     return getOrInitializeIdentity(

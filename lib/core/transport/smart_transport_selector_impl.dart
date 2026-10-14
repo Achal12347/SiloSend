@@ -252,7 +252,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
 
       case TransportType.wifiDirect:
         throw UnsupportedError(
-          'Wi-Fi Direct transport connection is not implemented in SiloSend yet',
+          'Wi-Fi Direct transport connection is not implemented in Vayu yet',
         );
     }
   }

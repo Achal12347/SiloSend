@@ -75,8 +75,7 @@ class ConnectionSession {
       !_isDisposed;
   LinkMetrics get currentMetrics => connection.currentMetrics;
 
-  Stream<VayuPacket> get incomingPackets =>
-      _incomingPacketsController.stream;
+  Stream<VayuPacket> get incomingPackets => _incomingPacketsController.stream;
   Stream<ConnectionSessionInfo> get stateChanges => _stateController.stream;
 
   void _init() {

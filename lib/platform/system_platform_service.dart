@@ -13,19 +13,27 @@ import 'package:vayu/platform/platform_service.dart';
 /// - Unprobed radios and sensors are explicitly reported as [CapabilityStatus.unknown]
 ///   until real native platform channels or plugins are attached.
 class SystemPlatformService implements PlatformService {
-  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/platform');
+  static const MethodChannel _channel = MethodChannel(
+    'com.achyrio.vayu/platform',
+  );
 
   final String? platformNameOverride;
   final Future<DeviceCapabilities> Function()? customProbe;
   final Future<SystemCapabilities> Function()? customCapabilitiesProbe;
 
+  /// Test hook that forces the Android code path on non-Android test hosts.
+  final bool? isAndroidOverride;
+
   SystemPlatformService({
     this.platformNameOverride,
     this.customProbe,
     this.customCapabilitiesProbe,
+    this.isAndroidOverride,
   });
 
   bool get _isActualAndroid {
+    final override = isAndroidOverride;
+    if (override != null) return override;
     try {
       return Platform.isAndroid;
     } catch (_) {
@@ -104,16 +112,28 @@ class SystemPlatformService implements PlatformService {
     return capabilities.supportsWifiDirect;
   }
 
+  // Shared by every caller so a second tap while the system dialog is open
+  // waits for the same answer instead of failing with ALREADY_REQUESTING.
+  Future<PermissionStatus>? _pendingNearbyRequest;
+  Future<bool>? _pendingEnableBluetooth;
+
   @override
-  Future<PermissionStatus> requestNearbyPermissions() async {
+  Future<PermissionStatus> requestNearbyPermissions() {
+    return _pendingNearbyRequest ??= _requestNearbyPermissionsOnce()
+        .whenComplete(() => _pendingNearbyRequest = null);
+  }
+
+  Future<PermissionStatus> _requestNearbyPermissionsOnce() async {
     if (!_isActualAndroid) {
       return PermissionStatus.denied;
     }
 
     try {
-      final statusStr = await _channel
-          .invokeMethod<String>('requestNearbyPermissions')
-          .timeout(const Duration(seconds: 2));
+      // No timeout: the call completes only when the user answers the system
+      // permission dialog, which routinely takes longer than a few seconds.
+      final statusStr = await _channel.invokeMethod<String>(
+        'requestNearbyPermissions',
+      );
       switch (statusStr) {
         case 'granted':
           return PermissionStatus.granted;
@@ -136,16 +156,19 @@ class SystemPlatformService implements PlatformService {
   }
 
   @override
-  Future<bool> requestEnableBluetooth() async {
+  Future<bool> requestEnableBluetooth() {
+    return _pendingEnableBluetooth ??= _requestEnableBluetoothOnce()
+        .whenComplete(() => _pendingEnableBluetooth = null);
+  }
+
+  Future<bool> _requestEnableBluetoothOnce() async {
     if (!_isActualAndroid) {
       return false;
     }
 
     try {
-      return await _channel
-              .invokeMethod<bool>('enableBluetooth')
-              .timeout(const Duration(seconds: 2)) ??
-          false;
+      // No timeout: waits for the user to answer the system Bluetooth dialog.
+      return await _channel.invokeMethod<bool>('enableBluetooth') ?? false;
     } on MissingPluginException {
       return false;
     } on PlatformException {
