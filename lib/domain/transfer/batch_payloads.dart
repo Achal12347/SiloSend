@@ -62,7 +62,15 @@ class TransferBatchOfferPayload {
   final Uint8List batchId;
   final List<BatchManifestEntry> files;
 
-  TransferBatchOfferPayload({required this.batchId, required this.files}) {
+  /// Proof that the sender holds the receiver's Receive ticket (see
+  /// `ReceiveTicket`); absent for ordinary offers. Older builds ignore it.
+  final String? receiveProof;
+
+  TransferBatchOfferPayload({
+    required this.batchId,
+    required this.files,
+    this.receiveProof,
+  }) {
     if (batchId.length != 16) {
       throw ArgumentError('batchId must be 16 bytes');
     }
@@ -77,7 +85,10 @@ class TransferBatchOfferPayload {
 
   Uint8List toBytes() {
     final body = utf8.encode(
-      jsonEncode({'files': files.map((f) => f.toJson()).toList()}),
+      jsonEncode({
+        'files': files.map((f) => f.toJson()).toList(),
+        if (receiveProof != null) 'proof': receiveProof,
+      }),
     );
     return Uint8List.fromList([...batchId, ...body]);
   }
@@ -99,8 +110,12 @@ class TransferBatchOfferPayload {
     if (list.isEmpty || list.length > maxFiles) {
       throw const FormatException('Batch offer file count out of range');
     }
+    final proof = json['proof'];
     return TransferBatchOfferPayload(
       batchId: Uint8List.fromList(bytes.sublist(0, 16)),
+      receiveProof: proof is String && RegExp(r'^[0-9a-f]{64}$').hasMatch(proof)
+          ? proof
+          : null,
       files: [
         for (final item in list)
           if (item is Map<String, dynamic>)

@@ -60,7 +60,7 @@ void main() {
       // Verify document summary is rendered truthfully
       expect(find.text('report.pdf'), findsOneWidget);
       expect(find.text('1.0 MB'), findsOneWidget);
-      expect(find.text('Send To Nearby Device'), findsOneWidget);
+      expect(find.text('Send to'), findsOneWidget);
 
       // Initially no peers -> shows empty searching state
       expect(find.text('Looking for nearby Vayu devices...'), findsOneWidget);

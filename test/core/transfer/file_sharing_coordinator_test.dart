@@ -787,6 +787,92 @@ void main() {
     });
 
     test(
+      'A sender holding the Receive ticket is accepted without a prompt',
+      () async {
+        final files = {
+          'content://t/r1.jpg': Uint8List.fromList([7, 7, 7]),
+        };
+        final sender = senderWith(_TestDocumentPickerService.multi(files));
+        const ticket = '00112233445566778899aabbccddeeff';
+
+        // Receiver opens Receive; sender scanned its code.
+        coordinatorB.startReceiveSession(ticket);
+        sender.rememberReceiveTicket(identityB.idHex, ticket);
+
+        var prompts = 0;
+        coordinatorB.incomingBatchRequests.listen((_) => prompts++);
+        coordinatorB.incomingRequests.listen((_) => prompts++);
+        final accepted = <TransferBatch>[];
+        coordinatorB.autoAcceptedBatches.listen(accepted.add);
+
+        // Even a single file goes as a batch carrying the proof.
+        final tasks = await sender.sendFilesToPeer(
+          peer: peerOfB(),
+          documents: docsFor(files),
+        );
+        expect(tasks.single.status, TransferStatus.completed);
+        expect(prompts, 0);
+        expect(accepted, hasLength(1));
+        await _until(
+          () => accepted.single.state == TransferBatchState.completed,
+        );
+        expect(File('${tempDirB.path}/r1.jpg').readAsBytesSync(), [7, 7, 7]);
+        sender.dispose();
+      },
+    );
+
+    test('Without the ticket the receiver is still asked', () async {
+      final files = {
+        'content://t/x1.txt': Uint8List.fromList([1]),
+      };
+      final sender = senderWith(_TestDocumentPickerService.multi(files));
+      // Receive is open, but this sender never scanned its code.
+      coordinatorB.startReceiveSession('00112233445566778899aabbccddeeff');
+      sender.rememberReceiveTicket(
+        identityB.idHex,
+        'ffeeddccbbaa99887766554433221100',
+      );
+      var autoAccepted = 0;
+      coordinatorB.autoAcceptedBatches.listen((_) => autoAccepted++);
+      final prompted = <IncomingBatchRequest>[];
+      coordinatorB.incomingBatchRequests.listen((req) {
+        prompted.add(req);
+        coordinatorB.declineIncomingBatch(req);
+      });
+
+      await expectLater(
+        sender.sendFilesToPeer(peer: peerOfB(), documents: docsFor(files)),
+        throwsA(isA<TransferBatchDeclinedException>()),
+      );
+      expect(prompted, hasLength(1));
+      expect(autoAccepted, 0);
+      sender.dispose();
+    });
+
+    test('A closed Receive session no longer auto-accepts', () async {
+      final files = {
+        'content://t/y1.txt': Uint8List.fromList([2]),
+      };
+      final sender = senderWith(_TestDocumentPickerService.multi(files));
+      const ticket = '00112233445566778899aabbccddeeff';
+      coordinatorB.startReceiveSession(ticket);
+      coordinatorB.endReceiveSession();
+      sender.rememberReceiveTicket(identityB.idHex, ticket);
+      final prompted = <IncomingBatchRequest>[];
+      coordinatorB.incomingBatchRequests.listen((req) {
+        prompted.add(req);
+        coordinatorB.declineIncomingBatch(req);
+      });
+
+      await expectLater(
+        sender.sendFilesToPeer(peer: peerOfB(), documents: docsFor(files)),
+        throwsA(isA<TransferBatchDeclinedException>()),
+      );
+      expect(prompted, hasLength(1));
+      sender.dispose();
+    });
+
+    test(
       'A batch too big for free space is refused with the real reason',
       () async {
         final smallDisk = FileSharingCoordinator(
@@ -852,6 +938,7 @@ class _NoBatchEngine implements TransferEngine {
     required String batchId,
     required List<BatchManifestEntry> files,
     Duration timeout = const Duration(minutes: 5),
+    String? receiveProof,
   }) => throw UnsupportedError('old peer');
 
   @override

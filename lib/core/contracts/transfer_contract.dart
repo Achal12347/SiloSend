@@ -228,6 +228,10 @@ class IncomingBatchRequest {
   final String batchId;
   final String senderDeviceId;
   final List<BatchManifestEntry> files;
+
+  /// Sender's proof of holding this phone's Receive ticket, if it sent one.
+  /// Verified by the coordinator against its own ticket; never trusted as is.
+  final String? receiveProof;
   final Future<void> Function() onAccept;
   final Future<void> Function(TransferCancelReason code, String message)
   onReject;
@@ -238,6 +242,7 @@ class IncomingBatchRequest {
     required this.files,
     required this.onAccept,
     required this.onReject,
+    this.receiveProof,
   });
 
   int get totalBytes => files.fold(0, (sum, f) => sum + f.sizeBytes);
@@ -281,6 +286,7 @@ abstract class TransferEngine {
     required String batchId,
     required List<BatchManifestEntry> files,
     Duration timeout,
+    String? receiveProof,
   });
 
   /// Stream of incoming batch offers awaiting one accept/decline decision.

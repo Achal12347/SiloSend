@@ -11,6 +11,9 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/trust_level.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
+import 'package:vayu/core/pairing/pairing_coordinator.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
+import 'package:vayu/platform/qr_scanner.dart';
 
 /// Modal bottom sheet allowing the user to select a discovered nearby Vayu
 /// peer to receive a pre-selected document or batch of documents.
@@ -60,6 +63,16 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
   bool _isSending = false;
   String? _sendingToPeerId;
 
+  // Tap or scan a phone that is on its Receive screen.
+  StreamSubscription<PairingPayload>? _nfcSub;
+  bool _nfcReady = false;
+  bool _joining = false;
+
+  bool get _nativeNfc =>
+      Platform.isAndroid &&
+      !Platform.environment.containsKey('FLUTTER_TEST') &&
+      !WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
   @override
   void initState() {
     super.initState();
@@ -93,12 +106,69 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           await widget.container.startDiscoveryAndAdvertising();
         }
       } catch (_) {}
+      _startTapReading();
     });
+  }
+
+  Future<void> _startTapReading() async {
+    if (!_nativeNfc || !mounted) return;
+    final nfc = widget.container.nfcPairingService;
+    _nfcSub = nfc.onPayloadReceived.listen(
+      (payload) => _sendToReceiver(
+        () => widget.container.pairingCoordinator.joinToSend(payload),
+      ),
+    );
+    final result = await nfc.startReading();
+    if (mounted) setState(() => _nfcReady = result.isSuccess);
+  }
+
+  Future<void> _scanReceiver() async {
+    try {
+      final text = await const QrScanner().scan();
+      if (text == null) return;
+      await _sendToReceiver(
+        () => widget.container.pairingCoordinator.joinToSendFromText(text),
+      );
+    } on QrScanException {
+      if (mounted) {
+        showVayuNotice(
+          context,
+          'The camera could not be opened.',
+          tone: VayuNoticeTone.problem,
+        );
+      }
+    }
+  }
+
+  /// Joins the phone whose Receive code was tapped or scanned, then sends.
+  /// That phone accepts without a prompt while its Receive screen is open.
+  Future<void> _sendToReceiver(Future<DiscoveredPeer> Function() join) async {
+    if (_joining || _isSending) return;
+    setState(() => _joining = true);
+    try {
+      final peer = await join();
+      if (!mounted) return;
+      await _sendToPeer(peer);
+    } on PairingException catch (e) {
+      if (mounted) {
+        showVayuNotice(context, e.message, tone: VayuNoticeTone.problem);
+      }
+    } catch (e) {
+      if (mounted) {
+        showVayuNotice(context, friendlyError(e), tone: VayuNoticeTone.problem);
+      }
+    } finally {
+      if (mounted) setState(() => _joining = false);
+    }
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
+    _nfcSub?.cancel();
+    if (_nativeNfc) {
+      widget.container.nfcPairingService.stopListening().ignore();
+    }
     super.dispose();
   }
 
@@ -245,7 +315,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           Row(
             children: [
               Text(
-                'Send To Nearby Device',
+                'Send to',
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -279,7 +349,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          'Searching...',
+                          'Searching…',
                           style: TextStyle(
                             fontSize: 12,
                             color: theme.colorScheme.primary,
@@ -322,6 +392,48 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                 ),
               );
             },
+          ),
+          const SizedBox(height: 16),
+          _buildTapOrScan(theme),
+        ],
+      ),
+    );
+  }
+
+  /// The quickest route: tap or scan a phone that is on its Receive screen.
+  Widget _buildTapOrScan(ThemeData theme) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        children: [
+          _joining
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                )
+              : Icon(
+                  _nfcReady ? Icons.nfc_rounded : Icons.qr_code_scanner_rounded,
+                  color: theme.colorScheme.secondary,
+                ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              _joining
+                  ? 'Connecting…'
+                  : _nfcReady
+                  ? 'Tap a phone that is on Receive, or scan its code'
+                  : 'Scan the code on a phone that is on Receive',
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          TextButton(
+            onPressed: _joining || _isSending ? null : _scanReceiver,
+            child: const Text('Scan'),
           ),
         ],
       ),
@@ -507,7 +619,11 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      if (widget.documents.length > 1) {
+      // A phone joined through its Receive code gets the files as one batch,
+      // carrying the proof that lets it accept without a prompt.
+      final viaReceiveCode = widget.container.fileSharingCoordinator
+          .hasReceiveTicketFor(peer.deviceId);
+      if (widget.documents.length > 1 || viaReceiveCode) {
         // The transfer screen follows this peer's files one by one.
         if (mounted) {
           navigator.pop(); // Close bottom sheet

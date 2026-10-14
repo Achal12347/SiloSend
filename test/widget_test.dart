@@ -69,17 +69,10 @@ void main() {
       // Peer row with real reachability, a send action, and connect in its menu
       expect(find.text('Remote-Pixel'), findsOneWidget);
       expect(find.text('New device'), findsOneWidget);
-      expect(find.text('Send files'), findsOneWidget);
-      expect(find.text('Send'), findsOneWidget);
+      // Home: Send and Receive, plus each peer row's own Send.
+      expect(find.text('Receive'), findsOneWidget);
+      expect(find.text('Send'), findsNWidgets(2));
 
-      // The pairing button opens the pairing screen in "Show code" mode
-      await tester.tap(find.byTooltip('Pair with QR or NFC'));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 600));
-      await tester.pump(const Duration(milliseconds: 600));
-      expect(find.text('Pair a phone'), findsOneWidget);
-      expect(find.text('Show code'), findsOneWidget);
-      await tester.tap(find.byTooltip('Back'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pump(const Duration(milliseconds: 600));

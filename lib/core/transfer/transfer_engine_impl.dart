@@ -134,6 +134,7 @@ class TransferEngineImpl implements TransferEngine {
     required String batchId,
     required List<BatchManifestEntry> files,
     Duration timeout = const Duration(minutes: 5),
+    String? receiveProof,
   }) async {
     final session = _resolveSession(targetDeviceId);
     if (session == null || !session.isEstablished) {
@@ -144,6 +145,7 @@ class TransferEngineImpl implements TransferEngine {
     final offer = TransferBatchOfferPayload(
       batchId: parseIdTo16Bytes(batchId),
       files: files,
+      receiveProof: receiveProof,
     );
     final key = offer.batchIdHex;
     final completer = Completer<TransferBatchResponsePayload>();
@@ -482,6 +484,7 @@ class TransferEngineImpl implements TransferEngine {
         batchId: offer.batchIdHex,
         senderDeviceId: session.remoteDeviceId,
         files: offer.files,
+        receiveProof: offer.receiveProof,
         onAccept: () => respond(true),
         onReject: (code, message) => respond(false, code, message),
       ),

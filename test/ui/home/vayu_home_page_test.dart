@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -70,7 +71,8 @@ void main() {
 
       // 2. Hero Section
       expect(find.text('Share files nearby'), findsOneWidget);
-      expect(find.text('Send files'), findsOneWidget);
+      expect(find.text('Send'), findsOneWidget);
+      expect(find.text('Receive'), findsOneWidget);
 
       // 3. Nearby Devices section
       expect(find.text('Nearby devices'), findsOneWidget);
@@ -113,7 +115,14 @@ void main() {
         // Peer row shows real reachability and an unverified identity honestly
         expect(find.text('Peer-Galaxy'), findsOneWidget);
         expect(find.text('New device'), findsOneWidget);
-        expect(find.text('Send'), findsOneWidget);
+        // The peer row's own Send (the hero has the other one).
+        expect(
+          find.descendant(
+            of: find.byType(DiscoveredPeerCard),
+            matching: find.text('Send'),
+          ),
+          findsOneWidget,
+        );
 
         // Manual connect lives in the row's menu
         await tester.tap(find.byTooltip('More'));
