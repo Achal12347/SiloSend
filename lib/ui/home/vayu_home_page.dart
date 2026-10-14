@@ -2,12 +2,10 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
-import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
-import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
@@ -27,6 +25,8 @@ import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/transfer/transfer_progress_card.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 /// Primary Home screen.
 ///
@@ -182,8 +182,6 @@ class _VayuHomePageState extends State<VayuHomePage>
               TransferProgressCard(container: container),
               _buildConnectionsIfAny(container),
               LocalDeviceCard(container: container),
-              const SizedBox(height: 24),
-              _buildFooter(context),
             ],
           ),
         ),
@@ -232,7 +230,6 @@ class _VayuHomePageState extends State<VayuHomePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _ReadinessLine(container: container, color: palette.onHero),
-                const SizedBox(height: 14),
                 Text(
                   'Share files nearby',
                   style: theme.textTheme.headlineMedium?.copyWith(
@@ -296,7 +293,6 @@ class _VayuHomePageState extends State<VayuHomePage>
   // ------------------------------------------------------------------ nearby
 
   Widget _buildNearbySection(BuildContext context, AppContainer container) {
-    final theme = Theme.of(context);
     return StreamBuilder<DiscoveryStatus>(
       stream: container.discoveryStatusStream,
       initialData: container.discoveryStatus,
@@ -320,14 +316,6 @@ class _VayuHomePageState extends State<VayuHomePage>
                 child: Text(isScanning ? 'Stop' : 'Search'),
               ),
             ),
-            if (isScanning)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 0, 4, 10),
-                child: Text(
-                  _scanningLabel(container),
-                  style: theme.textTheme.bodySmall,
-                ),
-              ),
             StreamBuilder<List<DiscoveredPeer>>(
               stream: container.discoveredPeersStream,
               initialData: container.discoveredPeers,
@@ -378,16 +366,6 @@ class _VayuHomePageState extends State<VayuHomePage>
         );
       },
     );
-  }
-
-  String _scanningLabel(AppContainer container) {
-    final active = container.discoveryCoordinator.activeTransports;
-    final hasLan = active.contains(TransportType.lan);
-    final hasBle = active.contains(TransportType.ble);
-    if (hasLan && hasBle) return 'Looking on Wi-Fi and Bluetooth';
-    if (hasLan) return 'Looking on Wi-Fi';
-    if (hasBle) return 'Looking on Bluetooth';
-    return 'Starting radios…';
   }
 
   Widget _buildEmptyNearby(
@@ -484,25 +462,6 @@ class _VayuHomePageState extends State<VayuHomePage>
     );
   }
 
-  Widget _buildFooter(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.lock_outline_rounded,
-          size: 14,
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-        const SizedBox(width: 6),
-        Text(
-          'End-to-end encrypted · Works offline',
-          style: theme.textTheme.bodySmall,
-        ),
-      ],
-    );
-  }
-
   // ----------------------------------------------------------------- actions
 
   /// Hero flow: system file picker, then choose a nearby device.
@@ -524,7 +483,7 @@ class _VayuHomePageState extends State<VayuHomePage>
       }
     } catch (e) {
       if (mounted) {
-        _showError('Could not open files: $e');
+        _showError('Couldn\'t open your files. Please try again.');
       }
     } finally {
       if (mounted) {
@@ -572,8 +531,11 @@ class _VayuHomePageState extends State<VayuHomePage>
     final messenger = ScaffoldMessenger.of(context);
     try {
       await container.connectToPeer(peer);
-      messenger.showSnackBar(
-        SnackBar(content: Text('Connected to ${peer.displayName}')),
+      showVayuNotice(
+        null,
+        messenger: messenger,
+        'Connected to ${peer.displayName}',
+        tone: VayuNoticeTone.success,
       );
     } catch (e) {
       if (mounted) {
@@ -603,7 +565,7 @@ class _VayuHomePageState extends State<VayuHomePage>
       }
     } catch (e) {
       if (mounted) {
-        _showError('Could not send to ${peer.displayName}: $e');
+        _showError(friendlyError(e, peerName: peer.displayName));
       }
     }
   }
@@ -640,7 +602,7 @@ class _VayuHomePageState extends State<VayuHomePage>
         await TransferDetailPage.open(context, container, task: task);
       }
     } catch (e) {
-      if (mounted) _showError('Could not send the contact: $e');
+      if (mounted) _showError(friendlyError(e));
     }
   }
 
@@ -689,18 +651,13 @@ class _VayuHomePageState extends State<VayuHomePage>
           await TransferDetailPage.open(context, container, task: task);
         }
       } catch (e) {
-        if (mounted) _showError('Could not send the contact: $e');
+        if (mounted) _showError(friendlyError(e));
       }
     }
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: VayuPalette.of(context).danger,
-      ),
-    );
+    showVayuNotice(context, message, tone: VayuNoticeTone.problem);
   }
 }
 
@@ -734,7 +691,8 @@ class _Wordmark extends StatelessWidget {
   }
 }
 
-/// One-line live readiness shown on the hero, plus Battery Saver when active.
+/// Battery Saver notice on the hero, shown only while it is active. Setup
+/// problems are explained by the setup banner instead.
 class _ReadinessLine extends StatelessWidget {
   final AppContainer container;
   final Color color;
@@ -744,59 +702,20 @@ class _ReadinessLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = VayuPalette.of(context);
-    return StreamBuilder<EvaluatedCapabilityState>(
-      stream: container.capabilityCoordinator.stateStream,
-      initialData: container.capabilityCoordinator.state,
-      builder: (context, snapshot) {
-        final state = snapshot.data ?? container.capabilityCoordinator.state;
-        final (String label, IconData icon) = switch (state.operationalStatus) {
-          CapabilityOperationalStatus.readyBoth => (
-            'Ready · Wi-Fi + Bluetooth',
-            Icons.check_circle_rounded,
+    return StreamBuilder<AppOrchestratorState>(
+      stream: container.orchestratorStateStream,
+      initialData: container.orchestrator.currentState,
+      builder: (context, orchestrator) {
+        final saver = orchestrator.data?.isBatterySaverActive ?? false;
+        if (!saver) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: StatusPill(
+            label: 'Battery Saver',
+            icon: Icons.battery_saver_rounded,
+            foreground: color,
+            background: palette.onHero.withValues(alpha: 0.08),
           ),
-          CapabilityOperationalStatus.readyLanOnly => (
-            'Ready · Wi-Fi',
-            Icons.check_circle_rounded,
-          ),
-          CapabilityOperationalStatus.readyBleOnly => (
-            'Ready · Bluetooth',
-            Icons.check_circle_rounded,
-          ),
-          CapabilityOperationalStatus.checking => (
-            'Checking connectivity…',
-            Icons.hourglass_top_rounded,
-          ),
-          CapabilityOperationalStatus.actionRequired => (
-            'Setup needed',
-            Icons.error_outline_rounded,
-          ),
-        };
-
-        return StreamBuilder<AppOrchestratorState>(
-          stream: container.orchestratorStateStream,
-          initialData: container.orchestrator.currentState,
-          builder: (context, orchestrator) {
-            final saver = orchestrator.data?.isBatterySaverActive ?? false;
-            return Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                StatusPill(
-                  label: label,
-                  icon: icon,
-                  foreground: color,
-                  background: palette.onHero.withValues(alpha: 0.08),
-                ),
-                if (saver)
-                  StatusPill(
-                    label: 'Battery Saver',
-                    icon: Icons.battery_saver_rounded,
-                    foreground: color,
-                    background: palette.onHero.withValues(alpha: 0.08),
-                  ),
-              ],
-            );
-          },
         );
       },
     );

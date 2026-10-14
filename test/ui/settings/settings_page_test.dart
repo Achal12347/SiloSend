@@ -85,11 +85,15 @@ void main() {
       await tester.tap(find.text('Edit'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Edit Device Name'), findsOneWidget);
+      expect(find.text('Device name'), findsOneWidget);
 
       // Enter new name
       await tester.enterText(find.byType(TextFormField), 'Updated-Phone-01');
-      await tester.tap(find.text('Save'));
+      // Saving runs against the real container, outside the fake clock.
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Save'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
       await tester.pumpAndSettle();
 
       // Verify display name updated on container
@@ -144,7 +148,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(PermissionsRationaleDialog), findsOneWidget);
-      expect(find.text('Nearby Devices (Bluetooth)'), findsOneWidget);
+      expect(find.text('Nearby devices'), findsOneWidget);
 
       await tester.tap(find.text('Got it'));
       await tester.pumpAndSettle();

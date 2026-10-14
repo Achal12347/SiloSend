@@ -7,6 +7,7 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_history.dart';
 import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Every finished transfer, newest first, kept across restarts.
 ///
@@ -52,24 +53,12 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
   }
 
   Future<void> _clear() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Clear history?'),
-        content: const Text(
-          'This removes the list only. Files you received stay on this phone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear'),
-          ),
-        ],
-      ),
+    final confirmed = await showVayuConfirm(
+      context,
+      title: 'Clear history?',
+      message: 'Only the list is cleared. Received files stay on this phone.',
+      confirmLabel: 'Clear history',
+      destructive: true,
     );
     if (confirmed != true) return;
     await widget.container.clearHistory();
@@ -80,8 +69,10 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
     final path = record.savedPath;
     final messenger = ScaffoldMessenger.of(context);
     if (path == null || !File(path).existsSync()) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('The file is no longer on this phone.')),
+      showVayuNotice(
+        null,
+        messenger: messenger,
+        'This file is no longer on your phone.',
       );
       return;
     }
@@ -90,7 +81,7 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
       mimeType: record.isContact ? 'text/x-vcard' : record.mimeType,
     );
     if (!opened) {
-      messenger.showSnackBar(SnackBar(content: Text('Saved to $path')));
+      showVayuNotice(null, messenger: messenger, 'Saved in Downloads/Vayu');
     }
   }
 

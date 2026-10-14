@@ -5,12 +5,15 @@ import 'package:vayu/core/constants/app_paths.dart';
 import 'package:vayu/core/settings/user_settings.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_scope.dart';
+import 'package:vayu/ui/app_error_handling.dart';
 import 'package:vayu/ui/home/vayu_home_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 void main(List<String> args) {
   AppPaths.configureFromArgs(args);
   WidgetsFlutterBinding.ensureInitialized();
+  installErrorHandlers();
   runApp(const VayuApp());
 }
 
@@ -72,6 +75,7 @@ class _VayuAppState extends State<VayuApp> {
           return MaterialApp(
             title: AppConstants.appName,
             debugShowCheckedModeBanner: false,
+            scaffoldMessengerKey: rootMessengerKey,
             theme: VayuTheme.light(),
             darkTheme: VayuTheme.dark(),
             themeMode: _themeModeFor(settings),

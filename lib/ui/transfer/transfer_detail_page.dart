@@ -12,6 +12,8 @@ import 'package:vayu/domain/transfer/payload_destination.dart';
 import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 /// Latest known progress for [task], also after the stream has closed.
 TransferProgress? latestProgressOf(TransferTask task) {
@@ -392,8 +394,7 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
               mimeType: task.metadata.mimeType,
             );
             if (!opened && context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(SnackBar(content: Text('Saved to $path')));
+              showVayuNotice(context, 'Saved in Downloads/Vayu');
             }
           },
           icon: const Icon(Icons.open_in_new_rounded),
@@ -428,8 +429,11 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
         batch.batchId,
       );
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Could not retry: ${_describeFailure(e)}')),
+      showVayuNotice(
+        null,
+        messenger: messenger,
+        _describeFailure(e),
+        tone: VayuNoticeTone.problem,
       );
     } finally {
       if (mounted) setState(() => _retrying = false);
@@ -455,8 +459,11 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
         );
       }
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Could not reconnect: $e')),
+      showVayuNotice(
+        null,
+        messenger: messenger,
+        friendlyError(e),
+        tone: VayuNoticeTone.problem,
       );
     } finally {
       if (mounted) setState(() => _sharingAgain = false);

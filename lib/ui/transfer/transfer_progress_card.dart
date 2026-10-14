@@ -8,6 +8,8 @@ import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/transfer/transfer_history_page.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 /// Home "Transfers" section: a compact row per active or recent transfer.
 ///
@@ -264,8 +266,11 @@ class _TransferRow extends StatelessWidget {
         );
       }
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Could not share again: $e')),
+      showVayuNotice(
+        null,
+        messenger: messenger,
+        friendlyError(e),
+        tone: VayuNoticeTone.problem,
       );
     }
   }

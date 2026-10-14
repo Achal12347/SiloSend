@@ -9,6 +9,8 @@ import 'package:vayu/core/security/secure_session_impl.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/trust_level.dart';
 import 'package:vayu/ui/security/sas_verification_dialog.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 /// Renders real-time active point-to-point connection sessions and disconnect actions.
 class ActiveConnectionsCard extends StatelessWidget {
@@ -188,13 +190,10 @@ class ActiveConnectionsCard extends StatelessWidget {
                                   .sendFileToPeer(sendPeer);
                             } catch (e) {
                               if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: const Text(
-                                      'Unable to send file. Check the connection and try again.',
-                                    ),
-                                    backgroundColor: Colors.red,
-                                  ),
+                                showVayuNotice(
+                                  context,
+                                  friendlyError(e),
+                                  tone: VayuNoticeTone.problem,
                                 );
                               }
                             }

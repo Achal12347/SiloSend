@@ -6,6 +6,7 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
 import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/ui/widgets/rename_device_sheet.dart';
 
 /// Settings Screen (UI10, UI9, Section 30 & 31).
 ///
@@ -418,74 +419,11 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _showEditNameDialog(
-    BuildContext context,
-    String currentName,
-  ) async {
-    final textController = TextEditingController(text: currentName);
-    final formKey = GlobalKey<FormState>();
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Edit Device Name'),
-        content: Form(
-          key: formKey,
-          child: TextFormField(
-            controller: textController,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Display Name',
-              hintText: 'e.g. My Phone',
-            ),
-            validator: (val) {
-              if (val == null || val.trim().isEmpty) {
-                return 'Name cannot be empty';
-              }
-              if (val.trim().length > 32) {
-                return 'Name must be 32 characters or fewer';
-              }
-              return null;
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              if (formKey.currentState?.validate() == true) {
-                final newName = textController.text.trim();
-                final messenger = ScaffoldMessenger.of(context);
-                Navigator.of(ctx).pop();
-                try {
-                  await widget.container.updateCustomDisplayName(newName);
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text('Device name updated to "$newName"'),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (mounted) {
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text('Failed to update name: $e'),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  }
-                }
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+  Future<void> _showEditNameDialog(BuildContext context, String currentName) {
+    return showRenameDeviceSheet(
+      context,
+      container: widget.container,
+      currentName: currentName,
     );
   }
 }

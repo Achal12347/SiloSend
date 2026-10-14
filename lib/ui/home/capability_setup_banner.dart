@@ -4,6 +4,7 @@ import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
 import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Contextual capability and permission setup card.
 ///
@@ -339,12 +340,12 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       final status = await widget.container.capabilityCoordinator
           .requestNearbyAccess();
       if (status == PermissionStatus.permanentlyDenied && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Permission permanently denied. Please enable Nearby devices in App Settings.',
-            ),
-          ),
+        showVayuNotice(
+          context,
+          'Allow Nearby devices for Vayu in your phone\'s settings.',
+          actionLabel: 'Settings',
+          onAction: () =>
+              widget.container.capabilityCoordinator.openAppSettings(),
         );
       }
     } finally {

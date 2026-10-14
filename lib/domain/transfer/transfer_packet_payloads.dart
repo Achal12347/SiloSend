@@ -4,15 +4,6 @@ import 'dart:typed_data';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/utils/crc32.dart';
 
-/// Subtype / packet type codes for Phase 7 Transfer Wire Protocol.
-class TransferPacketSubtype {
-  static const int metadata = 0x10;
-  static const int chunk = 0x11;
-  static const int ack = 0x12;
-  static const int nack = 0x13;
-  static const int cancel = 0x14;
-}
-
 /// SACK / ACK operation types.
 enum TransferAckType {
   offerAccepted(0x01),

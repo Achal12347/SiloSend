@@ -64,9 +64,9 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      // 1. Header branding and live readiness on the hero
+      // 1. Header branding; readiness text appears only when it matters
       expect(find.text('Vayu'), findsOneWidget);
-      expect(find.text('Ready · Wi-Fi + Bluetooth'), findsOneWidget);
+      expect(find.textContaining('Ready ·'), findsNothing);
 
       // 2. Hero Section
       expect(find.text('Share files nearby'), findsOneWidget);
@@ -112,7 +112,7 @@ void main() {
 
         // Peer row shows real reachability and an unverified identity honestly
         expect(find.text('Peer-Galaxy'), findsOneWidget);
-        expect(find.text('New device · Wi-Fi & Bluetooth'), findsOneWidget);
+        expect(find.text('New device'), findsOneWidget);
         expect(find.text('Send'), findsOneWidget);
 
         // Manual connect lives in the row's menu

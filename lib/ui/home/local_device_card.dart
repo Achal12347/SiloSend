@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/ui/widgets/rename_device_sheet.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// How this phone appears to others, with a rename action.
@@ -45,15 +46,16 @@ class LocalDeviceCard extends StatelessWidget {
                       displayName,
                       style: theme.textTheme.titleMedium,
                     ),
-                    subtitle: Text(
-                      visible
-                          ? 'Visible to nearby devices'
-                          : 'Hidden while search is paused',
-                      style: theme.textTheme.bodySmall,
-                    ),
+                    // Only worth saying when nearby phones cannot see you.
+                    subtitle: visible
+                        ? null
+                        : Text(
+                            'Hidden while search is paused',
+                            style: theme.textTheme.bodySmall,
+                          ),
                     trailing: IconButton(
                       icon: const Icon(Icons.edit_outlined),
-                      tooltip: 'Change Device Name',
+                      tooltip: 'Change name',
                       onPressed: () =>
                           _showEditNameDialog(context, displayName),
                     ),
@@ -68,40 +70,10 @@ class LocalDeviceCard extends StatelessWidget {
   }
 
   void _showEditNameDialog(BuildContext context, String currentName) {
-    final controller = TextEditingController(text: currentName);
-    showDialog<void>(
-      context: context,
-      builder: (dialogCtx) => AlertDialog(
-        title: const Text('Change Device Name'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 32,
-          decoration: const InputDecoration(
-            labelText: 'Device Name',
-            hintText: 'Name nearby devices will see',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final newName = controller.text.trim();
-              if (newName.isNotEmpty) {
-                // Re-advertises so nearby phones see the new name immediately.
-                await container.updateCustomDisplayName(newName);
-              }
-              if (dialogCtx.mounted) {
-                Navigator.of(dialogCtx).pop();
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+    showRenameDeviceSheet(
+      context,
+      container: container,
+      currentName: currentName,
     );
   }
 }
