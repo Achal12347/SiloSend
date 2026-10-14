@@ -12,6 +12,8 @@ import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/platform/qr_scanner.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 enum PairingMode { show, join }
 
@@ -176,8 +178,11 @@ class _PairingPageState extends State<PairingPage> {
         sessions.length > _sessionsAtOpen &&
         mounted) {
       final name = sessions.last.info.remoteDisplayName ?? 'a nearby device';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Connected to $name')));
+      showVayuNotice(
+        context,
+        'Connected to $name',
+        tone: VayuNoticeTone.success,
+      );
       Navigator.of(context).maybePop();
     }
   }
@@ -211,14 +216,16 @@ class _PairingPageState extends State<PairingPage> {
     try {
       final peer = await action();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Paired with ${peer.displayName}')),
+      showVayuNotice(
+        context,
+        'Paired with ${peer.displayName}',
+        tone: VayuNoticeTone.success,
       );
       Navigator.of(context).pop(peer);
     } on PairingException catch (e) {
       if (mounted) setState(() => _joinProblem = e.message);
     } catch (e) {
-      if (mounted) setState(() => _joinProblem = 'Pairing failed: $e');
+      if (mounted) setState(() => _joinProblem = friendlyError(e));
     } finally {
       if (mounted) setState(() => _joining = false);
     }
@@ -356,9 +363,7 @@ class _PairingPageState extends State<PairingPage> {
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: link));
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Pairing link copied')),
-              );
+              showVayuNotice(context, 'Link copied');
             }
           },
           icon: const Icon(Icons.link_rounded),

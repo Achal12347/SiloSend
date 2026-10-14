@@ -61,7 +61,7 @@ void main() {
 
       // Peer row with real reachability, a send action, and connect in its menu
       expect(find.text('Remote-Pixel'), findsOneWidget);
-      expect(find.text('New device · Wi-Fi & Bluetooth'), findsOneWidget);
+      expect(find.text('New device'), findsOneWidget);
       expect(find.text('Send files'), findsOneWidget);
       expect(find.text('Send'), findsOneWidget);
 
@@ -82,10 +82,6 @@ void main() {
       await tester.scrollUntilVisible(find.text('Your device'), 200);
       expect(find.text('Test-Device-Alpha'), findsOneWidget);
       expect(find.text('42424242...4242'), findsNothing);
-      await tester.scrollUntilVisible(
-        find.text('End-to-end encrypted · Works offline'),
-        200,
-      );
 
       container.dispose();
     },

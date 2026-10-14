@@ -180,9 +180,12 @@ class VayuTheme {
           borderSide: BorderSide(color: scheme.secondary, width: 1.5),
         ),
       ),
+      // Notices are attached to the bottom edge, never floating mid-screen.
       snackBarTheme: SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: radius),
+        behavior: SnackBarBehavior.fixed,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
         backgroundColor: scheme.inverseSurface,
         contentTextStyle: textTheme.bodyMedium?.copyWith(
           color: scheme.onInverseSurface,

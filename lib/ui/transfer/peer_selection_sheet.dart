@@ -9,6 +9,8 @@ import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/trust_level.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/friendly_error.dart';
 
 /// Modal bottom sheet allowing the user to select a discovered nearby Vayu
 /// peer to receive a pre-selected document or batch of documents.
@@ -548,11 +550,11 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           _isSending = false;
           _sendingToPeerId = null;
         });
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text('Send failed: $e'),
-            backgroundColor: VayuPalette.of(context).danger,
-          ),
+        showVayuNotice(
+          null,
+          messenger: messenger,
+          friendlyError(e, peerName: peer.displayName),
+          tone: VayuNoticeTone.problem,
         );
       }
     }

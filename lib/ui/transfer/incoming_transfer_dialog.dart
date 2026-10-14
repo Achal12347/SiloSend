@@ -7,6 +7,8 @@ import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/trust_label.dart';
+import 'package:vayu/ui/friendly_error.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// Asks the user to accept or decline an incoming file or contact (UI6).
@@ -29,9 +31,9 @@ class IncomingTransferDialog extends StatelessWidget {
     required IncomingTransferRequest request,
     required AppContainer container,
   }) {
-    return showDialog<void>(
+    return showVayuSheet<void>(
       context: context,
-      barrierDismissible: false,
+      dismissible: false,
       builder: (dialogContext) =>
           IncomingTransferDialog(request: request, container: container),
     );
@@ -65,136 +67,120 @@ class IncomingTransferDialog extends StatelessWidget {
         ? meta.fileName.replaceAll(RegExp(r'\.vcf$', caseSensitive: false), '')
         : meta.fileName;
 
-    return AlertDialog(
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-      title: Text(
-        isContact ? 'Incoming contact' : 'Incoming file',
-        style: theme.textTheme.headlineSmall,
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
+    return VayuSheet(
+      topPadding: true,
+      title: isContact ? 'Incoming contact' : 'Incoming file',
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              DeviceAvatar(
+                name: remoteName,
+                seed: request.senderDeviceId,
+                size: 40,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(remoteName, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        if (trust.icon != null) ...[
+                          Icon(trust.icon, size: 14, color: trust.color),
+                          const SizedBox(width: 4),
+                        ],
+                        Text(
+                          trust.text,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: trust.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
               children: [
-                DeviceAvatar(
-                  name: remoteName,
-                  seed: request.senderDeviceId,
-                  size: 40,
+                Icon(
+                  isContact
+                      ? Icons.person_outline_rounded
+                      : Icons.insert_drive_file_outlined,
+                  color: theme.colorScheme.secondary,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(remoteName, style: theme.textTheme.titleMedium),
+                      Text(
+                        itemName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
+                      ),
                       const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          if (trust.icon != null) ...[
-                            Icon(trust.icon, size: 14, color: trust.color),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            trust.text,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: trust.color,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        isContact
+                            ? 'Contact card · ${formatBytes(meta.totalBytes)}'
+                            : formatBytes(meta.totalBytes),
+                        style: theme.textTheme.bodySmall,
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isContact
-                        ? Icons.person_outline_rounded
-                        : Icons.insert_drive_file_outlined,
-                    color: theme.colorScheme.secondary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          itemName,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          isContact
-                              ? 'Contact card · ${formatBytes(meta.totalBytes)}'
-                              : formatBytes(meta.totalBytes),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (trustLevel == TrustLevel.keyConflict) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: palette.dangerContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Text(
-                  'This device\'s identity changed since you last connected. '
-                  'Decline unless you know it was reinstalled or reset.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface,
-                  ),
-                ),
-              ),
-            ],
+          ),
+          if (trustLevel == TrustLevel.keyConflict) ...[
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 14,
-                  color: theme.colorScheme.secondary,
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: palette.dangerContainer,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                'This device\'s identity changed since you last connected. '
+                'Decline unless you know it was reinstalled or reset.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  'Sent end-to-end encrypted',
-                  style: theme.textTheme.bodySmall,
-                ),
-              ],
+              ),
             ),
           ],
-        ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 14,
+                color: theme.colorScheme.secondary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Sent end-to-end encrypted',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ],
       ),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
       actions: [
-        OutlinedButton(
-          onPressed: () async {
-            Navigator.of(context).pop();
-            await container.fileSharingCoordinator.declineIncomingTransfer(
-              request,
-              reason: 'Declined by recipient',
-            );
-          },
-          child: const Text('Decline'),
-        ),
         FilledButton(
           onPressed: () async {
             final navigator = Navigator.of(context);
@@ -205,18 +191,19 @@ class IncomingTransferDialog extends StatelessWidget {
               task = await container.fileSharingCoordinator
                   .acceptIncomingTransfer(request);
             } on InsufficientStorageException catch (e) {
-              messenger?.showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Not enough space: needs ${formatBytes(e.requiredBytes)}, '
-                    '${formatBytes(e.freeBytes)} free. The sender was told.',
-                  ),
-                ),
+              showVayuNotice(
+                null,
+                messenger: messenger,
+                friendlyError(e),
+                tone: VayuNoticeTone.problem,
               );
               return;
             } catch (e) {
-              messenger?.showSnackBar(
-                const SnackBar(content: Text('Could not start receiving.')),
+              showVayuNotice(
+                null,
+                messenger: messenger,
+                'Couldn\'t start receiving. Please try again.',
+                tone: VayuNoticeTone.problem,
               );
               return;
             }
@@ -230,6 +217,16 @@ class IncomingTransferDialog extends StatelessWidget {
             );
           },
           child: const Text('Accept'),
+        ),
+        OutlinedButton(
+          onPressed: () async {
+            Navigator.of(context).pop();
+            await container.fileSharingCoordinator.declineIncomingTransfer(
+              request,
+              reason: 'Declined by recipient',
+            );
+          },
+          child: const Text('Decline'),
         ),
       ],
     );

@@ -109,21 +109,22 @@ void main() {
         await tester.pumpAndSettle();
 
         // Verify dialog contents
-        expect(find.text('Security Verification'), findsOneWidget);
-        expect(find.text('NUMERIC CODE'), findsOneWidget);
-        expect(find.text('BIOMETRIC WORDS'), findsOneWidget);
-        expect(find.text('Peer Fingerprint'), findsOneWidget);
-        expect(find.text('Confirm Match'), findsOneWidget);
-        expect(find.text('Mismatch / Abort'), findsOneWidget);
+        expect(find.text('Check the safety words'), findsOneWidget);
+        expect(find.text('They match'), findsOneWidget);
+        expect(find.text("They don't match"), findsOneWidget);
+        // The fingerprint stays behind "Details".
+        await tester.tap(find.text('Details'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Device fingerprint'), findsOneWidget);
 
         // 3. Confirm Match inside dialog
         await tester.runAsync(() async {
-          await tester.tap(find.text('Confirm Match'));
+          await tester.tap(find.text('They match'));
         });
         await tester.pumpAndSettle();
 
         // Verify dialog is dismissed and trust level badge is now 'SAS Verified'
-        expect(find.text('Security Verification'), findsNothing);
+        expect(find.text('Check the safety words'), findsNothing);
         expect(find.text(TrustLevel.sasVerified.displayLabel), findsOneWidget);
       },
     );
@@ -158,7 +159,7 @@ void main() {
       // Tap 'Mismatch / Abort'
       await tester.runAsync(() async {
         final closedFuture = containerA.connectionManager.onSessionClosed.first;
-        await tester.tap(find.text('Mismatch / Abort'));
+        await tester.tap(find.text("They don't match"));
         await closedFuture;
       });
       await tester.pumpAndSettle();

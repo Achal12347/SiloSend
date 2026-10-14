@@ -1,76 +1,51 @@
 import 'package:flutter/material.dart';
 
-/// Modal dialog providing transparent, truthful rationale for all requested permissions (UI3).
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
+
+/// Explains, in a bottom sheet, why Vayu asks for each permission (UI3).
 class PermissionsRationaleDialog extends StatelessWidget {
   const PermissionsRationaleDialog({super.key});
 
   static Future<void> show(BuildContext context) {
-    return showDialog(
+    return showVayuSheet<void>(
       context: context,
-      builder: (context) => const PermissionsRationaleDialog(),
+      builder: (_) => const PermissionsRationaleDialog(),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    return AlertDialog(
-      title: Row(
+    return VayuSheet(
+      title: 'Why Vayu asks for permissions',
+      message: 'Everything stays between nearby phones. No account, no cloud.',
+      content: Column(
         children: [
-          Icon(Icons.security_rounded, color: theme.colorScheme.primary),
-          const SizedBox(width: 10),
-          const Expanded(child: Text('Permission Rationale')),
+          _item(
+            theme,
+            Icons.bluetooth_searching_rounded,
+            'Nearby devices',
+            'Find and connect to phones near you. Vayu never tracks your location.',
+          ),
+          _item(
+            theme,
+            Icons.wifi_rounded,
+            'Wi-Fi',
+            'Send files fast over Wi-Fi, without using the internet.',
+          ),
+          _item(
+            theme,
+            Icons.folder_outlined,
+            'Files',
+            'Open the files you choose and save the ones you receive.',
+          ),
+          _item(
+            theme,
+            Icons.nfc_rounded,
+            'NFC (optional)',
+            'Pair or share your card with a tap.',
+          ),
         ],
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Vayu operates entirely offline and peer-to-peer. '
-              'Permissions are used strictly for local device communication without any cloud tracking.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 16),
-            _buildPermissionItem(
-              theme,
-              icon: Icons.bluetooth_searching_rounded,
-              title: 'Nearby Devices (Bluetooth)',
-              description:
-                  'Used to discover and establish direct peer-to-peer radio links with nearby devices. '
-                  'Vayu never tracks your physical location.',
-            ),
-            const SizedBox(height: 12),
-            _buildPermissionItem(
-              theme,
-              icon: Icons.wifi_rounded,
-              title: 'Local Network (Wi-Fi)',
-              description:
-                  'Used to discover devices on the same Wi-Fi network and transmit data at maximum bandwidth '
-                  'over local TCP sockets without going through the internet.',
-            ),
-            const SizedBox(height: 12),
-            _buildPermissionItem(
-              theme,
-              icon: Icons.folder_rounded,
-              title: 'Storage & Downloads',
-              description:
-                  'Required to read files you choose to send and to save received files into your '
-                  'device\'s standard Downloads directory.',
-            ),
-            const SizedBox(height: 12),
-            _buildPermissionItem(
-              theme,
-              icon: Icons.nfc_rounded,
-              title: 'NFC (Optional)',
-              description: 'Used for instant one-tap pairing and out-of-band key verification between devices.',
-            ),
-          ],
-        ),
       ),
       actions: [
         FilledButton(
@@ -81,45 +56,31 @@ class PermissionsRationaleDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildPermissionItem(
-    ThemeData theme, {
-    required IconData icon,
-    required String title,
-    required String description,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primaryContainer.withValues(alpha: 0.4),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(icon, size: 20, color: theme.colorScheme.primary),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
+  Widget _item(ThemeData theme, IconData icon, String title, String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 22, color: theme.colorScheme.secondary),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  text,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                description,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

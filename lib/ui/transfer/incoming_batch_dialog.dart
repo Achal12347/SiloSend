@@ -7,6 +7,8 @@ import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/trust_label.dart';
+import 'package:vayu/ui/friendly_error.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// Asks once whether to receive every file of an incoming batch.
@@ -28,9 +30,9 @@ class IncomingBatchDialog extends StatefulWidget {
     required IncomingBatchRequest request,
     required AppContainer container,
   }) {
-    return showDialog<void>(
+    return showVayuSheet<void>(
       context: context,
-      barrierDismissible: false,
+      dismissible: false,
       builder: (_) =>
           IncomingBatchDialog(request: request, container: container),
     );
@@ -71,154 +73,138 @@ class _IncomingBatchDialogState extends State<IncomingBatchDialog> {
         ? files
         : files.take(_collapsedCount).toList();
 
-    return AlertDialog(
-      titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-      title: Text(
-        'Incoming ${files.length} files',
-        style: theme.textTheme.headlineSmall,
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                DeviceAvatar(
-                  name: remoteName,
-                  seed: request.senderDeviceId,
-                  size: 40,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(remoteName, style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          if (trust.icon != null) ...[
-                            Icon(trust.icon, size: 14, color: trust.color),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            trust.text,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: trust.color,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(16),
+    return VayuSheet(
+      topPadding: true,
+      title: 'Incoming ${files.length} files',
+      content: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              DeviceAvatar(
+                name: remoteName,
+                seed: request.senderDeviceId,
+                size: 40,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
-                    child: Text(
-                      '${files.length} files · ${formatBytes(request.totalBytes)}',
-                      style: theme.textTheme.titleSmall,
-                    ),
-                  ),
-                  for (final f in shown)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 4,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.insert_drive_file_outlined,
-                            size: 18,
-                            color: theme.colorScheme.secondary,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              f.fileName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formatBytes(f.sizeBytes),
-                            style: theme.textTheme.bodySmall,
-                          ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(remoteName, style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        if (trust.icon != null) ...[
+                          Icon(trust.icon, size: 14, color: trust.color),
+                          const SizedBox(width: 4),
                         ],
-                      ),
+                        Text(
+                          trust.text,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: trust.color,
+                          ),
+                        ),
+                      ],
                     ),
-                  if (shown.length < files.length)
-                    TextButton(
-                      onPressed: () => setState(() => _expanded = true),
-                      child: Text('Show ${files.length - shown.length} more'),
-                    ),
-                ],
-              ),
-            ),
-            if (trustLevel == TrustLevel.keyConflict) ...[
-              const SizedBox(height: 14),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: palette.dangerContainer,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Text(
-                  'This device\'s identity changed since you last connected. '
-                  'Decline unless you know it was reinstalled or reset.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurface,
-                  ),
+                  ],
                 ),
               ),
             ],
-            const SizedBox(height: 14),
-            Row(
+          ),
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainer,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(
-                  Icons.lock_outline_rounded,
-                  size: 14,
-                  color: theme.colorScheme.secondary,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
                   child: Text(
-                    'Sent end-to-end encrypted. Accepting covers only these files.',
-                    style: theme.textTheme.bodySmall,
+                    '${files.length} files · ${formatBytes(request.totalBytes)}',
+                    style: theme.textTheme.titleSmall,
                   ),
                 ),
+                for (final f in shown)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 4,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.insert_drive_file_outlined,
+                          size: 18,
+                          color: theme.colorScheme.secondary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            f.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          formatBytes(f.sizeBytes),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                if (shown.length < files.length)
+                  TextButton(
+                    onPressed: () => setState(() => _expanded = true),
+                    child: Text('Show ${files.length - shown.length} more'),
+                  ),
               ],
             ),
+          ),
+          if (trustLevel == TrustLevel.keyConflict) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: palette.dangerContainer,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Text(
+                'This device\'s identity changed since you last connected. '
+                'Decline unless you know it was reinstalled or reset.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
           ],
-        ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Icon(
+                Icons.lock_outline_rounded,
+                size: 14,
+                color: theme.colorScheme.secondary,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Sent end-to-end encrypted. Accepting covers only these files.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
-      actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
       actions: [
-        OutlinedButton(
-          onPressed: () async {
-            Navigator.of(context).pop();
-            await container.fileSharingCoordinator.declineIncomingBatch(
-              request,
-              reason: 'Declined by recipient',
-            );
-          },
-          child: const Text('Decline'),
-        ),
         FilledButton(
           onPressed: () async {
             final navigator = Navigator.of(context);
@@ -229,18 +215,19 @@ class _IncomingBatchDialogState extends State<IncomingBatchDialog> {
                 request,
               );
             } on InsufficientStorageException catch (e) {
-              messenger?.showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Not enough space: needs ${formatBytes(e.requiredBytes)}, '
-                    '${formatBytes(e.freeBytes)} free. The sender was told.',
-                  ),
-                ),
+              showVayuNotice(
+                null,
+                messenger: messenger,
+                friendlyError(e),
+                tone: VayuNoticeTone.problem,
               );
               return;
             } catch (_) {
-              messenger?.showSnackBar(
-                const SnackBar(content: Text('Could not start receiving.')),
+              showVayuNotice(
+                null,
+                messenger: messenger,
+                'Couldn\'t start receiving. Please try again.',
+                tone: VayuNoticeTone.problem,
               );
               return;
             }
@@ -254,6 +241,16 @@ class _IncomingBatchDialogState extends State<IncomingBatchDialog> {
             );
           },
           child: Text('Accept all'),
+        ),
+        OutlinedButton(
+          onPressed: () async {
+            Navigator.of(context).pop();
+            await container.fileSharingCoordinator.declineIncomingBatch(
+              request,
+              reason: 'Declined by recipient',
+            );
+          },
+          child: const Text('Decline'),
         ),
       ],
     );

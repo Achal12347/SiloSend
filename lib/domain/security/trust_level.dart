@@ -31,20 +31,20 @@ enum TrustLevel {
   keyConflict,
 }
 
-/// User-facing display helpers for [TrustLevel].
+/// Plain-language label for [TrustLevel]; matches `TrustLabel` in the UI.
 extension TrustLevelDisplay on TrustLevel {
   String get displayLabel {
     switch (this) {
       case TrustLevel.unverifiedTOFU:
-        return 'Unverified TOFU';
+        return 'New device';
       case TrustLevel.trustedTOFU:
-        return 'Trusted (TOFU)';
+        return 'Known device';
       case TrustLevel.sasVerified:
-        return 'SAS Verified';
+        return 'Verified';
       case TrustLevel.nfcAuthenticated:
-        return 'NFC Verified';
+        return 'Verified';
       case TrustLevel.keyConflict:
-        return 'Key Conflict!';
+        return 'Security warning';
     }
   }
 }

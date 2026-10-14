@@ -10,6 +10,7 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Diagnostics & Live Telemetry Screen (UI11 & Section 32).
 ///
@@ -64,12 +65,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
               await container.capabilityCoordinator.refresh();
               await _refreshBattery();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Diagnostics refreshed'),
-                    duration: Duration(seconds: 1),
-                  ),
-                );
+                showVayuNotice(context, 'Refreshed');
               }
             },
           ),
@@ -449,11 +445,6 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     buffer.writeln('- Explicit Error: ${orch.explicitError.name}');
 
     Clipboard.setData(ClipboardData(text: buffer.toString()));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Diagnostics copied to clipboard'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    showVayuNotice(context, 'Copied', tone: VayuNoticeTone.success);
   }
 }

@@ -116,7 +116,7 @@ void main() {
       await tester.tap(find.byIcon(Icons.copy_rounded));
       await tester.pumpAndSettle();
 
-      expect(find.text('Diagnostics copied to clipboard'), findsOneWidget);
+      expect(find.text('Copied'), findsOneWidget);
       expect(clipboardText, isNotNull);
       expect(clipboardText, contains('# Vayu Diagnostics Report'));
       expect(clipboardText, contains('Diagnostics-Device'));

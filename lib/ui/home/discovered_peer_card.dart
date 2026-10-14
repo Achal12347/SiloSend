@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
-import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/ui/widgets/trust_label.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
@@ -74,8 +73,7 @@ class DiscoveredPeerCard extends StatelessWidget {
                     ],
                     Flexible(
                       child: Text(
-                        '$trustLabel · ${_reachLabel()}'
-                        '${isConnected ? ' · Connected' : ''}',
+                        isConnected ? '$trustLabel · Connected' : trustLabel,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -130,14 +128,5 @@ class DiscoveredPeerCard extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  String _reachLabel() {
-    final lan = peer.availableTransports.contains(TransportType.lan);
-    final ble = peer.availableTransports.contains(TransportType.ble);
-    if (lan && ble) return 'Wi-Fi & Bluetooth';
-    if (lan) return 'Wi-Fi';
-    if (ble) return 'Bluetooth';
-    return peer.transportType == TransportType.ble ? 'Bluetooth' : 'Wi-Fi';
   }
 }
