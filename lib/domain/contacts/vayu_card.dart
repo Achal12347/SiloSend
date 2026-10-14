@@ -1,6 +1,35 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+/// The next thing worth adding to a profile, in the order Vayu asks for it.
+enum ProfileStep { name, reach, work }
+
+/// How complete a profile is: name, a way to reach you, what you do.
+class ProfileProgress {
+  final Set<ProfileStep> done;
+
+  const ProfileProgress(this.done);
+
+  factory ProfileProgress.of(VayuCard? card) {
+    bool has(String? v) => v != null && v.trim().isNotEmpty;
+    return ProfileProgress({
+      if (card != null && has(card.name)) ProfileStep.name,
+      if (card != null && (has(card.phone) || has(card.email)))
+        ProfileStep.reach,
+      if (card != null && (has(card.title) || has(card.company)))
+        ProfileStep.work,
+    });
+  }
+
+  double get fraction => done.length / ProfileStep.values.length;
+
+  bool get isComplete => done.length == ProfileStep.values.length;
+
+  /// The first step not done yet, or null when complete.
+  ProfileStep? get next =>
+      ProfileStep.values.where((s) => !done.contains(s)).firstOrNull;
+}
+
 /// The user's own business card. Kept only on this phone; shared as a
 /// standard vCard 3.0 so any contacts app can save it.
 class VayuCard {

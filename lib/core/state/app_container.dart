@@ -18,6 +18,7 @@ import 'package:vayu/core/discovery/ble_discovery_service.dart';
 import 'package:vayu/core/discovery/discovery_coordinator.dart';
 import 'package:vayu/core/discovery/lan_discovery_service.dart';
 import 'package:vayu/core/identity/device_identity_manager.dart';
+import 'package:vayu/core/identity/device_name_generator.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
 import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
 import 'package:vayu/core/logging/app_logger.dart';
@@ -1121,13 +1122,42 @@ class AppContainer {
   /// Emits whenever the user's card is saved.
   Stream<VayuCard?> get myCardStream => _myCardController.stream;
 
-  /// Saves the user's card on this phone only.
+  /// Saves the user's card on this phone only. The card's name is the
+  /// profile name, so the two never disagree.
   Future<void> saveMyCard(VayuCard card) async {
     final store = _myCardStore ?? InMemoryMyCardStore();
     _myCardStore = store;
     await store.save(card);
     _myCard = card;
     if (!_myCardController.isClosed) _myCardController.add(card);
+    if (_userSettings.profileName != card.name) {
+      await updateProfileName(card.name);
+    }
+  }
+
+  /// First profile step (onboarding or the home banner): saves the name,
+  /// starts the card with it, and, if the phone still has a name Vayu chose,
+  /// renames it to "Riya's phone" (first name).
+  Future<void> setUpProfile(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final card = _myCard;
+    await saveMyCard(
+      card == null ? VayuCard(name: trimmed) : card.copyWith(name: trimmed),
+    );
+    final current = identity?.displayName;
+    if (current == null || DeviceNameGenerator.isAutomatic(current)) {
+      await updateCustomDisplayName(DeviceNameGenerator.phoneNameFor(trimmed));
+    }
+  }
+
+  /// Hides the "Set up your profile" banner for good.
+  Future<void> dismissProfilePrompt() async {
+    _userSettings = _userSettings.copyWith(profilePromptDismissed: true);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
   }
 
   /// Saves the person's own name (used on their Vayu card).

@@ -209,11 +209,11 @@ class _SettingsPageState extends State<SettingsPage> {
               foregroundColor: theme.colorScheme.onSecondaryContainer,
               child: const Icon(Icons.badge_outlined),
             ),
-            title: const Text('My card'),
+            title: const Text('Profile'),
             subtitle: Text(
               container.myCard == null
-                  ? 'Create a card to share by tap'
-                  : 'Share your contact details',
+                  ? 'Set up your name and card'
+                  : 'Your card, shared by tap',
             ),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => MyCardPage.open(context, container),

@@ -31,6 +31,22 @@ class DeviceNameGenerator {
   // No 0/O or 1/I, so the suffix is easy to read aloud.
   static const String _suffixAlphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
 
+  static final RegExp _generated = RegExp(
+    r'^Vayu-[A-Z][a-z]+[A-Z][a-z]+-[2-9A-HJ-NP-Z]{2}$',
+  );
+
+  /// True for names Vayu chose itself (generated or the old shared default),
+  /// which may be replaced by "Riya's phone"; never for a name the user typed.
+  static bool isAutomatic(String name) =>
+      name == legacyDefaultName || _generated.hasMatch(name);
+
+  /// "Riya Sharma" -> "Riya's phone" (clamped to the 32-byte name limit).
+  static String phoneNameFor(String personName) {
+    final first = personName.trim().split(RegExp(r'\s+')).first;
+    final name = "$first's phone";
+    return name.length > 32 ? name.substring(0, 32) : name;
+  }
+
   /// The default name for [deviceId] (16 bytes; shorter IDs still work).
   static String forDeviceId(Uint8List deviceId) {
     int byteAt(int i) => deviceId.isEmpty ? 0 : deviceId[i % deviceId.length];

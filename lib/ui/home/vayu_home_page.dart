@@ -33,6 +33,7 @@ import 'package:vayu/core/transfer/transfer_history.dart';
 import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/contacts/vayu_card.dart';
 import 'package:vayu/ui/card/my_card_page.dart';
+import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/route_observer.dart';
 
@@ -308,11 +309,7 @@ class _VayuHomePageState extends State<VayuHomePage>
         titleSpacing: 20,
         title: const _Wordmark(),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.badge_outlined),
-            tooltip: 'My card',
-            onPressed: () => MyCardPage.open(context, container),
-          ),
+          ProfileButton(container: container),
           IconButton(
             icon: const Icon(Icons.qr_code_2_rounded),
             tooltip: 'Pair with QR or NFC',
@@ -338,6 +335,7 @@ class _VayuHomePageState extends State<VayuHomePage>
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             children: [
+              ProfilePromptBanner(container: container),
               _buildHero(context, container),
               const SizedBox(height: 16),
               CapabilitySetupBanner(container: container),

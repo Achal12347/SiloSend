@@ -12,6 +12,7 @@ import 'package:vayu/ui/card/edit_card_page.dart';
 import 'package:vayu/ui/card/vayu_card_view.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
+import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
@@ -136,7 +137,7 @@ class _MyCardPageState extends State<MyCardPage> {
 
     if (card == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('My card')),
+        appBar: AppBar(title: const Text('Profile')),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -151,13 +152,13 @@ class _MyCardPageState extends State<MyCardPage> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  'Your card',
+                  'Your profile',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Share your contact details with a tap. It stays on this phone until you share it.',
+                  'Start with your name. Share it as a card with a tap; it stays on this phone until you do.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyLarge?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
@@ -167,9 +168,11 @@ class _MyCardPageState extends State<MyCardPage> {
                 SizedBox(
                   height: 54,
                   child: FilledButton(
-                    onPressed: () =>
-                        EditCardPage.open(context, widget.container),
-                    child: const Text('Create your card'),
+                    onPressed: () => showProfileSetupSheet(
+                      context,
+                      container: widget.container,
+                    ),
+                    child: const Text('Set up your profile'),
                   ),
                 ),
               ],
@@ -181,7 +184,7 @@ class _MyCardPageState extends State<MyCardPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My card'),
+        title: const Text('Profile'),
         actions: [
           IconButton(
             icon: const Icon(Icons.edit_outlined),
@@ -195,7 +198,11 @@ class _MyCardPageState extends State<MyCardPage> {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
           children: [
             VayuCardView(face: CardFace.fromCard(card)),
-            const SizedBox(height: 28),
+            _NextStep(
+              card: card,
+              onAdd: () => EditCardPage.open(context, widget.container),
+            ),
+            const SizedBox(height: 20),
             _TapStatus(state: _tap),
             const SizedBox(height: 24),
             OutlinedButton.icon(
@@ -216,6 +223,58 @@ class _MyCardPageState extends State<MyCardPage> {
   }
 }
 
+/// Suggests the single next profile step, until the profile is complete.
+class _NextStep extends StatelessWidget {
+  final VayuCard card;
+  final VoidCallback onAdd;
+
+  const _NextStep({required this.card, required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progress = ProfileProgress.of(card);
+    final text = switch (progress.next) {
+      ProfileStep.reach =>
+        'Add a phone number or email so people can reach you',
+      ProfileStep.work => 'Add your job title or company',
+      ProfileStep.name || null => null,
+    };
+    if (text == null) return const SizedBox(height: 8);
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onAdd,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  height: 28,
+                  child: CircularProgressIndicator(
+                    value: progress.fraction,
+                    strokeWidth: 3,
+                    color: theme.colorScheme.secondary,
+                    backgroundColor: theme.colorScheme.outlineVariant,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(child: Text(text, style: theme.textTheme.bodyMedium)),
+                TextButton(onPressed: onAdd, child: const Text('Add')),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _TapStatus extends StatelessWidget {
   final _TapState state;
 
@@ -228,7 +287,7 @@ class _TapStatus extends StatelessWidget {
       _TapState.ready => (
         Icons.nfc_rounded,
         'Ready to tap',
-        'Hold the back of your phone to another phone with Vayu open.',
+        'Hold your phone near another phone. Vayu opens there if installed.',
       ),
       _TapState.nfcOff => (
         Icons.nfc_rounded,

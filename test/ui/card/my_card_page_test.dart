@@ -34,35 +34,46 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('without a card it offers to create one', (tester) async {
+  testWidgets('without a profile it offers a name-only setup', (tester) async {
     await pump(tester);
-    expect(find.text('Create your card'), findsOneWidget);
-  });
-
-  testWidgets('creating a card prefills the name and saves it', (tester) async {
-    await pump(tester);
-    await tester.tap(find.text('Create your card'));
+    expect(find.text('Set up your profile'), findsOneWidget);
+    await tester.tap(find.text('Set up your profile'));
     await tester.pumpAndSettle();
-
-    // Name comes from onboarding; the preview shows it live.
-    expect(find.widgetWithText(TextFormField, 'Riya Sharma'), findsOneWidget);
-    await tester.enterText(
-      find.widgetWithText(TextFormField, 'Job title'),
-      'Designer',
-    );
+    await tester.enterText(find.byType(TextField), 'Riya Sharma');
     await tester.pump();
-    expect(find.text('Designer'), findsWidgets);
-
     await tester.runAsync(() async {
-      await tester.tap(find.text('Save card'));
+      await tester.tap(find.text('Save'));
       await Future<void>.delayed(const Duration(milliseconds: 100));
     });
     await tester.pumpAndSettle();
 
     expect(container.myCard?.name, 'Riya Sharma');
-    expect(container.myCard?.title, 'Designer');
-    expect(find.text('Show QR code'), findsOneWidget);
-    expect(find.text('Send to a nearby phone'), findsOneWidget);
+    // Progressive: the next step is offered, not demanded.
+    expect(
+      find.text('Add a phone number or email so people can reach you'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('editing the card fills in the next step', (tester) async {
+    await tester.runAsync(
+      () => container.saveMyCard(const VayuCard(name: 'Riya Sharma')),
+    );
+    await pump(tester);
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Phone'),
+      '+91 98765 43210',
+    );
+    await tester.pump();
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Save card'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+    expect(container.myCard?.phone, '+91 98765 43210');
+    expect(find.text('Add your job title or company'), findsOneWidget);
   });
 
   testWidgets('an existing card shows its share options and QR', (
