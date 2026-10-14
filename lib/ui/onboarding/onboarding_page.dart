@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:vayu/core/identity/device_name_generator.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/ui/widgets/vayu_mark.dart';
 
-/// First-launch introduction: welcome, your name, privacy, nearby access.
+/// First-launch introduction in three slides (swipe or tap Continue):
+/// what Vayu is, privacy, and setting up a profile (just a name).
 ///
-/// Every step except the last can be skipped; nothing here is required to
-/// use the app. Finishing (or skipping to the end) saves the answers and
-/// records completion, after which the app shows home.
+/// The profile can be skipped; home then shows a small "Set up your profile"
+/// banner. Permissions are not asked here, only when they are first needed.
 class OnboardingPage extends StatefulWidget {
   final AppContainer container;
 
@@ -20,7 +21,7 @@ class OnboardingPage extends StatefulWidget {
 }
 
 class _OnboardingPageState extends State<OnboardingPage> {
-  static const _pageCount = 4;
+  static const _pageCount = 3;
   final _pages = PageController();
   int _page = 0;
   bool _finishing = false;
@@ -28,59 +29,36 @@ class _OnboardingPageState extends State<OnboardingPage> {
   late final TextEditingController _name = TextEditingController(
     text: widget.container.userSettings.profileName ?? '',
   );
-  late final TextEditingController _device = TextEditingController(
-    text: widget.container.identity?.displayName ?? '',
-  );
-
-  // Until the user edits the device name, it follows "<First name>'s phone".
-  bool _deviceEdited = false;
 
   @override
   void dispose() {
     _pages.dispose();
     _name.dispose();
-    _device.dispose();
     super.dispose();
   }
 
-  void _onNameChanged(String value) {
-    if (_deviceEdited) return;
-    final first = value.trim().split(RegExp(r'\s+')).first;
-    if (first.isEmpty) return;
-    final suggestion = "$first's phone";
-    _device.value = TextEditingValue(
-      text: suggestion.length > 32 ? suggestion.substring(0, 32) : suggestion,
+  bool get _isLast => _page == _pageCount - 1;
+
+  void _goTo(int page) {
+    FocusScope.of(context).unfocus();
+    _pages.animateToPage(
+      page,
+      duration: const Duration(milliseconds: 340),
+      curve: Curves.easeOutCubic,
     );
   }
 
-  void _next() {
-    HapticFeedback.selectionClick();
-    FocusScope.of(context).unfocus();
-    if (_page < _pageCount - 1) {
-      _pages.nextPage(
-        duration: const Duration(milliseconds: 320),
-        curve: Curves.easeOutCubic,
-      );
-    }
-  }
-
-  Future<void> _finish({required bool askNearby}) async {
+  Future<void> _finish({required bool withProfile}) async {
     if (_finishing) return;
+    HapticFeedback.selectionClick();
     setState(() => _finishing = true);
     final container = widget.container;
     try {
       final name = _name.text.trim();
-      if (name.isNotEmpty) await container.updateProfileName(name);
-      final device = _device.text.trim();
-      if (device.isNotEmpty && device != container.identity?.displayName) {
-        await container.updateCustomDisplayName(device);
-      }
-      if (askNearby) {
-        await container.capabilityCoordinator.requestNearbyAccess();
-      }
+      if (withProfile && name.isNotEmpty) await container.setUpProfile(name);
     } catch (e) {
-      // Answers are optional; a failure here must not block the app.
-      AppLogger.warning('Onboarding', 'Saving onboarding answers failed: $e');
+      // The profile is optional; a failure here must not block the app.
+      AppLogger.warning('Onboarding', 'Saving the profile failed: $e');
     }
     await container.completeOnboarding();
   }
@@ -88,26 +66,32 @@ class _OnboardingPageState extends State<OnboardingPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final name = _name.text.trim();
+    final currentPhone = widget.container.identity?.displayName ?? '';
+    final phoneName =
+        name.isNotEmpty && DeviceNameGenerator.isAutomatic(currentPhone)
+        ? DeviceNameGenerator.phoneNameFor(name)
+        : currentPhone;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 16, 12, 0),
-              child: Row(
-                children: [
-                  _Dots(count: _pageCount, index: _page),
-                  const Spacer(),
-                  if (_page < _pageCount - 1)
-                    TextButton(
-                      onPressed: () => _pages.animateToPage(
-                        _pageCount - 1,
-                        duration: const Duration(milliseconds: 360),
-                        curve: Curves.easeOutCubic,
+              child: SizedBox(
+                height: 40,
+                child: Row(
+                  children: [
+                    _Dots(count: _pageCount, index: _page),
+                    const Spacer(),
+                    if (!_isLast)
+                      TextButton(
+                        onPressed: () => _goTo(_pageCount - 1),
+                        child: const Text('Skip'),
                       ),
-                      child: const Text('Skip'),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
             Expanded(
@@ -115,46 +99,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
                 controller: _pages,
                 onPageChanged: (i) => setState(() => _page = i),
                 children: [
-                  _Step(
-                    art: const VayuMark(size: 112),
+                  const _Slide(
+                    art: VayuMark(size: 112),
                     title: 'Welcome to Vayu',
                     body: 'Share files with phones nearby.\nNo internet, no accounts.',
                   ),
-                  _Step(
-                    art: Icon(
-                      Icons.badge_outlined,
-                      size: 64,
-                      color: theme.colorScheme.secondary,
-                    ),
-                    title: 'What should we call you?',
-                    body: 'Your name goes on your Vayu card. Your phone\'s name is what nearby people see.',
-                    child: Column(
-                      children: [
-                        TextField(
-                          controller: _name,
-                          onChanged: _onNameChanged,
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Your name',
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _device,
-                          maxLength: 32,
-                          onChanged: (_) => _deviceEdited = true,
-                          textCapitalization: TextCapitalization.words,
-                          textInputAction: TextInputAction.done,
-                          onSubmitted: (_) => _next(),
-                          decoration: const InputDecoration(
-                            labelText: 'Phone name',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  _Step(
+                  _Slide(
                     art: Icon(
                       Icons.lock_outline_rounded,
                       size: 64,
@@ -178,49 +128,80 @@ class _OnboardingPageState extends State<OnboardingPage> {
                       ],
                     ),
                   ),
-                  _Step(
+                  _Slide(
                     art: Icon(
-                      Icons.bluetooth_searching_rounded,
+                      Icons.badge_outlined,
                       size: 64,
                       color: theme.colorScheme.secondary,
                     ),
-                    title: 'Find phones nearby',
-                    body: 'Vayu needs the Nearby devices permission to see other phones. It never tracks your location.',
+                    title: 'Set up your profile',
+                    body: 'Your name goes on your card, so people know who is sharing.',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: _name,
+                          onChanged: (_) => setState(() {}),
+                          textCapitalization: TextCapitalization.words,
+                          textInputAction: TextInputAction.done,
+                          onSubmitted: (_) {
+                            if (_name.text.trim().isNotEmpty) {
+                              _finish(withProfile: true);
+                            }
+                          },
+                          decoration: const InputDecoration(
+                            labelText: 'Your name',
+                          ),
+                        ),
+                        if (phoneName.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Text(
+                            'Nearby phones will see "$phoneName".',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ],
               ),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-              child: _page < _pageCount - 1
-                  ? SizedBox(
-                      width: double.infinity,
-                      height: 54,
-                      child: FilledButton(
-                        onPressed: _next,
-                        child: Text(_page == 0 ? 'Get started' : 'Continue'),
-                      ),
-                    )
-                  : Column(
+              child: _isLast
+                  ? Column(
                       children: [
                         SizedBox(
                           width: double.infinity,
                           height: 54,
                           child: FilledButton(
-                            onPressed: _finishing
+                            onPressed: _finishing || name.isEmpty
                                 ? null
-                                : () => _finish(askNearby: true),
-                            child: const Text('Allow'),
+                                : () => _finish(withProfile: true),
+                            child: const Text('Continue'),
                           ),
                         ),
                         const SizedBox(height: 8),
                         TextButton(
                           onPressed: _finishing
                               ? null
-                              : () => _finish(askNearby: false),
-                          child: const Text('Not now'),
+                              : () => _finish(withProfile: false),
+                          child: const Text('Skip for now'),
                         ),
                       ],
+                    )
+                  : SizedBox(
+                      width: double.infinity,
+                      height: 54,
+                      child: FilledButton(
+                        onPressed: () {
+                          HapticFeedback.selectionClick();
+                          _goTo(_page + 1);
+                        },
+                        child: Text(_page == 0 ? 'Get started' : 'Continue'),
+                      ),
                     ),
             ),
           ],
@@ -230,13 +211,13 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 }
 
-class _Step extends StatelessWidget {
+class _Slide extends StatelessWidget {
   final Widget art;
   final String title;
   final String? body;
   final Widget? child;
 
-  const _Step({required this.art, required this.title, this.body, this.child});
+  const _Slide({required this.art, required this.title, this.body, this.child});
 
   @override
   Widget build(BuildContext context) {

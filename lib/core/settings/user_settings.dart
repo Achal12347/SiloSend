@@ -68,6 +68,9 @@ class UserSettings {
   /// Last onboarding version the user finished; 0 means never.
   final int onboardingVersion;
 
+  /// The user closed the "Set up your profile" banner on home.
+  final bool profilePromptDismissed;
+
   /// Bump to show onboarding again after a meaningful change.
   static const int currentOnboardingVersion = 1;
 
@@ -78,6 +81,7 @@ class UserSettings {
     this.customDownloadsPath,
     this.profileName,
     this.onboardingVersion = 0,
+    this.profilePromptDismissed = false,
   });
 
   bool get needsOnboarding => onboardingVersion < currentOnboardingVersion;
@@ -89,6 +93,7 @@ class UserSettings {
     String? customDownloadsPath,
     String? profileName,
     int? onboardingVersion,
+    bool? profilePromptDismissed,
   }) {
     return UserSettings(
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
@@ -97,6 +102,8 @@ class UserSettings {
       customDownloadsPath: customDownloadsPath ?? this.customDownloadsPath,
       profileName: profileName ?? this.profileName,
       onboardingVersion: onboardingVersion ?? this.onboardingVersion,
+      profilePromptDismissed:
+          profilePromptDismissed ?? this.profilePromptDismissed,
     );
   }
 
@@ -107,6 +114,7 @@ class UserSettings {
     if (customDownloadsPath != null) 'customDownloadsPath': customDownloadsPath,
     if (profileName != null) 'profileName': profileName,
     'onboardingVersion': onboardingVersion,
+    if (profilePromptDismissed) 'profilePromptDismissed': true,
   };
 
   factory UserSettings.fromJson(Map<String, dynamic> json) {
@@ -135,6 +143,7 @@ class UserSettings {
       customDownloadsPath: json['customDownloadsPath'] as String?,
       profileName: json['profileName'] as String?,
       onboardingVersion: json['onboardingVersion'] as int? ?? 0,
+      profilePromptDismissed: json['profilePromptDismissed'] as bool? ?? false,
     );
   }
 }
