@@ -423,3 +423,59 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
     );
   }
 }
+
+/// Muted card backgrounds for the Vayu business card, all readable with
+/// [VayuCardColors.onCard] text. Same in light and dark so a card looks the
+/// same on every phone.
+class VayuCardColors {
+  VayuCardColors._();
+
+  static const Color onCard = Color(0xFFF4F1EA);
+  static const Color onCardMuted = Color(0xFFC9C4BA);
+
+  static const List<(String, LinearGradient)> accents = [
+    (
+      'Ink',
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF2B2E33), Color(0xFF1D1F23)],
+      ),
+    ),
+    (
+      'Sage',
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF4F7F6E), Color(0xFF3B6355)],
+      ),
+    ),
+    (
+      'Clay',
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFFA47152), Color(0xFF835841)],
+      ),
+    ),
+    (
+      'Slate',
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF4C5866), Color(0xFF37414D)],
+      ),
+    ),
+    (
+      'Plum',
+      LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF6A5869), Color(0xFF524453)],
+      ),
+    ),
+  ];
+
+  static LinearGradient of(int index) =>
+      accents[index.clamp(0, accents.length - 1)].$2;
+}

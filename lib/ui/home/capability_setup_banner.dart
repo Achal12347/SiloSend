@@ -85,8 +85,8 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
     final List<Widget> actions = [];
 
     if (caps.isBluetoothOff && caps.lanState == NetworkState.disconnected) {
-      title = 'No Transports Available';
-      explanation = 'Vayu cannot discover nearby devices because Wi-Fi is disconnected and Bluetooth is turned off.';
+      title = "Can't find phones yet";
+      explanation = 'Connect to Wi-Fi or turn on Bluetooth.';
       actions.add(
         FilledButton.tonalIcon(
           onPressed: _isProcessing
@@ -96,7 +96,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                       widget.container.capabilityCoordinator.enableBluetooth(),
                 ),
           icon: const Icon(Icons.bluetooth_rounded, size: 16),
-          label: const Text('Turn On Bluetooth'),
+          label: const Text('Turn on Bluetooth'),
         ),
       );
       actions.add(
@@ -109,15 +109,15 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       );
     } else if (caps.isNearbyPermissionMissing &&
         caps.lanState == NetworkState.disconnected) {
-      title = 'Nearby Permission Required';
-      explanation = 'Wi-Fi is disconnected, and Vayu requires Nearby device access to discover phones via Bluetooth.';
+      title = 'Allow nearby devices';
+      explanation = 'Vayu needs this to find phones over Bluetooth.';
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(
             onPressed: () =>
                 widget.container.capabilityCoordinator.openAppSettings(),
             icon: const Icon(Icons.settings_rounded, size: 16),
-            label: const Text('Open Settings'),
+            label: const Text('Open settings'),
           ),
         );
       } else {
@@ -125,7 +125,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
           FilledButton.icon(
             onPressed: _isProcessing ? null : _requestNearbyPermission,
             icon: const Icon(Icons.security_rounded, size: 16),
-            label: const Text('Allow Nearby Devices'),
+            label: const Text('Allow'),
           ),
         );
       }
@@ -137,13 +137,13 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
         ),
       );
     } else {
-      title = 'Connectivity Required';
-      explanation = 'Connect to a local Wi-Fi network or enable Bluetooth to discover nearby devices.';
+      title = 'Connect to Wi-Fi or Bluetooth';
+      explanation = 'Vayu finds phones on your Wi-Fi or over Bluetooth.';
       actions.add(
         OutlinedButton.icon(
           onPressed: () => widget.container.platformService.openWifiSettings(),
           icon: const Icon(Icons.wifi_rounded, size: 16),
-          label: const Text('Wi-Fi Settings'),
+          label: const Text('Wi-Fi settings'),
         ),
       );
     }
@@ -170,8 +170,8 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
     final List<Widget> actions = [];
 
     if (caps.isBluetoothOff) {
-      title = 'Bluetooth is Turned Off';
-      explanation = 'Local Wi-Fi is ready for sharing. To also discover phones via Bluetooth Low Energy, turn on Bluetooth.';
+      title = 'Bluetooth is off';
+      explanation = "Turn it on to also find phones that aren't on your Wi-Fi.";
       actions.add(
         FilledButton.tonalIcon(
           onPressed: _isProcessing
@@ -181,19 +181,19 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                       widget.container.capabilityCoordinator.enableBluetooth(),
                 ),
           icon: const Icon(Icons.bluetooth_rounded, size: 16),
-          label: const Text('Turn On Bluetooth'),
+          label: const Text('Turn on Bluetooth'),
         ),
       );
     } else if (caps.isNearbyPermissionMissing) {
-      title = 'Nearby Device Access';
-      explanation = 'Nearby device access allows Vayu to discover phones over Bluetooth Low Energy. Your location is never tracked.';
+      title = 'Allow nearby devices';
+      explanation = 'Lets Vayu find phones over Bluetooth. Your location is never tracked.';
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(
             onPressed: () =>
                 widget.container.capabilityCoordinator.openAppSettings(),
             icon: const Icon(Icons.settings_rounded, size: 16),
-            label: const Text('Open Settings'),
+            label: const Text('Open settings'),
           ),
         );
       } else {
@@ -201,13 +201,13 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
           FilledButton.icon(
             onPressed: _isProcessing ? null : _requestNearbyPermission,
             icon: const Icon(Icons.security_rounded, size: 16),
-            label: const Text('Allow Permission'),
+            label: const Text('Allow'),
           ),
         );
       }
     } else {
-      title = 'BLE Unavailable';
-      explanation = 'Bluetooth Low Energy is currently unavailable. You can continue using Wi-Fi LAN discovery.';
+      title = "Bluetooth isn't available";
+      explanation = 'You can still share with phones on your Wi-Fi.';
     }
 
     // Always offer choice to proceed with LAN only
@@ -217,7 +217,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
           widget.container.capabilityCoordinator.continueWithLanOnly();
           setState(() => _dismissedBleWarning = true);
         },
-        child: const Text('Continue with LAN Only'),
+        child: const Text('Use Wi-Fi only'),
       ),
     );
 
@@ -244,14 +244,14 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       backgroundColor: theme.colorScheme.primaryContainer,
       icon: Icons.wifi_off_rounded,
       iconColor: theme.colorScheme.primary,
-      title: 'Local Wi-Fi Disconnected',
-      explanation: 'Bluetooth discovery is active. Connecting to the same Wi-Fi network enables high-speed transfers.',
+      title: 'Not on Wi-Fi',
+      explanation: 'Join the same Wi-Fi as the other phone for fast transfers.',
       actions: [
         OutlinedButton.icon(
           onPressed: () =>
               widget.container.capabilityCoordinator.openWifiSettings(),
           icon: const Icon(Icons.wifi_rounded, size: 16),
-          label: const Text('Wi-Fi Settings'),
+          label: const Text('Wi-Fi settings'),
           style: OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
         ),
       ],
@@ -273,7 +273,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor),
       ),
       child: Column(
@@ -293,9 +293,10 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                         Expanded(
                           child: Text(
                             title,
+                            // Theme text colour: readable in light and dark.
                             style: theme.textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.bold,
-                              color: Colors.black87,
+                              color: theme.colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -307,7 +308,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                             size: 18,
                             color: iconColor,
                           ),
-                          tooltip: 'Permission Rationale',
+                          tooltip: 'Why Vayu asks',
                           onPressed: () =>
                               PermissionsRationaleDialog.show(context),
                         ),
@@ -317,7 +318,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                     Text(
                       explanation,
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.black87,
+                        color: theme.colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ],

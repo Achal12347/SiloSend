@@ -5,6 +5,7 @@ import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
+import 'package:vayu/core/settings/user_settings.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
 import 'package:vayu/main.dart';
@@ -26,6 +27,12 @@ void main() {
       final container = AppContainer.standard(
         storage: storage,
         platformService: SystemPlatformService(platformNameOverride: 'android'),
+        // Returning user: onboarding already finished.
+        settingsStorage: InMemorySettingsStorage(
+          const UserSettings(
+            onboardingVersion: UserSettings.currentOnboardingVersion,
+          ),
+        ),
       );
 
       await container.initialize();

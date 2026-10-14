@@ -9,8 +9,14 @@ import 'package:qr/qr.dart';
 class QrCodeView extends StatelessWidget {
   final String data;
   final double size;
+  final String semanticLabel;
 
-  const QrCodeView({super.key, required this.data, this.size = 260});
+  const QrCodeView({
+    super.key,
+    required this.data,
+    this.size = 260,
+    this.semanticLabel = 'Pairing QR code',
+  });
 
   static const Color ink = Color(0xFF16171A);
   static const Color paper = Color(0xFFFBFAF7);
@@ -23,7 +29,7 @@ class QrCodeView extends StatelessWidget {
     );
     final image = QrImage(code);
     return Semantics(
-      label: 'Pairing QR code',
+      label: semanticLabel,
       image: true,
       child: Container(
         width: size,

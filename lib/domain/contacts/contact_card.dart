@@ -14,6 +14,9 @@ class ContactCard {
   final List<String> phones;
   final List<String> emails;
   final String? organization;
+  final String? title;
+  final String? website;
+  final String? note;
   final Uint8List vcard;
 
   const ContactCard({
@@ -22,6 +25,9 @@ class ContactCard {
     required this.emails,
     required this.vcard,
     this.organization,
+    this.title,
+    this.website,
+    this.note,
   });
 
   /// Parses and validates [bytes]; returns null when it is not a vCard.
@@ -45,6 +51,9 @@ class ContactCard {
     String? fn;
     String? n;
     String? org;
+    String? title;
+    String? url;
+    String? note;
     final phones = <String>[];
     final emails = <String>[];
     for (final line in lines.sublist(begin + 1, end)) {
@@ -71,6 +80,12 @@ class ContactCard {
           emails.add(value);
         case 'ORG':
           org ??= value.split(';').first;
+        case 'TITLE':
+          title ??= value;
+        case 'URL':
+          url ??= value;
+        case 'NOTE':
+          note ??= value;
       }
     }
     final name = (fn ?? n ?? '').trim();
@@ -80,6 +95,9 @@ class ContactCard {
       phones: phones,
       emails: emails,
       organization: org,
+      title: title,
+      website: url,
+      note: note,
       vcard: bytes,
     );
   }

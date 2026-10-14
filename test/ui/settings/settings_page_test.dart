@@ -68,10 +68,10 @@ void main() {
 
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Initial-Device-Name'), findsOneWidget);
-      expect(find.text('Power Saving Policy'), findsOneWidget);
-      expect(find.text('Downloads Directory'), findsOneWidget);
-      expect(find.text('Permission Rationale'), findsOneWidget);
-      expect(find.text('Diagnostics & Telemetry'), findsOneWidget);
+      expect(find.text('Battery saver'), findsOneWidget);
+      expect(find.text('Received files'), findsOneWidget);
+      expect(find.text('Why Vayu asks for permissions'), findsOneWidget);
+      expect(find.text('Diagnostics'), findsOneWidget);
       expect(find.text('About'), findsOneWidget);
     });
 
@@ -144,7 +144,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Permission Rationale'));
+      await tester.tap(find.text('Why Vayu asks for permissions'));
       await tester.pumpAndSettle();
 
       expect(find.byType(PermissionsRationaleDialog), findsOneWidget);
@@ -166,7 +166,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Diagnostics & Telemetry'));
+      await tester.tap(find.text('Diagnostics'));
       await tester.pumpAndSettle();
 
       expect(find.byType(DiagnosticsPage), findsOneWidget);

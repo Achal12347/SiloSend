@@ -10,6 +10,7 @@ import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
+import 'package:vayu/core/contacts/my_card_store.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -54,6 +55,7 @@ import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/core/transport/smart_transport_selector_impl.dart';
 import 'package:vayu/domain/identity/device_capabilities.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
+import 'package:vayu/domain/contacts/vayu_card.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/domain/security/crypto_identity_keypair.dart';
@@ -101,6 +103,10 @@ class AppContainer {
   SecureSessionManager? _secureSessionManager;
   TransferEngine? _transferEngine;
   TransferHistory? _transferHistory;
+  MyCardStore? _myCardStore;
+  VayuCard? _myCard;
+  final StreamController<VayuCard?> _myCardController =
+      StreamController<VayuCard?>.broadcast();
   BatteryStateProvider? _batteryProvider;
   TransportSelector? _transportSelector;
   FilePickerService? _filePickerService;
@@ -778,6 +784,10 @@ class AppContainer {
             : InMemoryTransferHistoryStorage(),
       );
       await _transferHistory!.load();
+      _myCardStore = Platform.isAndroid && !_isTestEnvironment
+          ? FileMyCardStore(File('${AppPaths.androidFilesDir}/my_card.json'))
+          : InMemoryMyCardStore();
+      _myCard = await _myCardStore!.load();
       _fileSharingCoordinator =
           _injectedFileSharingCoordinator ??
           FileSharingCoordinator(
@@ -1046,6 +1056,9 @@ class AppContainer {
     if (!_userSettingsController.isClosed) {
       _userSettingsController.close();
     }
+    if (!_myCardController.isClosed) {
+      _myCardController.close();
+    }
     _isInitialized = false;
   }
 
@@ -1099,6 +1112,43 @@ class AppContainer {
     if (_discoveryCoordinator?.status == DiscoveryStatus.active) {
       await stopDiscoveryAndAdvertising();
       await startDiscoveryAndAdvertising();
+    }
+  }
+
+  /// The user's own business card, or null before one is created.
+  VayuCard? get myCard => _myCard;
+
+  /// Emits whenever the user's card is saved.
+  Stream<VayuCard?> get myCardStream => _myCardController.stream;
+
+  /// Saves the user's card on this phone only.
+  Future<void> saveMyCard(VayuCard card) async {
+    final store = _myCardStore ?? InMemoryMyCardStore();
+    _myCardStore = store;
+    await store.save(card);
+    _myCard = card;
+    if (!_myCardController.isClosed) _myCardController.add(card);
+  }
+
+  /// Saves the person's own name (used on their Vayu card).
+  Future<void> updateProfileName(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    _userSettings = _userSettings.copyWith(profileName: trimmed);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+  }
+
+  /// Records that onboarding is finished so it is not shown again.
+  Future<void> completeOnboarding() async {
+    _userSettings = _userSettings.copyWith(
+      onboardingVersion: UserSettings.currentOnboardingVersion,
+    );
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
     }
   }
 

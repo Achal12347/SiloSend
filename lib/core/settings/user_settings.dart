@@ -21,18 +21,18 @@ enum BatterySaverMode {
       case BatterySaverMode.on:
         return 'On';
       case BatterySaverMode.system:
-        return 'Follow System';
+        return 'Automatic';
     }
   }
 
   String get description {
     switch (this) {
       case BatterySaverMode.off:
-        return 'Standard discovery and high-performance transport selection.';
+        return 'Full speed. Uses more battery while searching.';
       case BatterySaverMode.on:
-        return 'Reduces background discovery duty cycles and optimizes transport selection for energy efficiency.';
+        return 'Searches less often to save battery.';
       case BatterySaverMode.system:
-        return 'Automatically applies power-saving optimizations when Android Power Saver is active.';
+        return "Saves battery when your phone's Battery Saver is on.";
     }
   }
 }
@@ -62,24 +62,41 @@ class UserSettings {
   final String? customDisplayName;
   final String? customDownloadsPath;
 
+  /// The person's own name (for their card), separate from the device name.
+  final String? profileName;
+
+  /// Last onboarding version the user finished; 0 means never.
+  final int onboardingVersion;
+
+  /// Bump to show onboarding again after a meaningful change.
+  static const int currentOnboardingVersion = 1;
+
   const UserSettings({
     this.batterySaverMode = BatterySaverMode.system,
     this.themePreference = AppThemePreference.system,
     this.customDisplayName,
     this.customDownloadsPath,
+    this.profileName,
+    this.onboardingVersion = 0,
   });
+
+  bool get needsOnboarding => onboardingVersion < currentOnboardingVersion;
 
   UserSettings copyWith({
     BatterySaverMode? batterySaverMode,
     AppThemePreference? themePreference,
     String? customDisplayName,
     String? customDownloadsPath,
+    String? profileName,
+    int? onboardingVersion,
   }) {
     return UserSettings(
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
       themePreference: themePreference ?? this.themePreference,
       customDisplayName: customDisplayName ?? this.customDisplayName,
       customDownloadsPath: customDownloadsPath ?? this.customDownloadsPath,
+      profileName: profileName ?? this.profileName,
+      onboardingVersion: onboardingVersion ?? this.onboardingVersion,
     );
   }
 
@@ -88,6 +105,8 @@ class UserSettings {
     'themePreference': themePreference.name,
     if (customDisplayName != null) 'customDisplayName': customDisplayName,
     if (customDownloadsPath != null) 'customDownloadsPath': customDownloadsPath,
+    if (profileName != null) 'profileName': profileName,
+    'onboardingVersion': onboardingVersion,
   };
 
   factory UserSettings.fromJson(Map<String, dynamic> json) {
@@ -114,6 +133,8 @@ class UserSettings {
       themePreference: theme,
       customDisplayName: json['customDisplayName'] as String?,
       customDownloadsPath: json['customDownloadsPath'] as String?,
+      profileName: json['profileName'] as String?,
+      onboardingVersion: json['onboardingVersion'] as int? ?? 0,
     );
   }
 }
