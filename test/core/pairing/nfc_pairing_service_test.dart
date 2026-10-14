@@ -28,6 +28,9 @@ class _FakePlatformService extends PlatformService {
 }
 
 class _TestNfcAdapter implements NfcPlatformAdapter {
+  @override
+  Future<void> stopServing() async {}
+
   bool available = true;
   bool enabled = true;
   void Function(Uint8List ndefBytes)? tagCallback;

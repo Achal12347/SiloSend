@@ -67,8 +67,7 @@ class PermissionsRationaleDialog extends StatelessWidget {
               theme,
               icon: Icons.nfc_rounded,
               title: 'NFC (Optional)',
-              description:
-                  'Used for instant one-tap pairing and out-of-band key verification between devices.',
+              description: 'Used for instant one-tap pairing and out-of-band key verification between devices.',
             ),
           ],
         ),

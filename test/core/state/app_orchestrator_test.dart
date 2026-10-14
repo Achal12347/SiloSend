@@ -20,280 +20,355 @@ import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/platform/platform_service.dart';
 
 void main() {
-  group('AppOrchestrator Central State Tests (Track C: U1–U8 & Section 33)', () {
-    late LocalDeviceIdentity localIdentity;
-    late AppContainer container;
-    late _MockDiscoveryService mockDiscoveryService;
+  group(
+    'AppOrchestrator Central State Tests (Track C: U1–U8 & Section 33)',
+    () {
+      late LocalDeviceIdentity localIdentity;
+      late AppContainer container;
+      late _MockDiscoveryService mockDiscoveryService;
 
-    setUp(() async {
-      localIdentity = LocalDeviceIdentity.generate(
-        displayName: 'Test-Device',
-        platform: 'android',
-      );
-      mockDiscoveryService = _MockDiscoveryService(TransportType.lan);
-      final coordinator = DiscoveryCoordinator(
-        services: [mockDiscoveryService],
-      );
-
-      container = AppContainer.standard(
-        storage: InMemoryIdentityStorage(localIdentity),
-        discoveryCoordinator: coordinator,
-      );
-      await container.initialize();
-    });
-
-    tearDown(() {
-      container.dispose();
-      mockDiscoveryService.dispose();
-    });
-
-    test('Initializes truthfully into ready or discovering state', () {
-      final state = container.orchestrator.currentState;
-      expect(state, isNotNull);
-      expect(state.phase, isA<AppOperationalPhase>());
-      expect(state.explicitError, isA<AppExplicitError>());
-    });
-
-    test('Reflects discovery active and peer found states truthfully', () async {
-      final orchestrator = container.orchestrator;
-
-      // Start discovery
-      await container.discoveryCoordinator.startDiscovery();
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-      expect(
-        orchestrator.currentState.phase,
-        AppOperationalPhase.discovering,
-      );
-
-      // Add a discovered peer through mock service
-      final peer = DiscoveredPeer(
-        deviceId: 'aabbccddeeff00112233445566778899',
-        displayName: 'Pixel 9 Pro',
-        transportType: TransportType.lan,
-        rssi: -55,
-        lastSeen: DateTime.now(),
-      );
-
-      mockDiscoveryService.emitPeer(peer);
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-
-      expect(orchestrator.currentState.phase, AppOperationalPhase.deviceFound);
-      expect(orchestrator.currentState.discoveredPeersCount, greaterThan(0));
-
-      await container.discoveryCoordinator.stopDiscovery();
-    });
-
-    test('Battery Saver state propagates truthfully into AppOrchestratorState', () async {
-      final testBatteryProvider = _MockBatteryProvider(
-        initialSnapshot: BatterySnapshot(
-          batteryLevel: 42,
-          isCharging: false,
-          isBatterySaverActive: true,
-          timestamp: DateTime.now(),
-        ),
-      );
-
-      final customContainer = AppContainer.standard(
-        storage: InMemoryIdentityStorage(localIdentity),
-        batteryProvider: testBatteryProvider,
-      );
-      await customContainer.initialize();
-      await customContainer.orchestrator.refresh();
-
-      expect(customContainer.orchestrator.currentState.isBatterySaverActive, isTrue);
-
-      customContainer.dispose();
-    });
-
-    test('User setBatterySaverMode overrides system snapshot truthfully', () async {
-      final testBatteryProvider = _MockBatteryProvider(
-        initialSnapshot: BatterySnapshot(
-          batteryLevel: 90,
-          isCharging: true,
-          isBatterySaverActive: false,
-          timestamp: DateTime.now(),
-        ),
-      );
-
-      final customContainer = AppContainer.standard(
-        storage: InMemoryIdentityStorage(localIdentity),
-        batteryProvider: testBatteryProvider,
-      );
-      await customContainer.initialize();
-
-      expect(customContainer.orchestrator.currentState.isBatterySaverActive, isFalse);
-
-      // User turns on Battery Saver
-      await customContainer.setBatterySaverMode(BatterySaverMode.on);
-      expect(customContainer.orchestrator.currentState.isBatterySaverActive, isTrue);
-      expect(customContainer.discoveryCoordinator.isBatterySaverActive, isTrue);
-
-      // User turns off Battery Saver
-      await customContainer.setBatterySaverMode(BatterySaverMode.off);
-      expect(customContainer.orchestrator.currentState.isBatterySaverActive, isFalse);
-      expect(customContainer.discoveryCoordinator.isBatterySaverActive, isFalse);
-
-      customContainer.dispose();
-    });
-
-    test('Maps active transfer state to transferring and completed (Section 33)', () async {
-      final orchestrator = container.orchestrator;
-      final metadata = TransferMetadata(
-        transferId: 'test_transfer_orchestrator_1',
-        fileName: 'document.pdf',
-        totalBytes: 5000,
-        chunkSize: 1000,
-        sha256Checksum: '1122334455667788990011223344556677889900112233445566778899001122',
-        mimeType: 'application/pdf',
-      );
-
-      final progressCtrl = StreamController<TransferProgress>.broadcast();
-      final dummyTask = _MockTransferTask(
-        metadata: metadata,
-        progressStream: progressCtrl.stream,
-        status: TransferStatus.transferring,
-      );
-
-      container.fileSharingCoordinator.allTransfers; // access
-      // Inject task tracking
-      container.fileSharingCoordinator.rememberPeer(
-        DiscoveredPeer(
-          deviceId: dummyTask.remoteDeviceId,
-          displayName: 'Remote-Peer',
-          transportType: TransportType.lan,
-          rssi: 0,
-          lastSeen: DateTime.now(),
-        ),
-      );
-
-      // Track task in coordinator
-      // Since FileSharingCoordinator notifies transfers changed:
-      expect(orchestrator.currentState.phase, isNotNull);
-      progressCtrl.close();
-    });
-
-    group('Permission State Evaluation (Issue 3 Regression Tests)', () {
-      test('notRequested on Android enters ready phase without error', () async {
-        final caps = const SystemCapabilities(
-          platformName: 'android',
-          bluetoothState: RadioState.enabled,
-          nearbyPermission: PermissionStatus.notRequested,
-          lanState: NetworkState.lanAvailable,
+      setUp(() async {
+        localIdentity = LocalDeviceIdentity.generate(
+          displayName: 'Test-Device',
+          platform: 'android',
         );
-        final platform = _MockCapsPlatformService(caps);
-        final coordinator = CapabilityCoordinator(
-          platformService: platform,
-          lifecycleManager: AppLifecycleManager(),
-          initialCapabilities: caps,
+        mockDiscoveryService = _MockDiscoveryService(TransportType.lan);
+        final coordinator = DiscoveryCoordinator(
+          services: [mockDiscoveryService],
         );
-        final customContainer = AppContainer.standard(
+
+        container = AppContainer.standard(
           storage: InMemoryIdentityStorage(localIdentity),
-          capabilityCoordinator: coordinator,
+          discoveryCoordinator: coordinator,
         );
-        await customContainer.initialize();
-
-        expect(customContainer.orchestrator.currentState.phase, AppOperationalPhase.ready);
-        expect(customContainer.orchestrator.currentState.explicitError, AppExplicitError.none);
-        customContainer.dispose();
+        await container.initialize();
       });
 
-      test('denied on Android enters error phase with permissionRequired', () async {
-        final caps = const SystemCapabilities(
-          platformName: 'android',
-          bluetoothState: RadioState.enabled,
-          nearbyPermission: PermissionStatus.denied,
-          lanState: NetworkState.lanAvailable,
-        );
-        final platform = _MockCapsPlatformService(caps);
-        final coordinator = CapabilityCoordinator(
-          platformService: platform,
-          lifecycleManager: AppLifecycleManager(),
-          initialCapabilities: caps,
-        );
-        final customContainer = AppContainer.standard(
-          storage: InMemoryIdentityStorage(localIdentity),
-          capabilityCoordinator: coordinator,
-        );
-        await customContainer.initialize();
-
-        expect(customContainer.orchestrator.currentState.phase, AppOperationalPhase.error);
-        expect(customContainer.orchestrator.currentState.explicitError, AppExplicitError.permissionRequired);
-        customContainer.dispose();
+      tearDown(() {
+        container.dispose();
+        mockDiscoveryService.dispose();
       });
 
-      test('permanentlyDenied on Android enters error phase with permissionRequired', () async {
-        final caps = const SystemCapabilities(
-          platformName: 'android',
-          bluetoothState: RadioState.enabled,
-          nearbyPermission: PermissionStatus.permanentlyDenied,
-          lanState: NetworkState.lanAvailable,
-        );
-        final platform = _MockCapsPlatformService(caps);
-        final coordinator = CapabilityCoordinator(
-          platformService: platform,
-          lifecycleManager: AppLifecycleManager(),
-          initialCapabilities: caps,
-        );
-        final customContainer = AppContainer.standard(
-          storage: InMemoryIdentityStorage(localIdentity),
-          capabilityCoordinator: coordinator,
-        );
-        await customContainer.initialize();
-
-        expect(customContainer.orchestrator.currentState.phase, AppOperationalPhase.error);
-        expect(customContainer.orchestrator.currentState.explicitError, AppExplicitError.permissionRequired);
-        customContainer.dispose();
+      test('Initializes truthfully into ready or discovering state', () {
+        final state = container.orchestrator.currentState;
+        expect(state, isNotNull);
+        expect(state.phase, isA<AppOperationalPhase>());
+        expect(state.explicitError, isA<AppExplicitError>());
       });
 
-      test('granted on Android enters ready phase without error', () async {
-        final caps = const SystemCapabilities(
-          platformName: 'android',
-          bluetoothState: RadioState.enabled,
-          nearbyPermission: PermissionStatus.granted,
-          lanState: NetworkState.lanAvailable,
-        );
-        final platform = _MockCapsPlatformService(caps);
-        final coordinator = CapabilityCoordinator(
-          platformService: platform,
-          lifecycleManager: AppLifecycleManager(),
-          initialCapabilities: caps,
-        );
-        final customContainer = AppContainer.standard(
-          storage: InMemoryIdentityStorage(localIdentity),
-          capabilityCoordinator: coordinator,
-        );
-        await customContainer.initialize();
+      test(
+        'Reflects discovery active and peer found states truthfully',
+        () async {
+          final orchestrator = container.orchestrator;
 
-        expect(customContainer.orchestrator.currentState.phase, AppOperationalPhase.ready);
-        expect(customContainer.orchestrator.currentState.explicitError, AppExplicitError.none);
-        customContainer.dispose();
+          // Start discovery
+          await container.discoveryCoordinator.startDiscovery();
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          expect(
+            orchestrator.currentState.phase,
+            AppOperationalPhase.discovering,
+          );
+
+          // Add a discovered peer through mock service
+          final peer = DiscoveredPeer(
+            deviceId: 'aabbccddeeff00112233445566778899',
+            displayName: 'Pixel 9 Pro',
+            transportType: TransportType.lan,
+            rssi: -55,
+            lastSeen: DateTime.now(),
+          );
+
+          mockDiscoveryService.emitPeer(peer);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+
+          expect(
+            orchestrator.currentState.phase,
+            AppOperationalPhase.deviceFound,
+          );
+          expect(
+            orchestrator.currentState.discoveredPeersCount,
+            greaterThan(0),
+          );
+
+          await container.discoveryCoordinator.stopDiscovery();
+        },
+      );
+
+      test(
+        'Battery Saver state propagates truthfully into AppOrchestratorState',
+        () async {
+          final testBatteryProvider = _MockBatteryProvider(
+            initialSnapshot: BatterySnapshot(
+              batteryLevel: 42,
+              isCharging: false,
+              isBatterySaverActive: true,
+              timestamp: DateTime.now(),
+            ),
+          );
+
+          final customContainer = AppContainer.standard(
+            storage: InMemoryIdentityStorage(localIdentity),
+            batteryProvider: testBatteryProvider,
+          );
+          await customContainer.initialize();
+          await customContainer.orchestrator.refresh();
+
+          expect(
+            customContainer.orchestrator.currentState.isBatterySaverActive,
+            isTrue,
+          );
+
+          customContainer.dispose();
+        },
+      );
+
+      test(
+        'User setBatterySaverMode overrides system snapshot truthfully',
+        () async {
+          final testBatteryProvider = _MockBatteryProvider(
+            initialSnapshot: BatterySnapshot(
+              batteryLevel: 90,
+              isCharging: true,
+              isBatterySaverActive: false,
+              timestamp: DateTime.now(),
+            ),
+          );
+
+          final customContainer = AppContainer.standard(
+            storage: InMemoryIdentityStorage(localIdentity),
+            batteryProvider: testBatteryProvider,
+          );
+          await customContainer.initialize();
+
+          expect(
+            customContainer.orchestrator.currentState.isBatterySaverActive,
+            isFalse,
+          );
+
+          // User turns on Battery Saver
+          await customContainer.setBatterySaverMode(BatterySaverMode.on);
+          expect(
+            customContainer.orchestrator.currentState.isBatterySaverActive,
+            isTrue,
+          );
+          expect(
+            customContainer.discoveryCoordinator.isBatterySaverActive,
+            isTrue,
+          );
+
+          // User turns off Battery Saver
+          await customContainer.setBatterySaverMode(BatterySaverMode.off);
+          expect(
+            customContainer.orchestrator.currentState.isBatterySaverActive,
+            isFalse,
+          );
+          expect(
+            customContainer.discoveryCoordinator.isBatterySaverActive,
+            isFalse,
+          );
+
+          customContainer.dispose();
+        },
+      );
+
+      test(
+        'Maps active transfer state to transferring and completed (Section 33)',
+        () async {
+          final orchestrator = container.orchestrator;
+          final metadata = TransferMetadata(
+            transferId: 'test_transfer_orchestrator_1',
+            fileName: 'document.pdf',
+            totalBytes: 5000,
+            chunkSize: 1000,
+            sha256Checksum: '1122334455667788990011223344556677889900112233445566778899001122',
+            mimeType: 'application/pdf',
+          );
+
+          final progressCtrl = StreamController<TransferProgress>.broadcast();
+          final dummyTask = _MockTransferTask(
+            metadata: metadata,
+            progressStream: progressCtrl.stream,
+            status: TransferStatus.transferring,
+          );
+
+          container.fileSharingCoordinator.allTransfers; // access
+          // Inject task tracking
+          container.fileSharingCoordinator.rememberPeer(
+            DiscoveredPeer(
+              deviceId: dummyTask.remoteDeviceId,
+              displayName: 'Remote-Peer',
+              transportType: TransportType.lan,
+              rssi: 0,
+              lastSeen: DateTime.now(),
+            ),
+          );
+
+          // Track task in coordinator
+          // Since FileSharingCoordinator notifies transfers changed:
+          expect(orchestrator.currentState.phase, isNotNull);
+          progressCtrl.close();
+        },
+      );
+
+      group('Permission State Evaluation (Issue 3 Regression Tests)', () {
+        test(
+          'notRequested on Android enters ready phase without error',
+          () async {
+            final caps = const SystemCapabilities(
+              platformName: 'android',
+              bluetoothState: RadioState.enabled,
+              nearbyPermission: PermissionStatus.notRequested,
+              lanState: NetworkState.lanAvailable,
+            );
+            final platform = _MockCapsPlatformService(caps);
+            final coordinator = CapabilityCoordinator(
+              platformService: platform,
+              lifecycleManager: AppLifecycleManager(),
+              initialCapabilities: caps,
+            );
+            final customContainer = AppContainer.standard(
+              storage: InMemoryIdentityStorage(localIdentity),
+              capabilityCoordinator: coordinator,
+            );
+            await customContainer.initialize();
+
+            expect(
+              customContainer.orchestrator.currentState.phase,
+              AppOperationalPhase.ready,
+            );
+            expect(
+              customContainer.orchestrator.currentState.explicitError,
+              AppExplicitError.none,
+            );
+            customContainer.dispose();
+          },
+        );
+
+        test(
+          'denied on Android enters error phase with permissionRequired',
+          () async {
+            final caps = const SystemCapabilities(
+              platformName: 'android',
+              bluetoothState: RadioState.enabled,
+              nearbyPermission: PermissionStatus.denied,
+              lanState: NetworkState.lanAvailable,
+            );
+            final platform = _MockCapsPlatformService(caps);
+            final coordinator = CapabilityCoordinator(
+              platformService: platform,
+              lifecycleManager: AppLifecycleManager(),
+              initialCapabilities: caps,
+            );
+            final customContainer = AppContainer.standard(
+              storage: InMemoryIdentityStorage(localIdentity),
+              capabilityCoordinator: coordinator,
+            );
+            await customContainer.initialize();
+
+            expect(
+              customContainer.orchestrator.currentState.phase,
+              AppOperationalPhase.error,
+            );
+            expect(
+              customContainer.orchestrator.currentState.explicitError,
+              AppExplicitError.permissionRequired,
+            );
+            customContainer.dispose();
+          },
+        );
+
+        test('permanentlyDenied on Android enters error phase with permissionRequired', () async {
+          final caps = const SystemCapabilities(
+            platformName: 'android',
+            bluetoothState: RadioState.enabled,
+            nearbyPermission: PermissionStatus.permanentlyDenied,
+            lanState: NetworkState.lanAvailable,
+          );
+          final platform = _MockCapsPlatformService(caps);
+          final coordinator = CapabilityCoordinator(
+            platformService: platform,
+            lifecycleManager: AppLifecycleManager(),
+            initialCapabilities: caps,
+          );
+          final customContainer = AppContainer.standard(
+            storage: InMemoryIdentityStorage(localIdentity),
+            capabilityCoordinator: coordinator,
+          );
+          await customContainer.initialize();
+
+          expect(
+            customContainer.orchestrator.currentState.phase,
+            AppOperationalPhase.error,
+          );
+          expect(
+            customContainer.orchestrator.currentState.explicitError,
+            AppExplicitError.permissionRequired,
+          );
+          customContainer.dispose();
+        });
+
+        test('granted on Android enters ready phase without error', () async {
+          final caps = const SystemCapabilities(
+            platformName: 'android',
+            bluetoothState: RadioState.enabled,
+            nearbyPermission: PermissionStatus.granted,
+            lanState: NetworkState.lanAvailable,
+          );
+          final platform = _MockCapsPlatformService(caps);
+          final coordinator = CapabilityCoordinator(
+            platformService: platform,
+            lifecycleManager: AppLifecycleManager(),
+            initialCapabilities: caps,
+          );
+          final customContainer = AppContainer.standard(
+            storage: InMemoryIdentityStorage(localIdentity),
+            capabilityCoordinator: coordinator,
+          );
+          await customContainer.initialize();
+
+          expect(
+            customContainer.orchestrator.currentState.phase,
+            AppOperationalPhase.ready,
+          );
+          expect(
+            customContainer.orchestrator.currentState.explicitError,
+            AppExplicitError.none,
+          );
+          customContainer.dispose();
+        });
+
+        test('Desktop / Windows with notRequired stays ready without Android permission error', () async {
+          final caps = const SystemCapabilities(
+            platformName: 'windows',
+            bluetoothState: RadioState.enabled,
+            nearbyPermission: PermissionStatus.notRequired,
+            lanState: NetworkState.lanAvailable,
+          );
+          final platform = _MockCapsPlatformService(caps);
+          final coordinator = CapabilityCoordinator(
+            platformService: platform,
+            lifecycleManager: AppLifecycleManager(),
+            initialCapabilities: caps,
+          );
+          final customContainer = AppContainer.standard(
+            storage: InMemoryIdentityStorage(localIdentity),
+            capabilityCoordinator: coordinator,
+          );
+          await customContainer.initialize();
+
+          expect(
+            customContainer.orchestrator.currentState.phase,
+            AppOperationalPhase.ready,
+          );
+          expect(
+            customContainer.orchestrator.currentState.explicitError,
+            AppExplicitError.none,
+          );
+          customContainer.dispose();
+        });
       });
-
-      test('Desktop / Windows with notRequired stays ready without Android permission error', () async {
-        final caps = const SystemCapabilities(
-          platformName: 'windows',
-          bluetoothState: RadioState.enabled,
-          nearbyPermission: PermissionStatus.notRequired,
-          lanState: NetworkState.lanAvailable,
-        );
-        final platform = _MockCapsPlatformService(caps);
-        final coordinator = CapabilityCoordinator(
-          platformService: platform,
-          lifecycleManager: AppLifecycleManager(),
-          initialCapabilities: caps,
-        );
-        final customContainer = AppContainer.standard(
-          storage: InMemoryIdentityStorage(localIdentity),
-          capabilityCoordinator: coordinator,
-        );
-        await customContainer.initialize();
-
-        expect(customContainer.orchestrator.currentState.phase, AppOperationalPhase.ready);
-        expect(customContainer.orchestrator.currentState.explicitError, AppExplicitError.none);
-        customContainer.dispose();
-      });
-    });
-  });
+    },
+  );
 }
 
 class _MockDiscoveryService implements DiscoveryService {

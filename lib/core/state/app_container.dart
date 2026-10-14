@@ -9,6 +9,7 @@ import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/core/constants/app_paths.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -20,7 +21,14 @@ import 'package:vayu/core/identity/identity_storage.dart';
 import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/nfc_pairing_service.dart';
+import 'package:vayu/core/security/aead_cipher.dart';
 import 'package:vayu/core/security/crypto_service.dart';
+import 'package:vayu/core/security/trust_record_storage.dart';
+import 'package:vayu/core/pairing/local_hotspot_service.dart';
+import 'package:vayu/core/pairing/pairing_coordinator.dart';
+import 'package:vayu/platform/android_nfc_adapter.dart';
+import 'package:vayu/platform/contact_picker.dart';
+import 'package:vayu/platform/android_secure_key_store.dart';
 import 'package:vayu/core/security/peer_trust_store.dart';
 import 'package:vayu/core/security/secure_key_store.dart';
 import 'package:vayu/core/battery/battery_snapshot.dart';
@@ -35,9 +43,14 @@ import 'package:vayu/core/contracts/storage_contract.dart';
 import 'package:vayu/core/file/system_file_picker_service.dart';
 import 'package:vayu/core/file/system_storage_service.dart';
 import 'package:vayu/core/session/session_lifecycle_policy.dart';
+import 'package:vayu/core/contracts/transfer_keep_alive_contract.dart';
+import 'package:vayu/core/transfer/transfer_keep_alive_controller.dart';
+import 'package:vayu/platform/android_transfer_keep_alive.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/core/transfer/file_sharing_coordinator.dart';
 import 'package:vayu/core/transfer/transfer_engine_impl.dart';
+import 'package:vayu/core/transfer/transfer_history.dart';
+import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/core/transport/smart_transport_selector_impl.dart';
 import 'package:vayu/domain/identity/device_capabilities.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
@@ -47,7 +60,7 @@ import 'package:vayu/domain/security/crypto_identity_keypair.dart';
 import 'package:vayu/platform/platform_service.dart';
 import 'package:vayu/platform/system_platform_service.dart';
 
-/// Central dependency and service container for SiloSend core primitives.
+/// Central dependency and service container for Vayu core primitives.
 ///
 /// Unifies identity management, platform capabilities, lifecycle management,
 /// peer discovery, transport connections, and pairing into a cohesive,
@@ -87,12 +100,15 @@ class AppContainer {
   PeerTrustStore? _peerTrustStore;
   SecureSessionManager? _secureSessionManager;
   TransferEngine? _transferEngine;
+  TransferHistory? _transferHistory;
   BatteryStateProvider? _batteryProvider;
   TransportSelector? _transportSelector;
   FilePickerService? _filePickerService;
   StorageService? _storageService;
   SessionLifecyclePolicy? _sessionLifecyclePolicy;
   FileSharingCoordinator? _fileSharingCoordinator;
+  PairingCoordinator? _pairingCoordinator;
+  LocalHotspotService? _hotspotService;
   AppOrchestrator? _orchestrator;
 
   UserSettings _userSettings = const UserSettings();
@@ -418,9 +434,34 @@ class AppContainer {
     return _transferEngine!;
   }
 
-  /// Reactive stream of incoming transfer offers from remote peers.
+  /// Incoming single-file offers that need the user's decision. Files from a
+  /// batch the user already accepted are handled by the coordinator instead.
   Stream<IncomingTransferRequest> get incomingTransferRequests =>
-      transferEngine.incomingTransferRequests;
+      _fileSharingCoordinator?.incomingRequests ?? const Stream.empty();
+
+  /// Incoming multi-file offers, answered once for the whole batch.
+  Stream<IncomingBatchRequest> get incomingBatchRequests =>
+      _fileSharingCoordinator?.incomingBatchRequests ?? const Stream.empty();
+
+  /// Finished transfers kept across restarts (empty before initialize()).
+  List<TransferHistoryRecord> get transferHistory =>
+      _transferHistory?.records ?? const [];
+
+  /// Removes one entry from the history.
+  Future<void> removeFromHistory(String transferId) async {
+    await _transferHistory?.remove(transferId);
+  }
+
+  /// Empties the history (files already saved are not touched).
+  Future<void> clearHistory() async {
+    await _transferHistory?.clear();
+  }
+
+  /// Timings of the most recent transfers (Diagnostics), if available.
+  TransferStatsLog? get transferStatsLog {
+    final engine = _transferEngine;
+    return engine is TransferEngineImpl ? engine.statsLog : null;
+  }
 
   /// Currently active transfer tasks (both outbound and inbound).
   List<TransferTask> get activeTransfers =>
@@ -477,6 +518,20 @@ class AppContainer {
   }
 
   /// End-to-end file sharing coordinator (Phase 9).
+  /// QR / link / NFC pairing shared by every out-of-band flow.
+  PairingCoordinator get pairingCoordinator {
+    if (_pairingCoordinator == null) {
+      throw StateError(
+        'PairingCoordinator accessed before AppContainer.initialize()',
+      );
+    }
+    return _pairingCoordinator!;
+  }
+
+  /// Phone-to-phone Wi-Fi (local-only hotspot) host and joiner.
+  LocalHotspotService get hotspotService =>
+      _hotspotService ?? const UnsupportedHotspotService();
+
   FileSharingCoordinator get fileSharingCoordinator {
     if (_fileSharingCoordinator == null) {
       throw StateError(
@@ -634,13 +689,35 @@ class AppContainer {
       } else {
         _nfcPairingService = NfcPairingService(
           platformService: platformService,
+          platformAdapter: Platform.isAndroid && !_isTestEnvironment
+              ? AndroidNfcPlatformAdapter()
+              : null,
         );
       }
 
       // 9. Initialize Cryptographic Security Primitives & Secure Session Manager (Phase 6)
-      _cryptoService = _injectedCryptoService ?? CryptoService();
-      _secureKeyStore = _injectedSecureKeyStore ?? InMemorySecureKeyStore();
-      _peerTrustStore = _injectedPeerTrustStore ?? PeerTrustStore();
+      _cryptoService =
+          _injectedCryptoService ??
+          CryptoService(aead: Platform.isAndroid ? PlatformAeadCipher() : null);
+      // Identity keys persist only on Android (Keystore-wrapped). Trust records
+      // persist only alongside them: remembering a peer whose own key cannot
+      // survive a restart would turn every restart into a key conflict.
+      final persistentIdentity = Platform.isAndroid && !_isTestEnvironment;
+      _secureKeyStore =
+          _injectedSecureKeyStore ??
+          (persistentIdentity
+              ? const AndroidSecureKeyStore()
+              : InMemorySecureKeyStore());
+      _peerTrustStore =
+          _injectedPeerTrustStore ??
+          PeerTrustStore(
+            storage: persistentIdentity
+                ? FileTrustRecordStorage(
+                    File('${AppPaths.androidFilesDir}/peer_trust.json'),
+                  )
+                : null,
+          );
+      await _peerTrustStore!.load();
 
       if (_injectedSecureSessionManager != null) {
         _secureSessionManager = _injectedSecureSessionManager;
@@ -693,6 +770,14 @@ class AppContainer {
               await disconnectSession(sessionId, reason: reason);
             },
           );
+      _transferHistory = TransferHistory(
+        Platform.isAndroid && !_isTestEnvironment
+            ? FileTransferHistoryStorage(
+                File('${AppPaths.androidFilesDir}/transfer_history.json'),
+              )
+            : InMemoryTransferHistoryStorage(),
+      );
+      await _transferHistory!.load();
       _fileSharingCoordinator =
           _injectedFileSharingCoordinator ??
           FileSharingCoordinator(
@@ -702,7 +787,35 @@ class AppContainer {
             storageService: _storageService!,
             secureSessionManager: _secureSessionManager!,
             sessionLifecyclePolicy: _sessionLifecyclePolicy!,
+            contactDirectory: Platform.isAndroid && !_isTestEnvironment
+                ? const ContactPicker().privateDirectory
+                : null,
+            history: _transferHistory,
+            keepAliveController: TransferKeepAliveController(
+              keepAlive: Platform.isAndroid
+                  ? const AndroidTransferKeepAlive()
+                  : const NoopTransferKeepAlive(),
+            ),
           );
+
+      _hotspotService = Platform.isAndroid && !_isTestEnvironment
+          ? AndroidHotspotService()
+          : const UnsupportedHotspotService();
+      _pairingCoordinator = PairingCoordinator(
+        identity: () => identity,
+        lanPort: () => _lanServer?.boundPort,
+        localPublicKeyHex: () =>
+            _secureSessionManager?.localKeypair?.publicKeyHex,
+        supportsBle: () => _capabilities.supportsBle,
+        discoveryCoordinator: _discoveryCoordinator!,
+        secureSessionManager: _secureSessionManager!,
+        transportSelector: _transportSelector!,
+        fileSharingCoordinator: _fileSharingCoordinator!,
+        hotspot: _hotspotService!,
+        activeSessionCount: () =>
+            _connectionManager?.activeSessions.length ?? 0,
+        sessionChanges: _connectionManager?.activeSessionsStream,
+      );
 
       // 13. Initialize Central Application Orchestrator (Track C: U1–U8)
       _orchestrator = AppOrchestrator(
@@ -772,6 +885,17 @@ class AppContainer {
     _systemCapabilities = caps;
     if (!_capabilitiesController.isClosed) {
       _capabilitiesController.add(caps);
+    }
+
+    // The GATT server cannot start before Nearby Devices permission is granted,
+    // which often happens after launch; retry once BLE becomes usable.
+    final bleServer = _bleServer;
+    if (bleServer != null && !bleServer.isRunning && caps.canUseBle) {
+      try {
+        await bleServer.start();
+      } catch (e) {
+        AppLogger.warning('AppContainer', 'BLE GATT server retry failed: $e');
+      }
     }
 
     if (_discoveryCoordinator != null &&
@@ -903,6 +1027,10 @@ class AppContainer {
     _sessionLifecyclePolicy = null;
     _fileSharingCoordinator?.dispose();
     _fileSharingCoordinator = null;
+    _pairingCoordinator = null;
+    if (_hotspotService?.isHosting ?? false) {
+      _hotspotService?.stop();
+    }
     _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
@@ -937,6 +1065,15 @@ class AppContainer {
   }
 
   /// Updates user Battery Saver mode and adjusts discovery duty cycles accordingly.
+  /// Persists the appearance preference; the app root rebuilds from [userSettingsStream].
+  Future<void> setThemePreference(AppThemePreference preference) async {
+    _userSettings = _userSettings.copyWith(themePreference: preference);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+  }
+
   Future<void> setBatterySaverMode(BatterySaverMode mode) async {
     _userSettings = _userSettings.copyWith(batterySaverMode: mode);
     await settingsStorage.saveSettings(_userSettings);
@@ -975,6 +1112,15 @@ class AppContainer {
   }
 
   /// Resolves standard platform storage file without external dependencies.
+  static bool get _isTestEnvironment {
+    try {
+      return Platform.environment.containsKey('FLUTTER_TEST') ||
+          WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    } catch (_) {
+      return false;
+    }
+  }
+
   static IdentityStorage _createDefaultFileStorage() {
     try {
       if (Platform.environment.containsKey('FLUTTER_TEST') ||
@@ -983,9 +1129,7 @@ class AppContainer {
       }
       File file;
       if (Platform.isAndroid) {
-        final dir = Directory(
-          '/data/user/0/${AppConstants.applicationId}/files',
-        );
+        final dir = Directory(AppPaths.androidFilesDir);
         file = File('${dir.path}/device_identity.json');
       } else if (Platform.isWindows) {
         final appData =
@@ -1018,9 +1162,7 @@ class AppContainer {
       }
       File file;
       if (Platform.isAndroid) {
-        final dir = Directory(
-          '/data/user/0/${AppConstants.applicationId}/files',
-        );
+        final dir = Directory(AppPaths.androidFilesDir);
         file = File('${dir.path}/user_settings.json');
       } else if (Platform.isWindows) {
         final appData =

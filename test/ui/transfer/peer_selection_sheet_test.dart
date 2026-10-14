@@ -63,10 +63,7 @@ void main() {
       expect(find.text('Send To Nearby Device'), findsOneWidget);
 
       // Initially no peers -> shows empty searching state
-      expect(
-        find.text('Looking for nearby Vayu devices...'),
-        findsOneWidget,
-      );
+      expect(find.text('Looking for nearby Vayu devices...'), findsOneWidget);
 
       // Ingest remote peer
       container.discoveryCoordinator.ingestPeerForTesting(

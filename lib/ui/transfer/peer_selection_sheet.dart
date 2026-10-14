@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -22,7 +24,8 @@ class PeerSelectionSheet extends StatefulWidget {
     List<SelectedDocument>? documents,
     required this.container,
   }) : documents =
-           documents ?? (document != null ? [document] : const <SelectedDocument>[]);
+           documents ??
+           (document != null ? [document] : const <SelectedDocument>[]);
 
   /// Shows the peer selection bottom sheet.
   static Future<void> show(
@@ -63,7 +66,8 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
       duration: const Duration(milliseconds: 1400),
     );
 
-    final isTesting = Platform.environment.containsKey('FLUTTER_TEST') ||
+    final isTesting =
+        Platform.environment.containsKey('FLUTTER_TEST') ||
         WidgetsBinding.instance.runtimeType.toString().contains('Test');
     if (!isTesting) {
       _pulseController.repeat(reverse: true);
@@ -433,7 +437,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                         Icon(
                           Icons.verified_rounded,
                           size: 15,
-                          color: Colors.green.shade700,
+                          color: VayuPalette.fromTheme(theme).success,
                         ),
                       ],
                     ],
@@ -502,15 +506,16 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
 
     try {
       if (widget.documents.length > 1) {
+        // The transfer screen follows this peer's files one by one.
         if (mounted) {
           navigator.pop(); // Close bottom sheet
         }
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(
-              'Sending ${widget.documents.length} files to ${peer.displayName}...',
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => TransferDetailPage(
+              container: widget.container,
+              peerDeviceId: peer.deviceId,
             ),
-            duration: const Duration(seconds: 3),
           ),
         );
         await widget.container.fileSharingCoordinator.sendFilesToPeer(
@@ -519,22 +524,20 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
         );
       } else {
         // Initiate outbound single file transfer
-        final task = await widget.container.fileSharingCoordinator.sendFileToPeer(
-          peer,
-          preselectedDoc: widget.document,
-        );
+        final task = await widget.container.fileSharingCoordinator
+            .sendFileToPeer(peer, preselectedDoc: widget.document);
 
         if (mounted) {
           navigator.pop(); // Close bottom sheet
         }
 
         if (task != null) {
-          messenger.showSnackBar(
-            SnackBar(
-              content: Text(
-                'Sending "${widget.document.name}" to ${peer.displayName}...',
+          navigator.push(
+            MaterialPageRoute(
+              builder: (_) => TransferDetailPage(
+                container: widget.container,
+                transferId: task.transferId,
               ),
-              duration: const Duration(seconds: 3),
             ),
           );
         }
@@ -548,7 +551,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
         messenger.showSnackBar(
           SnackBar(
             content: Text('Send failed: $e'),
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: VayuPalette.of(context).danger,
           ),
         );
       }

@@ -12,16 +12,64 @@ abstract class BleTransportAdapter {
   Future<void> disconnect(String connectionId);
 }
 
+/// Optional adapter capability for outbound links: per-link native events and
+/// the MTU negotiated during connect.
+abstract class BleClientEventSource {
+  /// Native events (data, mtuChanged, disconnected) for one outbound link.
+  Stream<Map<String, dynamic>> clientEvents(String connectionId);
+
+  /// ATT MTU negotiated while connecting, if known.
+  int? negotiatedMtu(String connectionId);
+}
+
+/// Single subscription to the native BLE event channel, shared by every listener.
+///
+/// The native side keeps one event sink, so a second receiveBroadcastStream()
+/// call would silently replace the first listener. Client links and the GATT
+/// server therefore filter this one stream by the event's "role".
+class BlePlatformEvents {
+  static const EventChannel _channel = EventChannel(
+    'com.achyrio.vayu/ble_connection_events',
+  );
+  static Stream<Map<String, dynamic>>? _stream;
+
+  static Stream<Map<String, dynamic>> get stream => _stream ??= _channel
+      .receiveBroadcastStream()
+      .where((e) => e is Map)
+      .map((e) => Map<String, dynamic>.from(e as Map))
+      .asBroadcastStream();
+}
+
 /// Default implementation delegating to the native Flutter platform MethodChannel.
-class PlatformBleTransportAdapter implements BleTransportAdapter {
+class PlatformBleTransportAdapter
+    implements BleTransportAdapter, BleClientEventSource {
   static const MethodChannel _channel = MethodChannel(
     'com.achyrio.vayu/ble_connection',
   );
+  static final Map<String, int> _mtus = {};
 
+  /// Completes only when the native link is fully ready: MTU negotiated,
+  /// services discovered and the peer's TX notifications subscribed.
   @override
   Future<void> connect(String address, {int mtu = 512}) async {
-    await _channel.invokeMethod('connect', {'address': address, 'mtu': mtu});
+    final result = await _channel.invokeMapMethod<String, dynamic>('connect', {
+      'address': address,
+      'mtu': mtu,
+    });
+    final negotiated = (result?['mtu'] as num?)?.toInt();
+    if (negotiated != null) {
+      _mtus['ble_$address'] = negotiated;
+    }
   }
+
+  @override
+  int? negotiatedMtu(String connectionId) => _mtus[connectionId];
+
+  @override
+  Stream<Map<String, dynamic>> clientEvents(String connectionId) =>
+      BlePlatformEvents.stream.where(
+        (e) => e['role'] == 'client' && e['connectionId'] == connectionId,
+      );
 
   @override
   Future<void> sendChunk(String connectionId, Uint8List chunk) async {
@@ -59,14 +107,44 @@ class BleConnection implements TransportConnection {
   int _bytesSent = 0;
   int _bytesReceived = 0;
   final DateTime _connectedAt = DateTime.now();
+  StreamSubscription<Map<String, dynamic>>? _linkEventsSubscription;
 
+  /// [linkEvents] feeds an outbound link its own native events. Accepted
+  /// server-side links leave it null because [BleConnectionServer] routes them.
   BleConnection({
     required this.connectionId,
     required this.remoteAddress,
     int initialMtu = BlePacketSlicer.defaultAttMtu,
     BleTransportAdapter? adapter,
+    Stream<Map<String, dynamic>>? linkEvents,
   }) : _currentMtu = initialMtu,
-       _adapter = adapter ?? PlatformBleTransportAdapter();
+       _adapter = adapter ?? PlatformBleTransportAdapter() {
+    _linkEventsSubscription = linkEvents?.listen(
+      _handleLinkEvent,
+      onError: (Object e) =>
+          handlePeerDisconnected('BLE event stream error: $e'),
+    );
+  }
+
+  void _handleLinkEvent(Map<String, dynamic> event) {
+    switch (event['type']) {
+      case 'data':
+        final data = event['data'];
+        if (data is Uint8List) {
+          handleIncomingBytes(data);
+        } else if (data is List) {
+          handleIncomingBytes(Uint8List.fromList(List<int>.from(data)));
+        }
+        break;
+      case 'mtuChanged':
+        final mtu = (event['mtu'] as num?)?.toInt();
+        if (mtu != null) handleMtuChanged(mtu);
+        break;
+      case 'disconnected':
+        handlePeerDisconnected(event['reason'] as String?);
+        break;
+    }
+  }
 
   /// Connects to a remote BLE GATT server and returns an active [BleConnection].
   static Future<BleConnection> connect(
@@ -77,23 +155,37 @@ class BleConnection implements TransportConnection {
   }) async {
     final effectiveAdapter = adapter ?? PlatformBleTransportAdapter();
     final connectionId = 'ble_$remoteAddress';
+    final eventSource = effectiveAdapter is BleClientEventSource
+        ? effectiveAdapter as BleClientEventSource
+        : null;
 
-    await effectiveAdapter
-        .connect(remoteAddress, mtu: requestedMtu)
-        .timeout(
-          timeout,
-          onTimeout: () {
-            throw TimeoutException(
-              'Timed out connecting to BLE peer at $remoteAddress',
-            );
-          },
-        );
+    try {
+      await effectiveAdapter
+          .connect(remoteAddress, mtu: requestedMtu)
+          .timeout(
+            timeout,
+            onTimeout: () {
+              throw TimeoutException(
+                'Timed out connecting to BLE peer at $remoteAddress',
+              );
+            },
+          );
+    } catch (_) {
+      // Release the half-open native link so a retry can start cleanly.
+      try {
+        await effectiveAdapter.disconnect(connectionId);
+      } catch (_) {}
+      rethrow;
+    }
 
+    // Subscribing after connect is safe: the peer only notifies in reply to
+    // our first write, and a failure during setup surfaces as a connect error.
     return BleConnection(
       connectionId: connectionId,
       remoteAddress: remoteAddress,
-      initialMtu: requestedMtu,
+      initialMtu: eventSource?.negotiatedMtu(connectionId) ?? requestedMtu,
       adapter: effectiveAdapter,
+      linkEvents: eventSource?.clientEvents(connectionId),
     );
   }
 
@@ -145,6 +237,7 @@ class BleConnection implements TransportConnection {
   /// Handles peer disconnection event emitted from the native platform.
   void handlePeerDisconnected(String? reason) {
     if (_state == ConnectionState.disconnected) return;
+    _linkEventsSubscription?.cancel();
     _state = ConnectionState.disconnected;
     _disconnectReason = reason ?? 'BLE GATT disconnected by peer';
     if (!_incomingController.isClosed) {
@@ -189,6 +282,7 @@ class BleConnection implements TransportConnection {
 
     _state = ConnectionState.disconnecting;
     _disconnectReason = reason ?? 'Connection closed';
+    await _linkEventsSubscription?.cancel();
 
     try {
       await _adapter.disconnect(connectionId);

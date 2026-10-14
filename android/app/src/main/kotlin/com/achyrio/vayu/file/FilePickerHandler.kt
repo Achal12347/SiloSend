@@ -3,20 +3,15 @@ package com.achyrio.vayu.file
 import android.app.Activity
 import android.content.Intent
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import java.io.FileInputStream
-import java.nio.ByteBuffer
-import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Handles document picking and stream-based reading via Android Storage Access Framework (SAF).
+ * Handles document picking via the Android Storage Access Framework (SAF).
  *
- * Implements random-access chunk reads over [ParcelFileDescriptor] without forcing raw filesystem
- * paths or copying large files into cache.
+ * Reading picked documents lives in [FileIoHandler], which runs off the main thread.
  */
 class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
     companion object {
@@ -27,7 +22,6 @@ class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCa
     private var channel: MethodChannel? = null
     private var pendingResult: MethodChannel.Result? = null
     private var isMultipleSelection: Boolean = false
-    private val openDescriptors = ConcurrentHashMap<String, ParcelFileDescriptor>()
 
     fun register(messenger: BinaryMessenger) {
         channel = MethodChannel(messenger, CHANNEL)
@@ -37,7 +31,6 @@ class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCa
     fun unregister() {
         channel?.setMethodCallHandler(null)
         channel = null
-        closeAllDescriptors()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -63,49 +56,6 @@ class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCa
                     pendingResult = null
                     result.error("PICK_FAILED", "Failed to launch document picker: ${e.message}", null)
                 }
-            }
-            "readChunk" -> {
-                val uriString = call.argument<String>("uri")
-                val offset = (call.argument<Number>("offset") ?: 0L).toLong()
-                val length = (call.argument<Number>("length") ?: 0).toInt()
-
-                if (uriString == null) {
-                    result.error("INVALID_ARGS", "Missing URI parameter", null)
-                    return
-                }
-
-                try {
-                    val uri = Uri.parse(uriString)
-                    val pfd = openDescriptors.computeIfAbsent(uriString) {
-                        activity.contentResolver.openFileDescriptor(uri, "r")
-                            ?: throw IllegalArgumentException("Cannot open descriptor for $uriString")
-                    }
-
-                    val channel = FileInputStream(pfd.fileDescriptor).channel
-                    channel.position(offset)
-                    val buffer = ByteBuffer.allocate(length)
-                    val bytesRead = channel.read(buffer)
-
-                    if (bytesRead <= 0) {
-                        result.success(ByteArray(0))
-                    } else {
-                        val output = if (bytesRead == length) {
-                            buffer.array()
-                        } else {
-                            buffer.array().copyOf(bytesRead)
-                        }
-                        result.success(output)
-                    }
-                } catch (e: Exception) {
-                    result.error("READ_FAILED", "Failed to read chunk at offset $offset: ${e.message}", null)
-                }
-            }
-            "closeFile" -> {
-                val uriString = call.argument<String>("uri")
-                if (uriString != null) {
-                    openDescriptors.remove(uriString)?.close()
-                }
-                result.success(null)
             }
             else -> result.notImplemented()
         }
@@ -207,12 +157,4 @@ class FilePickerHandler(private val activity: Activity) : MethodChannel.MethodCa
         return true
     }
 
-    private fun closeAllDescriptors() {
-        for ((_, pfd) in openDescriptors) {
-            try {
-                pfd.close()
-            } catch (_: Exception) {}
-        }
-        openDescriptors.clear()
-    }
 }

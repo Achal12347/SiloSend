@@ -2,11 +2,13 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/battery/battery_snapshot.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
+import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
 
 /// Diagnostics & Live Telemetry Screen (UI11 & Section 32).
@@ -106,13 +108,12 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       Platform.operatingSystem.toUpperCase(),
                       isOk: Platform.isAndroid,
                     ),
-                    _buildRow(
-                      'OS Version',
-                      Platform.operatingSystemVersion,
-                    ),
+                    _buildRow('OS Version', Platform.operatingSystemVersion),
                     _buildRow(
                       'Platform Status',
-                      Platform.isAndroid ? 'Supported' : 'Non-Android (Limited)',
+                      Platform.isAndroid
+                          ? 'Supported'
+                          : 'Non-Android (Limited)',
                       isOk: Platform.isAndroid,
                     ),
                   ]),
@@ -201,7 +202,8 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       caps.locationRequiredForBle
                           ? (caps.locationEnabled ? 'ENABLED' : 'DISABLED')
                           : 'NOT REQUIRED',
-                      isOk: !caps.locationRequiredForBle || caps.locationEnabled,
+                      isOk:
+                          !caps.locationRequiredForBle || caps.locationEnabled,
                     ),
                     _buildRow(
                       'Wi-Fi Radio',
@@ -211,7 +213,10 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                   ]),
                   const SizedBox(height: 16),
 
-                  _buildSectionHeader(theme, 'Security & Cryptographic Identity'),
+                  _buildSectionHeader(
+                    theme,
+                    'Security & Cryptographic Identity',
+                  ),
                   _buildCard(theme, [
                     _buildRow(
                       'Local Device ID',
@@ -252,16 +257,16 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       'Power Status',
                       _batterySnapshot.isCharging != null
                           ? (_batterySnapshot.isCharging!
-                              ? 'Charging / Plugged in'
-                              : 'Discharging')
+                                ? 'Charging / Plugged in'
+                                : 'Discharging')
                           : 'Unknown',
                     ),
                     _buildRow(
                       'Android Power Saver',
                       _batterySnapshot.isBatterySaverActive != null
                           ? (_batterySnapshot.isBatterySaverActive!
-                              ? 'Active'
-                              : 'Inactive')
+                                ? 'Active'
+                                : 'Inactive')
                           : 'Unknown',
                     ),
                     _buildRow(
@@ -297,6 +302,16 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       isOk: orchState.explicitError == AppExplicitError.none,
                     ),
                   ]),
+                  const SizedBox(height: 16),
+
+                  _buildSectionHeader(theme, 'Recent Transfer Speed'),
+                  _buildCard(theme, [
+                    if (container.transferStatsLog?.recent.isEmpty ?? true)
+                      _buildRow('Measurements', 'No finished transfers yet')
+                    else
+                      for (final stats in container.transferStatsLog!.recent)
+                        _buildSpeedEntry(theme, stats),
+                  ]),
                   const SizedBox(height: 24),
                 ],
               );
@@ -304,6 +319,25 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
           );
         },
       ),
+    );
+  }
+
+  // Sizes and timings only; never file names.
+  Widget _buildSpeedEntry(ThemeData theme, TransferStats stats) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildRow(
+          '${stats.outbound ? 'Sent' : 'Received'} '
+              '${(stats.bytes / 1e6).toStringAsFixed(1)} MB',
+          '${stats.megabytesPerSecond.toStringAsFixed(1)} MB/s',
+          isOk: stats.succeeded ? null : false,
+        ),
+        SelectableText(
+          stats.summary(),
+          style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+        ),
+      ],
     );
   }
 
@@ -323,14 +357,6 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
 
   Widget _buildCard(ThemeData theme, List<Widget> children) {
     return Card(
-      elevation: 0,
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
       child: Padding(
         padding: const EdgeInsets.all(12.0),
         child: Column(
@@ -347,11 +373,12 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
   }
 
   Widget _buildRow(String label, String value, {bool? isOk}) {
+    final theme = Theme.of(context);
     Color? valColor;
     if (isOk == true) {
-      valColor = Colors.green.shade700;
+      valColor = VayuPalette.fromTheme(theme).success;
     } else if (isOk == false) {
-      valColor = Colors.orange.shade800;
+      valColor = VayuPalette.fromTheme(theme).warning;
     }
 
     return Padding(
@@ -394,16 +421,30 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     final buffer = StringBuffer();
     buffer.writeln('# Vayu Diagnostics Report');
     buffer.writeln('- Timestamp: ${DateTime.now().toIso8601String()}');
-    buffer.writeln('- OS: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})');
+    buffer.writeln(
+      '- OS: ${Platform.operatingSystem} (${Platform.operatingSystemVersion})',
+    );
     buffer.writeln('- Device ID: ${container.identity?.idHex ?? "Unknown"}');
-    buffer.writeln('- Display Name: ${container.identity?.displayName ?? "Unknown"}');
-    buffer.writeln('- Public Key Fingerprint: ${container.localKeypair?.publicKeyHex.substring(0, 16) ?? "None"}...');
+    buffer.writeln(
+      '- Display Name: ${container.identity?.displayName ?? "Unknown"}',
+    );
+    buffer.writeln(
+      '- Public Key Fingerprint: ${container.localKeypair?.publicKeyHex.substring(0, 16) ?? "None"}...',
+    );
     buffer.writeln('- Bluetooth: ${caps.bluetoothState.name}');
-    buffer.writeln('- LAN: ${caps.lanState.name} (Port: ${container.lanServer?.boundPort ?? 53531})');
+    buffer.writeln(
+      '- LAN: ${caps.lanState.name} (Port: ${container.lanServer?.boundPort ?? 53531})',
+    );
     buffer.writeln('- NFC: ${container.capabilities.nfc.name}');
-    buffer.writeln('- Permissions: nearby=${caps.nearbyPermission.name}, locationRequired=${caps.locationRequiredForBle}, locationEnabled=${caps.locationEnabled}');
-    buffer.writeln('- Battery: level=${_batterySnapshot.batteryLevel}%, charging=${_batterySnapshot.isCharging}, saver=${_batterySnapshot.isBatterySaverActive}');
-    buffer.writeln('- Vayu Battery Mode: ${container.userSettings.batterySaverMode.displayName}');
+    buffer.writeln(
+      '- Permissions: nearby=${caps.nearbyPermission.name}, locationRequired=${caps.locationRequiredForBle}, locationEnabled=${caps.locationEnabled}',
+    );
+    buffer.writeln(
+      '- Battery: level=${_batterySnapshot.batteryLevel}%, charging=${_batterySnapshot.isCharging}, saver=${_batterySnapshot.isBatterySaverActive}',
+    );
+    buffer.writeln(
+      '- Vayu Battery Mode: ${container.userSettings.batterySaverMode.displayName}',
+    );
     buffer.writeln('- Operational Phase: ${orch.phase.name}');
     buffer.writeln('- Explicit Error: ${orch.explicitError.name}');
 

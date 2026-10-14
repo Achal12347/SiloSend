@@ -64,20 +64,23 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      // 1. Header Branding & Connectivity Chip
+      // 1. Header branding and live readiness on the hero
       expect(find.text('Vayu'), findsOneWidget);
-      expect(find.text('Wi-Fi + BLE'), findsOneWidget);
+      expect(find.text('Ready · Wi-Fi + Bluetooth'), findsOneWidget);
 
       // 2. Hero Section
-      expect(find.text('Send Files Nearby'), findsOneWidget);
-      expect(find.text('Send File'), findsWidgets);
+      expect(find.text('Share files nearby'), findsOneWidget);
+      expect(find.text('Send files'), findsOneWidget);
 
       // 3. Nearby Devices section
-      expect(find.text('Nearby Devices'), findsOneWidget);
+      expect(find.text('Nearby devices'), findsOneWidget);
 
-      // 4. Local Device identity card
-      expect(find.text('Your Device'), findsOneWidget);
+      // 4. Local device row (below the fold on small test surfaces)
+      await tester.scrollUntilVisible(find.text('Your device'), 200);
+      expect(find.text('Your device'), findsOneWidget);
       expect(find.text('My-Pixel-Device'), findsOneWidget);
+      // Protocol internals are no longer on the home screen.
+      expect(find.text('Device ID'), findsNothing);
 
       await container.stopDiscoveryAndAdvertising();
       await tester.pump(const Duration(milliseconds: 100));
@@ -88,10 +91,7 @@ void main() {
       (tester) async {
         await tester.pumpWidget(
           MaterialApp(
-            home: AppScope(
-              container: container,
-              child: const VayuHomePage(),
-            ),
+            home: AppScope(container: container, child: const VayuHomePage()),
           ),
         );
         await tester.pump(const Duration(milliseconds: 100));
@@ -110,11 +110,17 @@ void main() {
 
         await tester.pump(const Duration(milliseconds: 100));
 
-        // Peer card is displayed
+        // Peer row shows real reachability and an unverified identity honestly
         expect(find.text('Peer-Galaxy'), findsOneWidget);
-        expect(find.text('LAN'), findsWidgets);
-        expect(find.text('BLE'), findsWidgets);
+        expect(find.text('New device · Wi-Fi & Bluetooth'), findsOneWidget);
+        expect(find.text('Send'), findsOneWidget);
+
+        // Manual connect lives in the row's menu
+        await tester.tap(find.byTooltip('More'));
+        await tester.pumpAndSettle();
         expect(find.text('Connect'), findsOneWidget);
+        await tester.tapAt(const Offset(5, 5));
+        await tester.pumpAndSettle();
 
         await container.stopDiscoveryAndAdvertising();
         await tester.pump(const Duration(milliseconds: 100));
@@ -141,8 +147,8 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 100));
 
-      expect(find.text('No Vayu devices found nearby'), findsOneWidget);
-      expect(find.text('Search Again'), findsOneWidget);
+      expect(find.text('No devices found yet'), findsOneWidget);
+      expect(find.text('Search again'), findsOneWidget);
 
       await container.stopDiscoveryAndAdvertising();
       await tester.pump(const Duration(milliseconds: 100));

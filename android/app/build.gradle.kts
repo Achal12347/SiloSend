@@ -45,3 +45,13 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // QR pairing scanner: CameraX preview/analysis with ZXing decoding.
+    // Chosen over ML Kit to avoid Google Play services and keep the APK small.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("androidx.camera:camera-view:1.4.2")
+    implementation("com.google.zxing:core:3.5.3")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+}

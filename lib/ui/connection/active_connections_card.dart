@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/security_contract.dart';
@@ -26,8 +27,6 @@ class ActiveConnectionsCard extends StatelessWidget {
         final sessions = snapshot.data ?? [];
 
         return Card(
-          elevation: 0,
-          color: theme.colorScheme.surfaceContainerHighest,
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Column(
@@ -59,7 +58,7 @@ class ActiveConnectionsCard extends StatelessWidget {
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.green.shade100,
+                          color: VayuPalette.fromTheme(theme).successContainer,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
@@ -67,7 +66,7 @@ class ActiveConnectionsCard extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.green.shade900,
+                            color: VayuPalette.fromTheme(theme).success,
                           ),
                         ),
                       ),
@@ -207,8 +206,10 @@ class ActiveConnectionsCard extends StatelessWidget {
                     label: const Text('Disconnect'),
                     style: OutlinedButton.styleFrom(
                       visualDensity: VisualDensity.compact,
-                      foregroundColor: Colors.red.shade700,
-                      side: BorderSide(color: Colors.red.shade300),
+                      foregroundColor: VayuPalette.fromTheme(theme).danger,
+                      side: BorderSide(
+                        color: VayuPalette.fromTheme(theme).dangerContainer,
+                      ),
                     ),
                     onPressed: () async {
                       await container.disconnectSession(
@@ -282,7 +283,7 @@ class ActiveConnectionsCard extends StatelessWidget {
 
     if (isSecured) {
       final trustLevel = secureSession.trustLevel;
-      final trustColor = _trustLevelColor(trustLevel);
+      final trustColor = _trustLevelColor(Theme.of(context), trustLevel);
 
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -295,14 +296,18 @@ class ActiveConnectionsCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.lock_rounded, size: 14, color: Colors.green.shade700),
+            Icon(
+              Icons.lock_rounded,
+              size: 14,
+              color: VayuPalette.fromTheme(theme).success,
+            ),
             const SizedBox(width: 4),
             Text(
               'AES-256-GCM',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
-                color: Colors.green.shade800,
+                color: VayuPalette.fromTheme(theme).success,
               ),
             ),
             const SizedBox(width: 8),
@@ -419,17 +424,17 @@ class ActiveConnectionsCard extends StatelessWidget {
     );
   }
 
-  Color _trustLevelColor(TrustLevel level) {
+  Color _trustLevelColor(ThemeData theme, TrustLevel level) {
     switch (level) {
       case TrustLevel.sasVerified:
       case TrustLevel.nfcAuthenticated:
-        return Colors.green.shade800;
+        return VayuPalette.fromTheme(theme).success;
       case TrustLevel.trustedTOFU:
-        return Colors.blue.shade800;
+        return theme.colorScheme.primary;
       case TrustLevel.unverifiedTOFU:
-        return Colors.amber.shade900;
+        return VayuPalette.fromTheme(theme).warning;
       case TrustLevel.keyConflict:
-        return Colors.red.shade800;
+        return VayuPalette.fromTheme(theme).danger;
     }
   }
 }

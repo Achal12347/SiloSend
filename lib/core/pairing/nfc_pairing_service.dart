@@ -50,7 +50,13 @@ abstract class NfcPlatformAdapter {
     required void Function(Uint8List ndefBytes) onTagDiscovered,
   });
   Future<void> stopListening();
+
+  /// Serves [ndefBytes] to a tapping peer (Android: host card emulation)
+  /// until [stopServing].
   Future<void> writeNdef(Uint8List ndefBytes);
+
+  /// Stops serving the last payload so nothing is readable off-screen.
+  Future<void> stopServing();
 }
 
 /// Manages out-of-band NFC pairing exchanges for Vayu.
@@ -103,7 +109,7 @@ class NfcPairingService {
     return available;
   }
 
-  /// Starts listening for incoming NFC tags with SiloSend NDEF records.
+  /// Starts listening for incoming NFC tags with Vayu NDEF records.
   Future<NfcOperationResult> startReading() async {
     if (_isDisposed) {
       return const NfcOperationResult(
@@ -200,6 +206,14 @@ class NfcPairingService {
         message: 'NFC write failed: $e',
       );
     }
+  }
+
+  /// Stops serving this phone's pairing payload.
+  Future<void> stopSharing() async {
+    try {
+      await platformAdapter?.stopServing();
+    } catch (_) {}
+    _updateStatus(NfcOperationStatus.idle);
   }
 
   /// Stops active NFC listening.

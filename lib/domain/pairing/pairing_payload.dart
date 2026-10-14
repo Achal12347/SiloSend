@@ -30,6 +30,12 @@ class PairingPayload {
   final String pairingToken;
   final String? ed25519PubKeyHex;
   final String? nfcCommitmentHex;
+
+  /// Phone-hosted Wi-Fi the joiner should connect to when the two phones share
+  /// no network (Android LocalOnlyHotspot). Both null otherwise.
+  final String? wifiSsid;
+  final String? wifiPassphrase;
+
   final int timestamp;
 
   PairingPayload({
@@ -44,6 +50,8 @@ class PairingPayload {
     required this.pairingToken,
     this.ed25519PubKeyHex,
     this.nfcCommitmentHex,
+    this.wifiSsid,
+    this.wifiPassphrase,
     int? timestamp,
   }) : displayName = sanitizeDisplayName(displayName),
        timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch {
@@ -234,6 +242,8 @@ class PairingPayload {
     'pairingToken': pairingToken,
     if (ed25519PubKeyHex != null) 'pubKey': ed25519PubKeyHex,
     if (nfcCommitmentHex != null) 'nfcCommitment': nfcCommitmentHex,
+    if (wifiSsid != null) 'wifiSsid': wifiSsid,
+    if (wifiPassphrase != null) 'wifiPassphrase': wifiPassphrase,
     'timestamp': timestamp,
   };
 
@@ -281,6 +291,8 @@ class PairingPayload {
         pairingToken: token,
         ed25519PubKeyHex: pubKey,
         nfcCommitmentHex: nfcCommitment,
+        wifiSsid: json['wifiSsid'] as String?,
+        wifiPassphrase: json['wifiPassphrase'] as String?,
         timestamp:
             json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
       );
@@ -289,7 +301,7 @@ class PairingPayload {
     }
   }
 
-  /// Serializes to a standard `silosend://pair?...` URI (for QR codes and NFC URI records).
+  /// Serializes to a standard `vayu://pair?...` URI (for QR codes and NFC URI records).
   Uri toUri() {
     final queryParams = <String, String>{
       'v': protocolVersion.toString(),
@@ -313,6 +325,12 @@ class PairingPayload {
     }
     if (nfcCommitmentHex != null) {
       queryParams['nfc'] = nfcCommitmentHex!;
+    }
+    if (wifiSsid != null) {
+      queryParams['ssid'] = wifiSsid!;
+    }
+    if (wifiPassphrase != null) {
+      queryParams['psk'] = wifiPassphrase!;
     }
 
     return Uri(scheme: uriScheme, host: uriHost, queryParameters: queryParams);
@@ -385,6 +403,8 @@ class PairingPayload {
         pairingToken: token,
         ed25519PubKeyHex: pubKey,
         nfcCommitmentHex: nfcCommitment,
+        wifiSsid: params['ssid'],
+        wifiPassphrase: params['psk'],
         timestamp: timestamp,
       );
     } on ArgumentError catch (e) {
@@ -393,7 +413,7 @@ class PairingPayload {
   }
 
   /// Encodes this pairing payload into a standard NFC Forum NDEF MIME media record
-  /// (`application/vnd.silosend.pairing`).
+  /// (`application/vnd.vayu.pairing`).
   Uint8List toNdefBytes() {
     final payloadBytes = utf8.encode(jsonEncode(toJson()));
     final typeBytes = utf8.encode(ndefMimeType);
@@ -509,6 +529,8 @@ class PairingPayload {
     String? pairingToken,
     String? ed25519PubKeyHex,
     String? nfcCommitmentHex,
+    String? wifiSsid,
+    String? wifiPassphrase,
     int? timestamp,
   }) {
     return PairingPayload(
@@ -523,6 +545,8 @@ class PairingPayload {
       pairingToken: pairingToken ?? this.pairingToken,
       ed25519PubKeyHex: ed25519PubKeyHex ?? this.ed25519PubKeyHex,
       nfcCommitmentHex: nfcCommitmentHex ?? this.nfcCommitmentHex,
+      wifiSsid: wifiSsid ?? this.wifiSsid,
+      wifiPassphrase: wifiPassphrase ?? this.wifiPassphrase,
       timestamp: timestamp ?? this.timestamp,
     );
   }

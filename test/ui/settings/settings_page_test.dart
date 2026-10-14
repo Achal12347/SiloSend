@@ -62,9 +62,7 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: SettingsPage(container: container),
-        ),
+        MaterialApp(home: SettingsPage(container: container)),
       );
       await tester.pumpAndSettle();
 
@@ -79,9 +77,7 @@ void main() {
 
     testWidgets('Allows editing device display name', (tester) async {
       await tester.pumpWidget(
-        MaterialApp(
-          home: SettingsPage(container: container),
-        ),
+        MaterialApp(home: SettingsPage(container: container)),
       );
       await tester.pumpAndSettle();
 
@@ -102,32 +98,37 @@ void main() {
       expect(find.text('Updated-Phone-01'), findsOneWidget);
     });
 
-    testWidgets('Toggling Battery Saver mode updates state and throttles discovery', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: SettingsPage(container: container),
-        ),
-      );
-      await tester.pumpAndSettle();
+    testWidgets(
+      'Toggling Battery Saver mode updates state and throttles discovery',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(home: SettingsPage(container: container)),
+        );
+        await tester.pumpAndSettle();
 
-      // Tap 'On' segment
-      await tester.tap(find.text('On'));
-      await tester.pumpAndSettle();
+        // Tap 'On' segment
+        await tester.tap(find.text('On'));
+        await tester.pumpAndSettle();
 
-      expect(container.userSettings.batterySaverMode, BatterySaverMode.on);
-      expect(container.orchestrator.currentState.isBatterySaverActive, isTrue);
-      expect(container.discoveryCoordinator.isBatterySaverActive, isTrue);
+        expect(container.userSettings.batterySaverMode, BatterySaverMode.on);
+        expect(
+          container.orchestrator.currentState.isBatterySaverActive,
+          isTrue,
+        );
+        expect(container.discoveryCoordinator.isBatterySaverActive, isTrue);
 
-      // Tap 'Off' segment
-      await tester.tap(find.text('Off'));
-      await tester.pumpAndSettle();
+        // Tap 'Off' segment
+        await tester.tap(find.text('Off'));
+        await tester.pumpAndSettle();
 
-      expect(container.userSettings.batterySaverMode, BatterySaverMode.off);
-      expect(container.orchestrator.currentState.isBatterySaverActive, isFalse);
-      expect(container.discoveryCoordinator.isBatterySaverActive, isFalse);
-    });
+        expect(container.userSettings.batterySaverMode, BatterySaverMode.off);
+        expect(
+          container.orchestrator.currentState.isBatterySaverActive,
+          isFalse,
+        );
+        expect(container.discoveryCoordinator.isBatterySaverActive, isFalse);
+      },
+    );
 
     testWidgets('Opens Permissions Rationale dialog', (tester) async {
       tester.view.physicalSize = const Size(800, 1600);
@@ -135,9 +136,7 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: SettingsPage(container: container),
-        ),
+        MaterialApp(home: SettingsPage(container: container)),
       );
       await tester.pumpAndSettle();
 
@@ -159,9 +158,7 @@ void main() {
       addTearDown(() => tester.view.resetPhysicalSize());
 
       await tester.pumpWidget(
-        MaterialApp(
-          home: SettingsPage(container: container),
-        ),
+        MaterialApp(home: SettingsPage(container: container)),
       );
       await tester.pumpAndSettle();
 

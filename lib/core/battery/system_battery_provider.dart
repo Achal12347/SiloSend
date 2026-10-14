@@ -13,7 +13,9 @@ import 'package:vayu/core/logging/app_logger.dart';
 /// - In unprobed, test, or unsupported environments, explicitly returns null fields
 ///   via [BatterySnapshot.unknown()] rather than fabricating fake hardware state.
 class SystemBatteryProvider implements BatteryStateProvider {
-  static const MethodChannel _channel = MethodChannel('com.achyrio.vayu/battery');
+  static const MethodChannel _channel = MethodChannel(
+    'com.achyrio.vayu/battery',
+  );
   static const Duration _cacheTtl = Duration(seconds: 10);
 
   final Future<Map<String, dynamic>?> Function()? customNativeProbe;

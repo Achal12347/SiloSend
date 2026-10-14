@@ -50,7 +50,9 @@ void main() {
     });
 
     test('FileSettingsStorage persists and reads from disk', () async {
-      final tempDir = Directory.systemTemp.createTempSync('vayu_settings_test_');
+      final tempDir = Directory.systemTemp.createTempSync(
+        'vayu_settings_test_',
+      );
       final file = File('${tempDir.path}/test_settings.json');
 
       try {

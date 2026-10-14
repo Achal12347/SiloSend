@@ -28,11 +28,17 @@ class ContentUriPayloadSource implements PayloadSource {
   readChunkCallback;
   final Future<void> Function(String uri)? closeCallback;
 
+  /// Optional platform hasher returning the digest and the true byte count in one
+  /// call; avoids streaming the whole file through per-chunk channel round trips.
+  final Future<({String sha256, int size})> Function(String uri)?
+  sha256Callback;
+
   ContentUriPayloadSource({
     required this.uri,
     required int length,
     required this.readChunkCallback,
     this.closeCallback,
+    this.sha256Callback,
   }) : _totalBytes = length;
 
   @override
@@ -75,6 +81,13 @@ class ContentUriPayloadSource implements PayloadSource {
 
   @override
   Future<String> computeSha256() async {
+    final platformHash = sha256Callback;
+    if (platformHash != null) {
+      final result = await platformHash(uri);
+      _totalBytes = result.size;
+      return result.sha256;
+    }
+
     var streamedLength = 0;
     crypto.Digest? digest;
     final sink = crypto.sha256.startChunkedConversion(

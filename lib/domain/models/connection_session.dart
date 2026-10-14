@@ -16,6 +16,9 @@ class ConnectionSessionInfo {
   final int? remotePort;
   final bool isInitiator;
 
+  /// Optional protocol features the remote build advertised in its handshake.
+  final Set<String> remoteFeatures;
+
   const ConnectionSessionInfo({
     required this.sessionId,
     required this.remoteDeviceId,
@@ -29,6 +32,7 @@ class ConnectionSessionInfo {
     this.remoteAddress,
     this.remotePort,
     this.isInitiator = false,
+    this.remoteFeatures = const {},
   });
 
   ConnectionSessionInfo copyWith({
@@ -44,6 +48,7 @@ class ConnectionSessionInfo {
     String? remoteAddress,
     int? remotePort,
     bool? isInitiator,
+    Set<String>? remoteFeatures,
   }) {
     return ConnectionSessionInfo(
       sessionId: sessionId ?? this.sessionId,
@@ -58,6 +63,7 @@ class ConnectionSessionInfo {
       remoteAddress: remoteAddress ?? this.remoteAddress,
       remotePort: remotePort ?? this.remotePort,
       isInitiator: isInitiator ?? this.isInitiator,
+      remoteFeatures: remoteFeatures ?? this.remoteFeatures,
     );
   }
 }

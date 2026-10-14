@@ -20,9 +20,7 @@ void main() {
     late FileIdentityStorage storage;
 
     setUp(() async {
-      tempDir = await Directory.systemTemp.createTemp(
-        'vayu_container_test_',
-      );
+      tempDir = await Directory.systemTemp.createTemp('vayu_container_test_');
       storageFile = File('${tempDir.path}/identity.json');
       storage = FileIdentityStorage(storageFile);
     });

@@ -34,8 +34,7 @@ class TestSecureSession implements SecureSession {
   bool get isEstablished => state == SessionState.secured;
 
   @override
-  Stream<VayuPacket> get incomingDecryptedPackets =>
-      _incomingController.stream;
+  Stream<VayuPacket> get incomingDecryptedPackets => _incomingController.stream;
 
   @override
   Future<void> sendEncryptedPacket(VayuPacket packet) async {
@@ -292,6 +291,7 @@ void main() {
         secureSession: session,
         destination: destination,
         metadata: metadata,
+        ackEvery: 1, // SACK contents per chunk; batching is tested separately
       );
 
       // Deliver Chunk 0

@@ -129,7 +129,7 @@ class EvaluatedCapabilityState {
   String? get actionDescription {
     switch (recommendedAction) {
       case CapabilityActionType.requestNearbyPermission:
-        return 'Allow Nearby Devices access so SiloSend can discover peers via Bluetooth.';
+        return 'Allow Nearby Devices access so Vayu can discover peers via Bluetooth.';
       case CapabilityActionType.enableBluetooth:
         return 'Bluetooth is turned off. Turn it on to find nearby devices without Wi-Fi.';
       case CapabilityActionType.openAppSettings:

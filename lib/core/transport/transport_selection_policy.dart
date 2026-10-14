@@ -130,7 +130,7 @@ class TransportSelectionPolicy {
     required TransportSelectionRequest request,
     required DeviceCapabilities localCapabilities,
   }) {
-    // Check if transport is implemented in SiloSend
+    // Check if transport is implemented in Vayu
     if (transport == TransportType.wifiDirect) {
       return 'transport_unimplemented';
     }

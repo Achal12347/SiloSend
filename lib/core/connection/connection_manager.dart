@@ -286,6 +286,7 @@ class ConnectionManager {
         remoteDeviceIdHex: responsePayload.deviceIdHex,
         remoteDisplayName: responsePayload.displayName,
         remotePlatform: responsePayload.platform,
+        remoteFeatures: responsePayload.features,
         transport: transport,
         framed: framed,
         isInitiator: true,
@@ -375,6 +376,7 @@ class ConnectionManager {
         remoteDeviceIdHex: initPayload.deviceIdHex,
         remoteDisplayName: initPayload.displayName,
         remotePlatform: initPayload.platform,
+        remoteFeatures: initPayload.features,
         transport: transport,
         framed: framed,
         isInitiator: false,
@@ -393,6 +395,7 @@ class ConnectionManager {
     required String remoteDeviceIdHex,
     required String remoteDisplayName,
     required String remotePlatform,
+    Set<String> remoteFeatures = const {},
     required TransportConnection transport,
     required FramedTransportConnection framed,
     bool isInitiator = false,
@@ -421,6 +424,7 @@ class ConnectionManager {
       remoteAddress: transport.remoteAddress,
       remotePort: transport.remotePort,
       isInitiator: isInitiator,
+      remoteFeatures: remoteFeatures,
     );
 
     final session = ConnectionSession(

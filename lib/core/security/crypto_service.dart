@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:vayu/core/security/aead_cipher.dart';
 import 'package:vayu/domain/security/crypto_identity_keypair.dart';
 
 /// Comprehensive cryptographic service providing reviewed, standard cryptographic primitives
@@ -11,7 +12,11 @@ import 'package:vayu/domain/security/crypto_identity_keypair.dart';
 class CryptoService {
   final Ed25519 _ed25519 = Ed25519();
   final X25519 _x25519 = X25519();
-  final AesGcm _aesGcm256 = AesGcm.with256bits();
+
+  /// Packet cipher; the Android container injects the platform-backed one.
+  final AeadCipher aead;
+
+  CryptoService({AeadCipher? aead}) : aead = aead ?? DartAeadCipher();
 
   /// Generates a persistent Ed25519 identity keypair using a cryptographically secure random 32-byte seed.
   Future<CryptoIdentityKeypair> generateIdentityKeypair() async {
@@ -20,13 +25,22 @@ class CryptoService {
     for (int i = 0; i < 32; i++) {
       seed[i] = random.nextInt(256);
     }
+    return identityKeypairFromSeed(seed);
+  }
 
+  /// Rebuilds the identity keypair from a stored 32-byte Ed25519 seed.
+  ///
+  /// The public key is always derived from the seed; pairing a stored seed with
+  /// any other public key would make every signature fail verification.
+  Future<CryptoIdentityKeypair> identityKeypairFromSeed(Uint8List seed) async {
+    if (seed.length != 32) {
+      throw ArgumentError.value(seed.length, 'seed', 'Must be 32 bytes');
+    }
     final keyPair = await _ed25519.newKeyPairFromSeed(seed);
     final publicKey = await keyPair.extractPublicKey();
-
     return CryptoIdentityKeypair(
       publicKey: Uint8List.fromList(publicKey.bytes),
-      privateKeySeed: seed,
+      privateKeySeed: Uint8List.fromList(seed),
     );
   }
 
@@ -356,16 +370,11 @@ class CryptoService {
       throw ArgumentError.value(aad.length, 'aad', 'Must be exactly 76 bytes');
     }
 
-    final secretBox = await _aesGcm256.encrypt(
-      plaintext,
-      secretKey: SecretKey(secretKeyBytes),
+    return aead.encrypt(
+      plaintext: plaintext,
+      key: secretKeyBytes,
       nonce: nonce,
       aad: aad,
-    );
-
-    return (
-      ciphertext: Uint8List.fromList(secretBox.cipherText),
-      authTag: Uint8List.fromList(secretBox.mac.bytes),
     );
   }
 
@@ -394,15 +403,13 @@ class CryptoService {
       throw ArgumentError.value(aad.length, 'aad', 'Must be exactly 76 bytes');
     }
 
-    final secretBox = SecretBox(ciphertext, nonce: nonce, mac: Mac(authTag));
-
-    final decrypted = await _aesGcm256.decrypt(
-      secretBox,
-      secretKey: SecretKey(secretKeyBytes),
+    return aead.decrypt(
+      ciphertext: ciphertext,
+      authTag: authTag,
+      key: secretKeyBytes,
+      nonce: nonce,
       aad: aad,
     );
-
-    return Uint8List.fromList(decrypted);
   }
 
   /// Constructs the canonical 76-byte AEAD Associated Authenticated Data (AAD).

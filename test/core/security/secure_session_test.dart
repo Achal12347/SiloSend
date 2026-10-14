@@ -286,32 +286,29 @@ void main() {
       );
     });
 
-    test(
-      'Regression Issue 1: Outbound elevation is single authoritative path preserving parameters',
-      () async {
-        // Attach managers so responder auto-listens, and initiator awaits caller elevation
-        secureManagerA.attachToConnectionManager(managerA);
-        secureManagerB.attachToConnectionManager(managerB);
+    test('Regression Issue 1: Outbound elevation is single authoritative path preserving parameters', () async {
+      // Attach managers so responder auto-listens, and initiator awaits caller elevation
+      secureManagerA.attachToConnectionManager(managerA);
+      secureManagerB.attachToConnectionManager(managerB);
 
-        // Connect transport
-        final sessionA = await managerA.connectToLanPeer(
-          remoteAddress: '127.0.0.1',
-          remotePort: serverB.boundPort,
-        );
+      // Connect transport
+      final sessionA = await managerA.connectToLanPeer(
+        remoteAddress: '127.0.0.1',
+        remotePort: serverB.boundPort,
+      );
 
-        // Initiator authoritatively elevates with custom timeout and credentials
-        final secureA = await secureManagerA.secureOutboundConnection(
-          sessionA,
-          timeout: const Duration(seconds: 8),
-        );
+      // Initiator authoritatively elevates with custom timeout and credentials
+      final secureA = await secureManagerA.secureOutboundConnection(
+        sessionA,
+        timeout: const Duration(seconds: 8),
+      );
 
-        expect(secureA.isEstablished, isTrue);
-        expect(secureManagerA.activeSessions.contains(secureA), isTrue);
+      expect(secureA.isEstablished, isTrue);
+      expect(secureManagerA.activeSessions.contains(secureA), isTrue);
 
-        // Calling secureOutboundConnection a second time returns cached established session without competing handshakes
-        final secureA2 = await secureManagerA.secureOutboundConnection(sessionA);
-        expect(identical(secureA, secureA2), isTrue);
-      },
-    );
+      // Calling secureOutboundConnection a second time returns cached established session without competing handshakes
+      final secureA2 = await secureManagerA.secureOutboundConnection(sessionA);
+      expect(identical(secureA, secureA2), isTrue);
+    });
   });
 }

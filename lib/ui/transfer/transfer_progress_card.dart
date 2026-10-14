@@ -3,10 +3,16 @@ import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_task_impl.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
-import 'package:vayu/domain/transfer/payload_destination.dart';
+import 'package:vayu/ui/format.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/transfer/transfer_detail_page.dart';
+import 'package:vayu/ui/transfer/transfer_history_page.dart';
+import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
-/// Renders active and recently completed file transfer tasks with live
-/// speed, ETA, progress bars, pause/resume, and cancellation controls.
+/// Home "Transfers" section: a compact row per active or recent transfer.
+///
+/// Rows show real engine progress and open [TransferDetailPage] on tap; the
+/// full send/receive/completion experience lives there.
 class TransferProgressCard extends StatelessWidget {
   final AppContainer container;
   final Stream<List<TransferTask>>? transfersStream;
@@ -29,7 +35,8 @@ class TransferProgressCard extends StatelessWidget {
           initialTransfers ?? container.fileSharingCoordinator.allTransfers,
       builder: (context, snapshot) {
         final transfers = snapshot.data ?? [];
-        if (transfers.isEmpty) {
+        final hasHistory = container.transferHistory.isNotEmpty;
+        if (transfers.isEmpty && !hasHistory) {
           return const SizedBox.shrink();
         }
 
@@ -42,373 +49,224 @@ class TransferProgressCard extends StatelessWidget {
             )
             .length;
 
-        return Card(
-          elevation: 0,
-          color: theme.colorScheme.surfaceContainerHighest,
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SectionHeader(
+                title: 'Transfers',
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.swap_vert_rounded,
-                          size: 20,
-                          color: theme.colorScheme.primary,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'File Transfers',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
                     if (activeCount > 0)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primaryContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '$activeCount Active',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onPrimaryContainer,
-                          ),
-                        ),
+                      StatusPill(
+                        label: '$activeCount active',
+                        foreground: theme.colorScheme.onPrimaryContainer,
+                        background: theme.colorScheme.primaryContainer,
+                      ),
+                    if (hasHistory)
+                      TextButton(
+                        onPressed: () =>
+                            TransferHistoryPage.open(context, container),
+                        child: const Text('History'),
                       ),
                   ],
                 ),
-                const Divider(height: 20),
-                Column(
-                  children: transfers
-                      .map((task) => _buildTransferItem(context, theme, task))
-                      .toList(),
+              ),
+              if (transfers.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 0),
+                  child: Text(
+                    'Nothing in progress.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                )
+              else
+                Card(
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      for (var i = 0; i < transfers.length; i++) ...[
+                        if (i > 0) const Divider(indent: 72, endIndent: 16),
+                        _TransferRow(container: container, task: transfers[i]),
+                      ],
+                    ],
+                  ),
                 ),
-              ],
-            ),
+            ],
           ),
         );
       },
     );
   }
+}
 
-  Widget _buildTransferItem(
-    BuildContext context,
-    ThemeData theme,
-    TransferTask task,
-  ) {
-    final isOutbound = task is! InboundTransferTask;
-    final meta = task.metadata;
+class _TransferRow extends StatelessWidget {
+  final AppContainer container;
+  final TransferTask task;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12.0),
-      padding: const EdgeInsets.all(12.0),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isOutbound
-                    ? Icons.arrow_upward_rounded
-                    : Icons.arrow_downward_rounded,
-                size: 16,
-                color: isOutbound
-                    ? Colors.blue.shade700
-                    : Colors.green.shade700,
+  const _TransferRow({required this.container, required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = VayuPalette.of(context);
+    final inbound = task is InboundTransferTask;
+    final status = task.status;
+
+    return InkWell(
+      onTap: () => TransferDetailPage.open(context, container, task: task),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: status == TransferStatus.completed
+                    ? palette.successContainer
+                    : theme.colorScheme.primaryContainer,
               ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  meta.fileName,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+              child: Icon(
+                status == TransferStatus.completed
+                    ? Icons.check_rounded
+                    : inbound
+                    ? Icons.south_rounded
+                    : Icons.north_east_rounded,
+                color: status == TransferStatus.completed
+                    ? palette.success
+                    : theme.colorScheme.onPrimaryContainer,
               ),
-              _buildStatusBadge(theme, task.status),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // Real-time progress updates
-          StreamBuilder<TransferProgress>(
-            stream: task.progressStream,
-            builder: (context, progressSnapshot) {
-              final progress = progressSnapshot.data;
-              if (progress == null) {
-                return Text(
-                  'Waiting for transfer status...',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                );
-              }
-
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LinearProgressIndicator(
-                    value: (task.status == TransferStatus.completed)
-                        ? 1.0
-                        : progress.fraction,
-                    backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(4),
-                    color: _progressBarColor(task.status),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: StreamBuilder<TransferProgress>(
+                stream: task.progressStream,
+                initialData: latestProgressOf(task),
+                builder: (context, snapshot) {
+                  final progress = snapshot.data;
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${_formatBytes(progress.bytesTransferred)} / ${_formatBytes(meta.totalBytes)} (${progress.percentage}%)',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                        ),
+                        task.metadata.fileName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall,
                       ),
-                      if (task.status == TransferStatus.transferring)
-                        Text(
-                          '${_formatSpeed(progress.speedBytesPerSecond)} • ${_formatEta(progress.etaSeconds ?? 0)}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                          ),
+                      const SizedBox(height: 3),
+                      _subtitle(context, progress),
+                      if (status == TransferStatus.transferring ||
+                          status == TransferStatus.paused) ...[
+                        const SizedBox(height: 8),
+                        LinearProgressIndicator(
+                          value: progress?.fraction,
+                          minHeight: 6,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ],
+                      if (status == TransferStatus.completed)
+                        Row(
+                          children: [
+                            TextButton(
+                              onPressed: () => _shareAgain(context),
+                              child: const Text('Share again'),
+                            ),
+                            TextButton(
+                              onPressed: () => container.fileSharingCoordinator
+                                  .dismissCompletedTask(task.transferId),
+                              child: const Text('Done'),
+                            ),
+                          ],
                         ),
                     ],
-                  ),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 8),
-
-          // Action controls
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (task.status == TransferStatus.transferring) ...[
-                OutlinedButton.icon(
-                  onPressed: () => task.cancel('Cancelled by user'),
-                  icon: const Icon(Icons.close_rounded, size: 14),
-                  label: const Text('Cancel'),
-                  style: OutlinedButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    foregroundColor: Colors.red.shade700,
-                    side: BorderSide(color: Colors.red.shade300),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
-                    ),
-                  ),
-                ),
-              ] else if (task.status == TransferStatus.completed) ...[
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  alignment: WrapAlignment.end,
-                  children: [
-                    Icon(
-                      Icons.verified_rounded,
-                      size: 14,
-                      color: Colors.green.shade700,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Verified successfully',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.green.shade800,
-                      ),
-                    ),
-                    if (task is InboundTransferTask &&
-                        task.destination is FilePayloadDestination) ...[
-                      const SizedBox(width: 8),
-                      FilledButton.tonalIcon(
-                        onPressed: () async {
-                          final path =
-                              (task.destination as FilePayloadDestination)
-                                  .targetFilePath;
-                          final opened = await container.platformService
-                              .openFile(path, mimeType: meta.mimeType);
-                          if (!opened && context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('File saved to $path')),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.open_in_new_rounded, size: 14),
-                        label: const Text('Open File'),
-                        style: FilledButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                        ),
-                      ),
-                    ],
-                    FilledButton.tonalIcon(
-                      onPressed: () async {
-                        try {
-                          await container.fileSharingCoordinator.shareAgain(
-                            task.remoteDeviceId,
-                          );
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Could not share again: $e'),
-                              ),
-                            );
-                          }
-                        }
-                      },
-                      icon: const Icon(Icons.replay_rounded, size: 14),
-                      label: const Text('Share again'),
-                      style: FilledButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                      ),
-                    ),
-                    OutlinedButton(
-                      onPressed: () {
-                        container.fileSharingCoordinator.dismissCompletedTask(
-                          task.transferId,
-                        );
-                      },
-                      style: OutlinedButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                      ),
-                      child: const Text('Done'),
-                    ),
-                  ],
-                ),
-              ],
-            ],
-          ),
-        ],
+                  );
+                },
+              ),
+            ),
+            if (status == TransferStatus.transferring ||
+                status == TransferStatus.idle)
+              IconButton(
+                tooltip: 'Cancel transfer',
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => task.cancel('Cancelled by user'),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildStatusBadge(ThemeData theme, TransferStatus status) {
-    Color bg;
-    Color fg;
-    String text;
-
-    switch (status) {
+  Widget _subtitle(BuildContext context, TransferProgress? progress) {
+    final theme = Theme.of(context);
+    final palette = VayuPalette.of(context);
+    final style = theme.textTheme.bodySmall;
+    switch (task.status) {
       case TransferStatus.transferring:
-        bg = Colors.blue.shade100;
-        fg = Colors.blue.shade900;
-        text = 'Transferring';
-        break;
+        final t = task;
+        if (t is OutboundTransferTask && t.awaitingAcceptance) {
+          return Text('Waiting for the other device to accept…', style: style);
+        }
+        if (progress == null) return Text('Starting…', style: style);
+        final parts = [
+          '${progress.percentage}%',
+          formatSpeed(progress.speedBytesPerSecond),
+          ?formatRemaining(progress.etaSeconds),
+        ];
+        return Text(parts.join(' · '), style: style);
       case TransferStatus.paused:
-        bg = Colors.amber.shade100;
-        fg = Colors.amber.shade900;
-        text = 'Paused';
-        break;
+        return Text('Paused', style: style);
+      case TransferStatus.verifying:
+        return Text('Verifying…', style: style);
       case TransferStatus.completed:
-        bg = Colors.green.shade100;
-        fg = Colors.green.shade900;
-        text = 'Completed';
-        break;
+        return Row(
+          children: [
+            Icon(Icons.verified_rounded, size: 14, color: palette.success),
+            const SizedBox(width: 4),
+            Text(
+              'Verified successfully',
+              style: style?.copyWith(color: palette.success),
+            ),
+            Text(' · ${formatBytes(task.metadata.totalBytes)}', style: style),
+          ],
+        );
       case TransferStatus.failed:
-        bg = Colors.red.shade100;
-        fg = Colors.red.shade900;
-        text = 'Failed';
-        break;
+        return Text('Failed', style: style?.copyWith(color: palette.danger));
       case TransferStatus.cancelled:
-        bg = Colors.grey.shade200;
-        fg = Colors.grey.shade800;
-        text = 'Cancelled';
-        break;
-      default:
-        bg = theme.colorScheme.surfaceContainerHighest;
-        fg = theme.colorScheme.onSurfaceVariant;
-        text = status.name;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: fg),
-      ),
-    );
-  }
-
-  Color _progressBarColor(TransferStatus status) {
-    switch (status) {
-      case TransferStatus.completed:
-        return Colors.green.shade600;
-      case TransferStatus.paused:
-        return Colors.amber.shade700;
-      case TransferStatus.failed:
-        return Colors.red.shade600;
-      case TransferStatus.cancelled:
-        return Colors.grey.shade500;
-      default:
-        return Colors.blue.shade600;
+        return Text('Cancelled', style: style);
+      case TransferStatus.idle:
+      case TransferStatus.queued:
+      case TransferStatus.connecting:
+        return Text(
+          task is InboundTransferTask
+              ? 'Starting…'
+              : 'Waiting for the other device…',
+          style: style,
+        );
     }
   }
 
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  Future<void> _shareAgain(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final next = await container.fileSharingCoordinator.shareAgain(
+        task.remoteDeviceId,
+      );
+      if (next != null && context.mounted) {
+        await TransferDetailPage.open(
+          context,
+          container,
+          transferId: next.transferId,
+        );
+      }
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not share again: $e')),
+      );
     }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
-
-  String _formatSpeed(double bytesPerSec) {
-    if (bytesPerSec < 1024) return '${bytesPerSec.toStringAsFixed(0)} B/s';
-    if (bytesPerSec < 1024 * 1024) {
-      return '${(bytesPerSec / 1024).toStringAsFixed(1)} KB/s';
-    }
-    return '${(bytesPerSec / (1024 * 1024)).toStringAsFixed(1)} MB/s';
-  }
-
-  String _formatEta(int seconds) {
-    if (seconds <= 0) return 'calculating...';
-    if (seconds < 60) return 'ETA: ${seconds}s';
-    final minutes = seconds ~/ 60;
-    final remainingSecs = seconds % 60;
-    return 'ETA: ${minutes}m ${remainingSecs}s';
   }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Vayu tap-to-pair card emulation under a private AID ("VAYUP" + version 1). -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/nfc_pairing_service"
+    android:requireDeviceUnlock="true">
+    <aid-group
+        android:category="other"
+        android:description="@string/nfc_pairing_service">
+        <aid-filter android:name="F0564159555001" />
+    </aid-group>
+</host-apdu-service>

@@ -55,8 +55,7 @@ void main() {
     });
 
     test('formatPublicFingerprint truncates safely', () {
-      const fp =
-          'Vayu-Ed25519-Identity-v1:abcdef1234567890abcdef1234567890';
+      const fp = 'Vayu-Ed25519-Identity-v1:abcdef1234567890abcdef1234567890';
       final truncated = SecurityLoggingPolicy.formatPublicFingerprint(
         fp,
         prefixLength: 20,

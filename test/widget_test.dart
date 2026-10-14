@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
@@ -37,24 +36,13 @@ void main() {
       // Verify app name in AppBar
       expect(find.text(AppConstants.appName), findsWidgets);
 
-      // Verify real local device identity card
-      expect(find.text('Your Device'), findsOneWidget);
-      expect(find.text('Test-Device-Alpha'), findsOneWidget);
-      expect(find.text('42424242...4242'), findsOneWidget);
+      // Nearby section with an honest idle state and a Search action
+      expect(find.text('Nearby devices'), findsOneWidget);
+      expect(find.text('Search'), findsOneWidget);
 
-      // Verify nearby devices section exists with Scan Nearby button
-      expect(find.text('Nearby Devices'), findsOneWidget);
-      expect(find.text('Scan Nearby'), findsOneWidget);
-
-      // Verify active connections card exists
-      expect(find.text('Active Connections'), findsOneWidget);
-      expect(find.textContaining('No active peer connections'), findsOneWidget);
-
-      // Verify architecture confirmation banner
-      expect(
-        find.text('End-to-End Encrypted (AES-256-GCM) • Offline Direct'),
-        findsOneWidget,
-      );
+      // No live sessions: the connections card stays hidden instead of
+      // showing protocol vocabulary.
+      expect(find.text('Active Connections'), findsNothing);
 
       // Ingest a discovered peer into coordinator to verify truthful UI card rendering
       container.discoveryCoordinator.ingestPeerForTesting(
@@ -71,26 +59,33 @@ void main() {
 
       await tester.pump(const Duration(milliseconds: 100));
 
-      // Verify peer is displayed with action buttons
+      // Peer row with real reachability, a send action, and connect in its menu
       expect(find.text('Remote-Pixel'), findsOneWidget);
-      expect(find.text('LAN'), findsWidgets);
-      expect(find.text('BLE'), findsWidgets);
-      expect(find.text('Send File'), findsNWidgets(2));
-      expect(find.text('Connect'), findsOneWidget);
+      expect(find.text('New device · Wi-Fi & Bluetooth'), findsOneWidget);
+      expect(find.text('Send files'), findsOneWidget);
+      expect(find.text('Send'), findsOneWidget);
 
-      // Tap pairing button in AppBar to open out-of-band pairing dialog
-      await tester.tap(find.byIcon(Icons.qr_code_2_rounded));
-      await tester.pump(const Duration(milliseconds: 300));
+      // The pairing button opens the pairing screen in "Show code" mode
+      await tester.tap(find.byTooltip('Pair with QR or NFC'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('Pair a phone'), findsOneWidget);
+      expect(find.text('Show code'), findsOneWidget);
+      await tester.tap(find.byTooltip('Back'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('Pair a phone'), findsNothing);
 
-      expect(find.text('Out-of-Band Pairing'), findsOneWidget);
-      expect(find.text('Local Pairing URI'), findsOneWidget);
-      expect(find.text('Connect Out-of-Band'), findsOneWidget);
-
-      // Close pairing dialog
-      await tester.tap(find.text('Close'));
-      await tester.pump(const Duration(milliseconds: 300));
-
-      expect(find.text('Out-of-Band Pairing'), findsNothing);
+      // Real local identity, without raw IDs on the home screen
+      await tester.scrollUntilVisible(find.text('Your device'), 200);
+      expect(find.text('Test-Device-Alpha'), findsOneWidget);
+      expect(find.text('42424242...4242'), findsNothing);
+      await tester.scrollUntilVisible(
+        find.text('End-to-end encrypted · Works offline'),
+        200,
+      );
 
       container.dispose();
     },
