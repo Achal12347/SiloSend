@@ -16,6 +16,7 @@ import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/ui/home/local_device_card.dart';
 import 'package:vayu/ui/pairing/pairing_page.dart';
 import 'package:vayu/platform/contact_picker.dart';
+import 'package:vayu/platform/nfc_card_inbox.dart';
 import 'package:vayu/platform/share_intent_service.dart';
 import 'package:vayu/ui/settings/settings_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
@@ -30,6 +31,7 @@ import 'package:vayu/ui/friendly_error.dart';
 import 'package:flutter/services.dart';
 import 'package:vayu/core/transfer/transfer_history.dart';
 import 'package:vayu/domain/contacts/contact_card.dart';
+import 'package:vayu/domain/contacts/vayu_card.dart';
 import 'package:vayu/ui/card/my_card_page.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/route_observer.dart';
@@ -59,9 +61,14 @@ class _VayuHomePageState extends State<VayuHomePage>
   StreamSubscription<List<SelectedDocument>>? _sharedSub;
 
   // Cards received by tap while home is the visible screen.
-  StreamSubscription<Uint8List>? _cardTapSub;
+  StreamSubscription<Uint8List>? _cardInboxSub;
+  StreamSubscription<VayuCard?>? _myCardSub;
   bool _routeVisible = true;
+  bool _appVisible = true;
   bool _subscribedToRoutes = false;
+  Timer? _shareTimer;
+  // Cards that arrived while another screen covered home; shown on return.
+  final List<Uint8List> _waitingCards = [];
 
   @override
   void initState() {
@@ -82,51 +89,91 @@ class _VayuHomePageState extends State<VayuHomePage>
       _autoStartDiscoveryIfReady();
       if (Platform.isAndroid && !isTesting) {
         _listenForSharedFiles();
-        _startTapReading();
+        _listenForTappedCards();
+        _scheduleCardSharing();
       }
     });
   }
 
   // ------------------------------------------------------------ tap to share
+  //
+  // While home is on screen this phone shares the user's card over NFC, both
+  // to Vayu and as a standard tag, so a phone tapped against it receives the
+  // card even when Vayu is closed there. Cards from other phones arrive
+  // through Android's tag reader (NfcCardInbox). Sharing stops whenever
+  // another screen covers home or the app leaves the screen.
 
-  bool get _canReadTaps =>
+  bool get _nfcEnabledHere =>
       Platform.isAndroid &&
       !Platform.environment.containsKey('FLUTTER_TEST') &&
       !WidgetsBinding.instance.runtimeType.toString().contains('Test');
 
-  void _startTapReading() {
-    if (!_canReadTaps || !_routeVisible || !mounted) return;
-    AppScope.of(context).nfcPairingService.startReading().ignore();
+  /// Starts sharing shortly after home becomes visible: the screen that just
+  /// closed stops its own sharing as it is torn down, which happens after
+  /// home is already visible again.
+  void _scheduleCardSharing() {
+    _shareTimer?.cancel();
+    if (!_nfcEnabledHere) return;
+    _shareTimer = Timer(const Duration(milliseconds: 600), _shareCardNow);
   }
 
-  void _stopTapReading() {
-    if (!_canReadTaps || !mounted) return;
-    AppScope.of(context).nfcPairingService.stopListening().ignore();
+  void _shareCardNow() {
+    if (!mounted || !_routeVisible || !_appVisible) return;
+    final container = AppScope.of(context);
+    final card = container.myCard;
+    if (card == null) return;
+    container.nfcPairingService.shareCard(card.toVcard()).ignore();
+  }
+
+  void _stopCardSharing() {
+    _shareTimer?.cancel();
+    if (!_nfcEnabledHere || !mounted) return;
+    AppScope.of(context).nfcPairingService.stopSharing().ignore();
+  }
+
+  Future<void> _listenForTappedCards() async {
+    const inbox = NfcCardInbox();
+    _cardInboxSub = inbox.cards.listen(_onCardTapped);
+    final pending = await inbox.takePending();
+    if (pending != null) _onCardTapped(pending);
   }
 
   @override
   void didPushNext() {
-    // Another screen (pairing, my card, a sheet) now owns NFC.
+    // Another screen (pairing, receive, profile, a sheet) now owns NFC.
     _routeVisible = false;
-    _stopTapReading();
+    _stopCardSharing();
   }
 
   @override
   void didPopNext() {
     _routeVisible = true;
-    _startTapReading();
+    _scheduleCardSharing();
+    if (_waitingCards.isNotEmpty) {
+      final next = _waitingCards.removeAt(0);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onCardTapped(next));
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Android turns reader mode off when the app leaves the screen.
-    if (state == AppLifecycleState.resumed) _startTapReading();
+    // Never share the card while Vayu is not on screen.
+    _appVisible = state == AppLifecycleState.resumed;
+    if (_appVisible) {
+      _scheduleCardSharing();
+    } else {
+      _stopCardSharing();
+    }
   }
 
   Future<void> _onCardTapped(Uint8List bytes) async {
-    if (!mounted || !_routeVisible) return;
+    if (!mounted) return;
     final card = ContactCard.tryParse(bytes);
     if (card == null) return;
+    if (!_routeVisible) {
+      _waitingCards.add(bytes);
+      return;
+    }
     HapticFeedback.mediumImpact();
     final container = AppScope.of(context);
     await showReceivedCardSheet(
@@ -210,8 +257,9 @@ class _VayuHomePageState extends State<VayuHomePage>
       _subscribedToRoutes = true;
     }
     if (container.isInitialized) {
-      _cardTapSub ??= container.nfcPairingService.onCardReceived.listen(
-        _onCardTapped,
+      // Re-share when the card is created or edited.
+      _myCardSub ??= container.myCardStream.listen(
+        (_) => _scheduleCardSharing(),
       );
     }
     _incomingRequestsSub?.cancel();
@@ -240,8 +288,9 @@ class _VayuHomePageState extends State<VayuHomePage>
   void dispose() {
     vayuRouteObserver.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
-    _cardTapSub?.cancel();
-    _stopTapReading();
+    _cardInboxSub?.cancel();
+    _myCardSub?.cancel();
+    _stopCardSharing();
     _pulseController.dispose();
     _incomingRequestsSub?.cancel();
     _incomingBatchesSub?.cancel();

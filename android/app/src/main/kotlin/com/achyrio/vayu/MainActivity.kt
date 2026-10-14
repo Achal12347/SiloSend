@@ -82,6 +82,7 @@ class MainActivity : FlutterActivity() {
         }
         nfcHandler = NfcHandler(this).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
+            handleIntent(intent)
         }
         contactsHandler = ContactsHandler(this).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
@@ -95,6 +96,7 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        nfcHandler?.handleIntent(intent)
         shareIntentHandler?.handle(intent)
     }
 

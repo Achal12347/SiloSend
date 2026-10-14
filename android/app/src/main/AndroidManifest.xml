@@ -98,6 +98,12 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- A Vayu card tapped from another phone: Android opens Vayu with it. -->
+            <intent-filter>
+                <action android:name="android.nfc.action.NDEF_DISCOVERED" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/vnd.achyrio.vayu.card" />
+            </intent-filter>
             <!-- "Share to Vayu" from Gallery, Files and other apps -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

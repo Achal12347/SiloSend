@@ -7,5 +7,9 @@
         android:category="other"
         android:description="@string/nfc_pairing_service">
         <aid-filter android:name="F0564159555001" />
+        <!-- Standard NFC Forum Type 4 Tag NDEF application: lets phones read a
+             shared Vayu card with Android's own tag reader. Answered only while
+             a card is being shared. -->
+        <aid-filter android:name="D2760000850101" />
     </aid-group>
 </host-apdu-service>

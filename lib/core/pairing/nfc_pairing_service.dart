@@ -59,6 +59,12 @@ abstract class NfcPlatformAdapter {
   Future<void> stopServing();
 }
 
+/// An adapter that can also share a card as a standard NFC tag, so phones
+/// with Vayu closed read it through Android's own tag reader.
+abstract class CardSharingNfcAdapter {
+  Future<void> serveCard(Uint8List vcard);
+}
+
 /// Manages out-of-band NFC pairing exchanges for Vayu.
 ///
 /// Strictly truthful:
@@ -282,7 +288,11 @@ class NfcPairingService {
     if (!await isNfcAvailable) return NfcOperationResult.unsupported;
     if (!await isNfcEnabled) return NfcOperationResult.disabled;
     try {
-      await adapter.writeNdef(vcard);
+      if (adapter is CardSharingNfcAdapter) {
+        await (adapter as CardSharingNfcAdapter).serveCard(vcard);
+      } else {
+        await adapter.writeNdef(vcard);
+      }
       _updateStatus(NfcOperationStatus.writing);
       return const NfcOperationResult(status: NfcOperationStatus.success);
     } catch (e) {
