@@ -92,7 +92,7 @@ void main() {
 
       // No banner should appear
       expect(find.byType(CapabilitySetupBanner), findsOneWidget);
-      expect(find.text('Bluetooth is Turned Off'), findsNothing);
+      expect(find.text('Bluetooth is off'), findsNothing);
       expect(find.text('Nearby Device Permission Required'), findsNothing);
 
       container.dispose();
@@ -134,15 +134,15 @@ void main() {
       );
       await tester.pump();
 
-      expect(find.text('Bluetooth is Turned Off'), findsOneWidget);
-      expect(find.text('Turn On Bluetooth'), findsOneWidget);
-      expect(find.text('Continue with LAN Only'), findsOneWidget);
+      expect(find.text('Bluetooth is off'), findsOneWidget);
+      expect(find.text('Turn on Bluetooth'), findsOneWidget);
+      expect(find.text('Use Wi-Fi only'), findsOneWidget);
 
-      // Tap 'Continue with LAN Only' to dismiss without blocking LAN
-      await tester.tap(find.text('Continue with LAN Only'));
+      // Tap 'Use Wi-Fi only' to dismiss without blocking LAN
+      await tester.tap(find.text('Use Wi-Fi only'));
       await tester.pump();
 
-      expect(find.text('Bluetooth is Turned Off'), findsNothing);
+      expect(find.text('Bluetooth is off'), findsNothing);
 
       container.dispose();
     },

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
@@ -183,6 +184,7 @@ class IncomingTransferDialog extends StatelessWidget {
       actions: [
         FilledButton(
           onPressed: () async {
+            HapticFeedback.selectionClick();
             final navigator = Navigator.of(context);
             final messenger = ScaffoldMessenger.maybeOf(context);
             navigator.pop();

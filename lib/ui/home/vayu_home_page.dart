@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Platform;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/material.dart';
 import 'package:vayu/core/constants/app_constants.dart';
@@ -27,6 +27,12 @@ import 'package:vayu/ui/transfer/transfer_progress_card.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
+import 'package:flutter/services.dart';
+import 'package:vayu/core/transfer/transfer_history.dart';
+import 'package:vayu/domain/contacts/contact_card.dart';
+import 'package:vayu/ui/card/my_card_page.dart';
+import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
+import 'package:vayu/ui/widgets/route_observer.dart';
 
 /// Primary Home screen.
 ///
@@ -41,7 +47,7 @@ class VayuHomePage extends StatefulWidget {
 }
 
 class _VayuHomePageState extends State<VayuHomePage>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
   late AnimationController _pulseController;
 
   bool _isTogglingDiscovery = false;
@@ -51,6 +57,11 @@ class _VayuHomePageState extends State<VayuHomePage>
   StreamSubscription<IncomingBatchRequest>? _incomingBatchesSub;
   ShareIntentService? _shareIntents;
   StreamSubscription<List<SelectedDocument>>? _sharedSub;
+
+  // Cards received by tap while home is the visible screen.
+  StreamSubscription<Uint8List>? _cardTapSub;
+  bool _routeVisible = true;
+  bool _subscribedToRoutes = false;
 
   @override
   void initState() {
@@ -66,10 +77,97 @@ class _VayuHomePageState extends State<VayuHomePage>
       _pulseController.repeat();
     }
 
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _autoStartDiscoveryIfReady();
-      if (Platform.isAndroid && !isTesting) _listenForSharedFiles();
+      if (Platform.isAndroid && !isTesting) {
+        _listenForSharedFiles();
+        _startTapReading();
+      }
     });
+  }
+
+  // ------------------------------------------------------------ tap to share
+
+  bool get _canReadTaps =>
+      Platform.isAndroid &&
+      !Platform.environment.containsKey('FLUTTER_TEST') &&
+      !WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
+  void _startTapReading() {
+    if (!_canReadTaps || !_routeVisible || !mounted) return;
+    AppScope.of(context).nfcPairingService.startReading().ignore();
+  }
+
+  void _stopTapReading() {
+    if (!_canReadTaps || !mounted) return;
+    AppScope.of(context).nfcPairingService.stopListening().ignore();
+  }
+
+  @override
+  void didPushNext() {
+    // Another screen (pairing, my card, a sheet) now owns NFC.
+    _routeVisible = false;
+    _stopTapReading();
+  }
+
+  @override
+  void didPopNext() {
+    _routeVisible = true;
+    _startTapReading();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Android turns reader mode off when the app leaves the screen.
+    if (state == AppLifecycleState.resumed) _startTapReading();
+  }
+
+  Future<void> _onCardTapped(Uint8List bytes) async {
+    if (!mounted || !_routeVisible) return;
+    final card = ContactCard.tryParse(bytes);
+    if (card == null) return;
+    HapticFeedback.mediumImpact();
+    final container = AppScope.of(context);
+    await showReceivedCardSheet(
+      context,
+      container: container,
+      card: card,
+      onSave: () => _saveTappedCard(container, card),
+    );
+  }
+
+  /// Keeps the card in app-private storage, records it in History, and hands
+  /// it to the phone's contacts app, where the user confirms the save.
+  Future<void> _saveTappedCard(AppContainer container, ContactCard card) async {
+    try {
+      final dir =
+          await const ContactPicker().privateDirectory() ??
+          await container.storageService.getDownloadsDirectory();
+      final path = await container.storageService.resolveUniqueDestinationPath(
+        dir,
+        ContactCard.fileNameFor(card.displayName),
+      );
+      await File(path).writeAsBytes(card.vcard, flush: true);
+      await container.fileSharingCoordinator.history?.add(
+        TransferHistoryRecord(
+          transferId: 'tap-${DateTime.now().microsecondsSinceEpoch}',
+          outbound: false,
+          peerDeviceId: '',
+          peerName: card.displayName,
+          fileName: ContactCard.fileNameFor(card.displayName),
+          sizeBytes: card.vcard.length,
+          mimeType: 'text/vcard',
+          isContact: true,
+          outcome: TransferOutcome.completed,
+          finishedAt: DateTime.now(),
+          savedPath: path,
+        ),
+      );
+      await container.platformService.openFile(path, mimeType: 'text/x-vcard');
+    } catch (e) {
+      if (mounted) _showError(friendlyError(e));
+    }
   }
 
   /// "Share to Vayu" from other apps lands here: go straight to device choice.
@@ -93,10 +191,8 @@ class _VayuHomePageState extends State<VayuHomePage>
     if (!mounted) return;
     final container = AppScope.of(context);
     try {
-      final raw = container.capabilityCoordinator.rawCapabilities;
-      if (raw.isNearbyPermissionNotRequested) {
-        await container.capabilityCoordinator.requestNearbyAccess();
-      }
+      // Nearby access is asked in onboarding, by the setup banner, or when
+      // the user taps Send; never unprompted here.
       if (container.capabilityCoordinator.state.hasAnyReady &&
           container.discoveryStatus == DiscoveryStatus.idle) {
         await container.startDiscoveryAndAdvertising();
@@ -108,6 +204,16 @@ class _VayuHomePageState extends State<VayuHomePage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final container = AppScope.of(context);
+    final route = ModalRoute.of(context);
+    if (!_subscribedToRoutes && route != null) {
+      vayuRouteObserver.subscribe(this, route);
+      _subscribedToRoutes = true;
+    }
+    if (container.isInitialized) {
+      _cardTapSub ??= container.nfcPairingService.onCardReceived.listen(
+        _onCardTapped,
+      );
+    }
     _incomingRequestsSub?.cancel();
     _incomingRequestsSub = container.incomingTransferRequests.listen((request) {
       if (mounted) {
@@ -132,6 +238,10 @@ class _VayuHomePageState extends State<VayuHomePage>
 
   @override
   void dispose() {
+    vayuRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    _cardTapSub?.cancel();
+    _stopTapReading();
     _pulseController.dispose();
     _incomingRequestsSub?.cancel();
     _incomingBatchesSub?.cancel();
@@ -149,6 +259,11 @@ class _VayuHomePageState extends State<VayuHomePage>
         titleSpacing: 20,
         title: const _Wordmark(),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.badge_outlined),
+            tooltip: 'My card',
+            onPressed: () => MyCardPage.open(context, container),
+          ),
           IconButton(
             icon: const Icon(Icons.qr_code_2_rounded),
             tooltip: 'Pair with QR or NFC',
@@ -610,35 +725,10 @@ class _VayuHomePageState extends State<VayuHomePage>
   Future<void> _shareContactFromHero(AppContainer container) async {
     final contact = await _pickContact();
     if (contact == null || !mounted) return;
-    final peers = container.discoveredPeers;
-    if (peers.isEmpty) {
-      _showError('No nearby devices yet. Open Vayu on the other phone first.');
-      return;
-    }
-    final peer = await showModalBottomSheet<DiscoveredPeer>(
-      context: context,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
-              child: Text(
-                'Send ${contact.name} to',
-                style: Theme.of(sheetContext).textTheme.titleMedium,
-              ),
-            ),
-            for (final p in peers)
-              ListTile(
-                leading: DeviceAvatar(name: p.displayName, seed: p.deviceId),
-                title: Text(p.displayName),
-                onTap: () => Navigator.of(sheetContext).pop(p),
-              ),
-            const SizedBox(height: 12),
-          ],
-        ),
-      ),
+    final peer = await pickNearbyPeer(
+      context,
+      container: container,
+      title: 'Send ${contact.name} to',
     );
     if (peer != null && mounted) {
       try {

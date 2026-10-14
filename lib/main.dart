@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:vayu/core/constants/app_constants.dart';
@@ -7,8 +9,11 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_scope.dart';
 import 'package:vayu/ui/app_error_handling.dart';
 import 'package:vayu/ui/home/vayu_home_page.dart';
+import 'package:vayu/ui/onboarding/onboarding_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/widgets/route_observer.dart';
+import 'package:vayu/ui/widgets/vayu_mark.dart';
 
 void main(List<String> args) {
   AppPaths.configureFromArgs(args);
@@ -76,19 +81,31 @@ class _VayuAppState extends State<VayuApp> {
             title: AppConstants.appName,
             debugShowCheckedModeBanner: false,
             scaffoldMessengerKey: rootMessengerKey,
+            navigatorObservers: [vayuRouteObserver],
             theme: VayuTheme.light(),
             darkTheme: VayuTheme.dark(),
             themeMode: _themeModeFor(settings),
             home: FutureBuilder<void>(
               future: _initFuture,
               builder: (context, snapshot) {
+                final Widget page;
                 if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const _StartupScreen();
+                  page = const _StartupScreen();
+                } else if (snapshot.hasError) {
+                  page = const _StartupErrorScreen();
+                } else if (settings.needsOnboarding) {
+                  page = OnboardingPage(container: _container);
+                } else {
+                  page = const VayuHomePage();
                 }
-                if (snapshot.hasError) {
-                  return const _StartupErrorScreen();
-                }
-                return const VayuHomePage();
+                // Each stage fades into the next instead of jumping.
+                return AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 350),
+                  child: KeyedSubtree(
+                    key: ValueKey(page.runtimeType),
+                    child: page,
+                  ),
+                );
               },
             ),
           );
@@ -98,36 +115,48 @@ class _VayuAppState extends State<VayuApp> {
   }
 }
 
-class _StartupScreen extends StatelessWidget {
+/// Matches the native splash (same background and mark), so start-up looks
+/// like one continuous screen. A spinner appears only if start-up is slow.
+class _StartupScreen extends StatefulWidget {
   const _StartupScreen();
 
   @override
+  State<_StartupScreen> createState() => _StartupScreenState();
+}
+
+class _StartupScreenState extends State<_StartupScreen> {
+  Timer? _slowTimer;
+  bool _slow = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _slowTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted) setState(() => _slow = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _slowTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final palette = VayuPalette.of(context);
-    final theme = Theme.of(context);
     return Scaffold(
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                gradient: palette.heroGradient,
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: Icon(Icons.air_rounded, color: palette.heroGlow, size: 40),
-            ),
-            const SizedBox(height: 20),
-            Text(AppConstants.appName, style: theme.textTheme.headlineMedium),
-            const SizedBox(height: 4),
-            Text('by Achyrio', style: theme.textTheme.bodySmall),
-            const SizedBox(height: 28),
-            const SizedBox(
+            const VayuMark(size: 96),
+            const SizedBox(height: 32),
+            SizedBox(
               width: 22,
               height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
+              child: _slow
+                  ? const CircularProgressIndicator(strokeWidth: 2.4)
+                  : null,
             ),
           ],
         ),

@@ -77,6 +77,8 @@ class NfcPairingService {
       StreamController<PairingPayload>.broadcast();
   final StreamController<NfcOperationStatus> _statusController =
       StreamController<NfcOperationStatus>.broadcast();
+  final StreamController<Uint8List> _cardController =
+      StreamController<Uint8List>.broadcast();
 
   NfcOperationStatus _currentStatus = NfcOperationStatus.idle;
   bool _isDisposed = false;
@@ -86,6 +88,10 @@ class NfcPairingService {
   NfcOperationStatus get status => _currentStatus;
   Stream<PairingPayload> get onPayloadReceived => _payloadController.stream;
   Stream<NfcOperationStatus> get onStatusChanged => _statusController.stream;
+
+  /// vCards received by tap (a phone showing its Vayu card). Pairing codes
+  /// keep arriving on [onPayloadReceived] as before.
+  Stream<Uint8List> get onCardReceived => _cardController.stream;
 
   /// Whether NFC hardware is present and supported on this device.
   Future<bool> get isNfcAvailable async {
@@ -233,6 +239,11 @@ class NfcPairingService {
   }
 
   void _handleTagDiscovered(Uint8List ndefBytes) {
+    if (_looksLikeVcard(ndefBytes)) {
+      AppLogger.info('NfcPairingService', 'Received a contact card by tap');
+      if (!_cardController.isClosed) _cardController.add(ndefBytes);
+      return;
+    }
     try {
       final payload = PairingPayload.fromNdefBytes(ndefBytes);
       AppLogger.info(
@@ -248,6 +259,35 @@ class NfcPairingService {
         'Received unparseable or malformed NFC NDEF record: $e',
       );
       _updateStatus(NfcOperationStatus.invalidPayload);
+    }
+  }
+
+  static final List<int> _vcardPrefix = 'BEGIN:VCARD'.codeUnits;
+
+  static bool _looksLikeVcard(Uint8List bytes) {
+    if (bytes.length < _vcardPrefix.length) return false;
+    for (var i = 0; i < _vcardPrefix.length; i++) {
+      final b = bytes[i];
+      final upper = b >= 0x61 && b <= 0x7A ? b - 0x20 : b;
+      if (upper != _vcardPrefix[i]) return false;
+    }
+    return true;
+  }
+
+  /// Serves [vcard] over NFC (host card emulation) until [stopSharing], so a
+  /// phone tapped against this one receives the card.
+  Future<NfcOperationResult> shareCard(Uint8List vcard) async {
+    final adapter = platformAdapter;
+    if (_isDisposed || adapter == null) return NfcOperationResult.unsupported;
+    if (!await isNfcAvailable) return NfcOperationResult.unsupported;
+    if (!await isNfcEnabled) return NfcOperationResult.disabled;
+    try {
+      await adapter.writeNdef(vcard);
+      _updateStatus(NfcOperationStatus.writing);
+      return const NfcOperationResult(status: NfcOperationStatus.success);
+    } catch (e) {
+      AppLogger.warning('NfcPairingService', 'Sharing card failed: $e');
+      return const NfcOperationResult(status: NfcOperationStatus.error);
     }
   }
 
@@ -271,6 +311,9 @@ class NfcPairingService {
     }
     if (!_statusController.isClosed) {
       await _statusController.close();
+    }
+    if (!_cardController.isClosed) {
+      await _cardController.close();
     }
   }
 }

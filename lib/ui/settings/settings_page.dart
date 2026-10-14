@@ -7,6 +7,7 @@ import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
 import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
 import 'package:vayu/ui/widgets/rename_device_sheet.dart';
+import 'package:vayu/ui/card/my_card_page.dart';
 
 /// Settings Screen (UI10, UI9, Section 30 & 31).
 ///
@@ -80,7 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 children: [
                   // 1. Device Profile & Display Name
-                  _buildSectionHeader(theme, 'Device Identity'),
+                  _buildSectionHeader(theme, 'You'),
                   _buildProfileCard(context, theme, container),
                   const SizedBox(height: 16),
 
@@ -89,7 +90,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 16),
 
                   // 2. Battery Saver UI (UI9 & Section 30)
-                  _buildSectionHeader(theme, 'Battery Saver'),
+                  _buildSectionHeader(theme, 'Battery'),
                   _buildBatterySaverCard(theme, container, settings, orchState),
                   const SizedBox(height: 16),
 
@@ -99,12 +100,12 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 16),
 
                   // 4. Permissions & Privacy
-                  _buildSectionHeader(theme, 'Permissions & Privacy'),
+                  _buildSectionHeader(theme, 'Privacy'),
                   _buildPermissionsCard(context, theme, container),
                   const SizedBox(height: 16),
 
                   // 5. Diagnostics & Troubleshooting (UI11)
-                  _buildSectionHeader(theme, 'Diagnostics'),
+                  _buildSectionHeader(theme, 'Advanced'),
                   _buildDiagnosticsCard(context, theme, container),
                   const SizedBox(height: 16),
 
@@ -182,25 +183,42 @@ class _SettingsPageState extends State<SettingsPage> {
     AppContainer container,
   ) {
     final currentName = container.identity?.displayName ?? 'Vayu-Device';
-    final deviceId = container.identity?.idHex ?? '';
-    final shortId = deviceId.length >= 8 ? deviceId.substring(0, 8) : deviceId;
-
     return Card(
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primaryContainer,
-          foregroundColor: theme.colorScheme.onPrimaryContainer,
-          child: const Icon(Icons.devices_rounded),
-        ),
-        title: Text(
-          currentName,
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Text('Device ID: $shortId...'),
-        trailing: FilledButton.tonal(
-          onPressed: () => _showEditNameDialog(context, currentName),
-          child: const Text('Edit'),
-        ),
+      child: Column(
+        children: [
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: theme.colorScheme.primaryContainer,
+              foregroundColor: theme.colorScheme.onPrimaryContainer,
+              child: const Icon(Icons.devices_rounded),
+            ),
+            title: Text(
+              currentName,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            subtitle: const Text('Your phone name'),
+            trailing: FilledButton.tonal(
+              onPressed: () => _showEditNameDialog(context, currentName),
+              child: const Text('Edit'),
+            ),
+          ),
+          const Divider(height: 1, thickness: 0.5),
+          ListTile(
+            leading: CircleAvatar(
+              backgroundColor: theme.colorScheme.secondaryContainer,
+              foregroundColor: theme.colorScheme.onSecondaryContainer,
+              child: const Icon(Icons.badge_outlined),
+            ),
+            title: const Text('My card'),
+            subtitle: Text(
+              container.myCard == null
+                  ? 'Create a card to share by tap'
+                  : 'Share your contact details',
+            ),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => MyCardPage.open(context, container),
+          ),
+        ],
       ),
     );
   }
@@ -234,7 +252,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(width: 8),
                     const Text(
-                      'Power Saving Policy',
+                      'Battery saver',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
                   ],
@@ -270,7 +288,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ButtonSegment(value: BatterySaverMode.on, label: Text('On')),
                 ButtonSegment(
                   value: BatterySaverMode.system,
-                  label: Text('Follow System'),
+                  label: Text('Automatic'),
                 ),
               ],
               selected: {settings.batterySaverMode},
@@ -287,16 +305,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Vayu will reduce unnecessary background discovery and consider '
-              'battery usage when selecting transports. High-speed LAN is still chosen '
-              'for large files to minimize radio active time.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
           ],
         ),
       ),
@@ -308,11 +316,11 @@ class _SettingsPageState extends State<SettingsPage> {
       child: ListTile(
         leading: Icon(Icons.folder_rounded, color: theme.colorScheme.primary),
         title: const Text(
-          'Downloads Directory',
+          'Received files',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: _isLoadingDownloads
-            ? const Text('Loading path...')
+            ? const Text('Loading…')
             : Text(
                 _downloadsDir ?? 'Default system downloads',
                 style: const TextStyle(fontSize: 12),
@@ -334,8 +342,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Icons.shield_outlined,
               color: theme.colorScheme.primary,
             ),
-            title: const Text('Permission Rationale'),
-            subtitle: const Text('Why Vayu needs local radio access'),
+            title: const Text('Why Vayu asks for permissions'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => PermissionsRationaleDialog.show(context),
           ),
@@ -345,8 +352,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Icons.settings_outlined,
               color: theme.colorScheme.primary,
             ),
-            title: const Text('System App Settings'),
-            subtitle: const Text('Manage permissions in device settings'),
+            title: const Text('Phone settings for Vayu'),
             trailing: const Icon(Icons.open_in_new_rounded, size: 18),
             onTap: () => container.platformService.openAppSettings(),
           ),
@@ -367,10 +373,10 @@ class _SettingsPageState extends State<SettingsPage> {
           color: theme.colorScheme.primary,
         ),
         title: const Text(
-          'Diagnostics & Telemetry',
+          'Diagnostics',
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
-        subtitle: const Text('Live hardware, network, and radio logs'),
+        subtitle: const Text('Connection details and transfer speed'),
         trailing: const Icon(Icons.chevron_right_rounded),
         onTap: () {
           Navigator.of(context).push(
@@ -407,8 +413,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Vayu is a product by Achyrio. Local-first, encrypted peer-to-peer data sharing '
-              'without intermediaries, cloud servers, or account logins. Built for speed, privacy, and resilience.',
+              'Share files with phones nearby. Encrypted, offline, no account.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),

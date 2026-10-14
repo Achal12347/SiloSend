@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
@@ -167,8 +168,11 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
         if (mounted) setState(() {});
       },
     );
+    final wasFinished = task.status == TransferStatus.completed;
     task.done.then(
       (_) {
+        // A gentle tick when a file finishes while the user is watching.
+        if (!wasFinished && mounted) HapticFeedback.lightImpact();
         if (mounted) setState(() {});
       },
       onError: (Object e) {
