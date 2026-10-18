@@ -130,9 +130,8 @@ class TransportSelectionPolicy {
     required TransportSelectionRequest request,
     required DeviceCapabilities localCapabilities,
   }) {
-    // Check if transport is implemented in Vayu
     if (transport == TransportType.wifiDirect) {
-      return 'transport_unimplemented';
+      return _wifiDirectDisqualification(request, localCapabilities);
     }
 
     // Check local hardware capability
@@ -163,6 +162,33 @@ class TransportSelectionPolicy {
     return null;
   }
 
+  /// Wi-Fi Direct is used when the peer cannot be reached on a shared
+  /// network: found over Bluetooth, which carries the group's credentials
+  /// inside the encrypted session. Small items stay on Bluetooth (making a
+  /// group takes seconds).
+  String? _wifiDirectDisqualification(
+    TransportSelectionRequest request,
+    DeviceCapabilities localCapabilities,
+  ) {
+    final peer = request.targetPeer;
+    if (!localCapabilities.supportsWifiDirect) {
+      return 'local_hardware_unsupported';
+    }
+    if (!peer.availableTransports.contains(TransportType.wifiDirect)) {
+      return 'peer_missing_transport';
+    }
+    final bleEndpoint = peer.bleEndpoint;
+    if (!peer.availableTransports.contains(TransportType.ble) ||
+        bleEndpoint == null ||
+        bleEndpoint.isEmpty) {
+      return 'no_bluetooth_to_hand_over';
+    }
+    if (request.payloadSizeBytes <= bleOptimalPayloadBytes) {
+      return 'payload_small_use_ble';
+    }
+    return null;
+  }
+
   /// Scores payload suitability for the candidate transport.
   double scorePayloadSuitability(
     TransportType transport,
@@ -178,7 +204,8 @@ class TransportSelectionPolicy {
       }
     }
 
-    if (transport == TransportType.lan) {
+    if (transport == TransportType.lan ||
+        transport == TransportType.wifiDirect) {
       if (payloadSizeBytes > bleMediumPayloadBytes) {
         return weightPayload; // 35.0 (Optimal for files, streams, large payloads)
       } else if (payloadSizeBytes > bleOptimalPayloadBytes) {

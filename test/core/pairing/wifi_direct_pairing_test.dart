@@ -28,8 +28,12 @@ class _FakeWifiDirect implements WifiDirectService {
   bool get isHosting => hosting;
 
   @override
-  Future<({WifiDirectGroup? group, HotspotStartError? error})>
-  createGroup() async {
+  Future<bool> supports5Ghz() async => true;
+
+  @override
+  Future<({WifiDirectGroup? group, HotspotStartError? error})> createGroup({
+    bool allow5Ghz = true,
+  }) async {
     calls.add('create');
     final error = createError;
     if (error != null) return (group: null, error: error);

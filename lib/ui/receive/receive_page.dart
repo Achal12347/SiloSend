@@ -143,7 +143,22 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       // user asked for one: explain its permission before Android asks.
       // On a shared Wi-Fi it is only an extra, tried when already allowed.
       final needDirect = _useHotspot || !raw.canUseLan;
-      if (needDirect && mounted) {
+      // Phones that find this one over Bluetooth (not on the same Wi-Fi)
+      // send over a Wi-Fi Direct group this phone hosts: explain and ask
+      // once while the user is here to receive.
+      var askForBluetoothSenders = false;
+      if (_c.wifiDirectSupported) {
+        final report = await _c.permissionManager.refresh();
+        final group = PermissionManager.groupFor(
+          VayuFeature.directWifi,
+          report.sdkVersion ?? 0,
+        );
+        askForBluetoothSenders =
+            group != null &&
+            _c.permissionManager.stateOf(group, report) ==
+                PermissionState.notRequested;
+      }
+      if ((needDirect || askForBluetoothSenders) && mounted) {
         await ensureFeature(context, _c, VayuFeature.directWifi);
       }
       final directReady = (await _c.permissionManager.check(

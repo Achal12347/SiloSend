@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/contracts/security_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/errors/app_error.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/security/crypto_service.dart';
@@ -80,13 +81,19 @@ class SecureSessionManager {
   /// Retrieves an active secure session by remote device ID hex.
   SecureSessionImpl? getSessionForPeer(String remoteDeviceId) {
     final clean = remoteDeviceId.replaceAll('-', '').toLowerCase();
+    SecureSessionImpl? bluetooth;
     for (final session in _sessions.values) {
       if (session.remoteDeviceId.replaceAll('-', '').toLowerCase() == clean &&
           session.isEstablished) {
-        return session;
+        // After a Wi-Fi Direct upgrade the peer has a Bluetooth session and
+        // a Wi-Fi one; transfers must use the Wi-Fi one.
+        if (session.connectionSession.connection.type != TransportType.ble) {
+          return session;
+        }
+        bluetooth ??= session;
       }
     }
-    return null;
+    return bluetooth;
   }
 
   /// Initializes or loads the persistent Ed25519 identity keypair from [SecureKeyStore].

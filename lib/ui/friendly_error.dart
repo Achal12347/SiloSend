@@ -3,10 +3,12 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import 'package:vayu/core/connection/link_upgrade_service.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/errors/app_error.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
+import 'package:vayu/domain/connection/link_upgrade_payloads.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 import 'package:vayu/ui/format.dart';
 
@@ -53,6 +55,20 @@ String friendlyError(Object error, {String? peerName}) {
   }
   if (error is TransferCancelledException) {
     return error.reason;
+  }
+  if (error is LinkUpgradeException) {
+    return switch (error.declined) {
+      LinkUpgradeDeclineReason.notReceiving =>
+        "$other isn't receiving right now. Ask them to tap Receive.",
+      LinkUpgradeDeclineReason.notAllowed =>
+        '$other has to allow Nearby Wi-Fi devices (and Location on older Android) to connect without a shared Wi-Fi.',
+      LinkUpgradeDeclineReason.unsupported =>
+        "$other can't make a direct Wi-Fi connection. Put both phones on the same Wi-Fi.",
+      LinkUpgradeDeclineReason.failed =>
+        "$other couldn't start a direct Wi-Fi connection. Try again.",
+      null =>
+        "Couldn't connect to $other over direct Wi-Fi. Move the phones closer and try again.",
+    };
   }
   if (error is NoViableTransportException ||
       error is SocketException ||

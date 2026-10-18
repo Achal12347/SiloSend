@@ -77,7 +77,13 @@ class WifiDirectHandler(
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "isSupported" -> result.success(isSupported())
-            "createGroup" -> withPermission(result) { createGroup(result) }
+            // Whether this phone can use a 5 GHz group (2.4 GHz-only phones
+            // cannot even see one).
+            "supports5Ghz" -> result.success(isSupported() && supports5Ghz())
+            "createGroup" -> {
+                val allow5Ghz = call.argument<Boolean>("allow5Ghz") ?: true
+                withPermission(result) { createGroup(result, allow5Ghz) }
+            }
             "removeGroup" -> {
                 stopHosting()
                 result.success(true)
@@ -148,8 +154,16 @@ class WifiDirectHandler(
 
     // ---------------------------------------------------------------- hosting
 
+    @Suppress("DEPRECATION")
+    private fun supports5Ghz(): Boolean = wifi.is5GHzBandSupported
+
+    /**
+     * Hosts a group. [allow5Ghz] false when the joining phone has no 5 GHz:
+     * the group is then made on 2.4 GHz, and a 5 GHz group already up is
+     * replaced.
+     */
     @SuppressLint("MissingPermission")
-    private fun createGroup(result: MethodChannel.Result) {
+    private fun createGroup(result: MethodChannel.Result, allow5Ghz: Boolean) {
         val m = manager
         val ch = p2p()
         if (m == null || ch == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -157,26 +171,52 @@ class WifiDirectHandler(
             return
         }
         if (hosting) {
-            describeGroup(m, ch, result, attempt = 0)
+            if (allow5Ghz) {
+                describeGroup(m, ch, result, attempt = 0)
+                return
+            }
+            m.requestGroupInfo(ch) { group ->
+                if (group != null && group.frequency >= 4900) {
+                    Log.i(TAG, "Replacing the 5 GHz group for a 2.4 GHz-only phone")
+                    hosting = false
+                    m.removeGroup(ch, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() = startGroup(m, ch, result, allow5Ghz)
+                        override fun onFailure(reason: Int) = startGroup(m, ch, result, allow5Ghz)
+                    })
+                } else {
+                    describeGroup(m, ch, result, attempt = 0)
+                }
+            }
             return
         }
         // A group left by an earlier screen (or another app) blocks creating one.
         m.removeGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = startGroup(m, ch, result)
-            override fun onFailure(reason: Int) = startGroup(m, ch, result)
+            override fun onSuccess() = startGroup(m, ch, result, allow5Ghz)
+            override fun onFailure(reason: Int) = startGroup(m, ch, result, allow5Ghz)
         })
     }
 
     @SuppressLint("MissingPermission")
-    private fun startGroup(m: WifiP2pManager, ch: WifiP2pManager.Channel, result: MethodChannel.Result) {
+    private fun startGroup(
+        m: WifiP2pManager,
+        ch: WifiP2pManager.Channel,
+        result: MethodChannel.Result,
+        allow5Ghz: Boolean,
+    ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         // 5 GHz is several times faster than 2.4 GHz; fall back when the phone
         // cannot host there (no 5 GHz, or its radio is tied to a 2.4 GHz router).
-        @Suppress("DEPRECATION")
-        val bands = if (wifi.is5GHzBandSupported) {
-            listOf(WifiP2pConfig.GROUP_OWNER_BAND_5GHZ, WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
-        } else {
-            listOf(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
+        // A 2.4 GHz-only joiner gets a 2.4 GHz group.
+        val bands = when {
+            !allow5Ghz -> listOf(
+                WifiP2pConfig.GROUP_OWNER_BAND_2GHZ,
+                WifiP2pConfig.GROUP_OWNER_BAND_AUTO,
+            )
+            supports5Ghz() -> listOf(
+                WifiP2pConfig.GROUP_OWNER_BAND_5GHZ,
+                WifiP2pConfig.GROUP_OWNER_BAND_AUTO,
+            )
+            else -> listOf(WifiP2pConfig.GROUP_OWNER_BAND_AUTO)
         }
         tryCreate(m, ch, bands, 0, result)
     }

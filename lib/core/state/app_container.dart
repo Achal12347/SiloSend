@@ -7,12 +7,14 @@ import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/connection/ble_connection_server.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/connection/link_upgrade_service.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
 import 'package:vayu/core/contacts/my_card_store.dart';
 import 'package:vayu/core/contacts/received_cards.dart';
 import 'package:vayu/core/permissions/permission_manager.dart';
+import 'package:vayu/domain/connection/link_upgrade_payloads.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -94,6 +96,7 @@ class AppContainer {
   final SessionLifecyclePolicy? _injectedSessionLifecyclePolicy;
   final FileSharingCoordinator? _injectedFileSharingCoordinator;
   final CapabilityCoordinator? _injectedCapabilityCoordinator;
+  final WifiDirectService? _injectedWifiDirectService;
 
   DiscoveryCoordinator? _discoveryCoordinator;
   CapabilityCoordinator? _capabilityCoordinator;
@@ -121,6 +124,10 @@ class AppContainer {
   PairingCoordinator? _pairingCoordinator;
   LocalHotspotService? _hotspotService;
   WifiDirectService? _wifiDirectService;
+  LinkUpgradeService? _linkUpgradeService;
+
+  /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
+  bool _wifiDirectSupported = false;
   AppOrchestrator? _orchestrator;
 
   UserSettings _userSettings = const UserSettings();
@@ -154,6 +161,7 @@ class AppContainer {
     SessionLifecyclePolicy? sessionLifecyclePolicy,
     FileSharingCoordinator? fileSharingCoordinator,
     CapabilityCoordinator? capabilityCoordinator,
+    WifiDirectService? wifiDirectService,
   }) : settingsStorage = settingsStorage ?? InMemorySettingsStorage(),
        _injectedDiscoveryCoordinator = discoveryCoordinator,
        _injectedConnectionManager = connectionManager,
@@ -171,7 +179,8 @@ class AppContainer {
        _injectedStorageService = storageService,
        _injectedSessionLifecyclePolicy = sessionLifecyclePolicy,
        _injectedFileSharingCoordinator = fileSharingCoordinator,
-       _injectedCapabilityCoordinator = capabilityCoordinator;
+       _injectedCapabilityCoordinator = capabilityCoordinator,
+       _injectedWifiDirectService = wifiDirectService;
 
   /// Factory producing a standard production container.
   factory AppContainer.standard({
@@ -196,6 +205,7 @@ class AppContainer {
     SessionLifecyclePolicy? sessionLifecyclePolicy,
     FileSharingCoordinator? fileSharingCoordinator,
     CapabilityCoordinator? capabilityCoordinator,
+    WifiDirectService? wifiDirectService,
   }) {
     final effectiveStorage = storage ?? _createDefaultFileStorage();
     final effectiveSettings =
@@ -226,6 +236,7 @@ class AppContainer {
       sessionLifecyclePolicy: sessionLifecyclePolicy,
       fileSharingCoordinator: fileSharingCoordinator,
       capabilityCoordinator: capabilityCoordinator,
+      wifiDirectService: wifiDirectService,
     );
   }
 
@@ -470,6 +481,22 @@ class AppContainer {
     await _transferHistory?.clear();
   }
 
+  /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
+  bool get wifiDirectSupported => _wifiDirectSupported;
+
+  /// Whether this phone may host a Wi-Fi Direct group for a phone that
+  /// found it over Bluetooth: only on the Receive screen (the same rule as
+  /// accepting files) and with Wi-Fi Direct allowed. Never asks for a
+  /// permission here: the request comes from another phone.
+  Future<LinkUpgradeDeclineReason?> _linkUpgradeBlocker() async {
+    final sharing = _fileSharingCoordinator;
+    if (sharing == null || !sharing.isReceiveScreenOpen) {
+      return LinkUpgradeDeclineReason.notReceiving;
+    }
+    final blockers = await permissionManager.check(VayuFeature.directWifi);
+    return blockers.isEmpty ? null : LinkUpgradeDeclineReason.notAllowed;
+  }
+
   /// What the platform reports when a transfer ends (speed diagnostics):
   /// Wi-Fi band and speed, thermal state, and whether this phone hosts a
   /// Wi-Fi Direct group meanwhile. Null when the platform reports nothing.
@@ -692,6 +719,17 @@ class AppContainer {
         }
       }
 
+      // 6b. Phone-to-phone Wi-Fi (hotspot and Wi-Fi Direct)
+      _hotspotService = Platform.isAndroid && !_isTestEnvironment
+          ? AndroidHotspotService()
+          : const UnsupportedHotspotService();
+      _wifiDirectService =
+          _injectedWifiDirectService ??
+          (Platform.isAndroid && !_isTestEnvironment
+              ? AndroidWifiDirectService()
+              : const UnsupportedWifiDirectService());
+      _wifiDirectSupported = await _wifiDirectService!.isSupported();
+
       // 7. Initialize Connection Manager
       if (_injectedConnectionManager != null) {
         _connectionManager = _injectedConnectionManager;
@@ -705,6 +743,7 @@ class AppContainer {
           supportedTransports: {
             TransportType.lan,
             if (_capabilities.supportsBle) TransportType.ble,
+            if (_wifiDirectSupported) TransportType.wifiDirect,
           },
         );
 
@@ -782,6 +821,20 @@ class AppContainer {
       }
       transferStatsLog?.environmentProbe = _transferEnvironment;
 
+      // 10b. Wi-Fi Direct hand-over for sessions found over Bluetooth
+      _linkUpgradeService = LinkUpgradeService(
+        localDeviceId: () => identity?.idHex ?? loadedIdentity.idHex,
+        wifiDirect: _wifiDirectService!,
+        hotspot: _hotspotService!,
+        lanPort: () => _lanServer?.boundPort,
+        hostingBlocker: _linkUpgradeBlocker,
+        sessionChanges: _connectionManager!.activeSessionsStream,
+      );
+      final engine = _transferEngine;
+      if (engine is TransferEngineImpl) {
+        _linkUpgradeService!.attach(engine.linkUpgradePackets);
+      }
+
       // 11. Initialize Battery State Provider & Smart Transport Selector (Phase 8)
       _batteryProvider = _injectedBatteryProvider ?? SystemBatteryProvider();
       _transportSelector =
@@ -791,6 +844,8 @@ class AppContainer {
             batteryProvider: _batteryProvider!,
             connectionManager: _connectionManager!,
             secureSessionManager: _secureSessionManager!,
+            linkUpgrade: _linkUpgradeService,
+            wifiDirectSupported: () async => _wifiDirectSupported,
           );
 
       // 12. Initialize File Services, Storage Services & File Sharing Coordinator (Phase 9)
@@ -853,12 +908,6 @@ class AppContainer {
       // nobody nearby can make this phone show prompts.
       _fileSharingCoordinator!.acceptOffersOutsideReceive = false;
 
-      _hotspotService = Platform.isAndroid && !_isTestEnvironment
-          ? AndroidHotspotService()
-          : const UnsupportedHotspotService();
-      _wifiDirectService = Platform.isAndroid && !_isTestEnvironment
-          ? AndroidWifiDirectService()
-          : const UnsupportedWifiDirectService();
       _pairingCoordinator = PairingCoordinator(
         identity: () => identity,
         lanPort: () => _lanServer?.boundPort,
@@ -1099,6 +1148,8 @@ class AppContainer {
     final supported = <TransportType>{
       if (canLan) TransportType.lan,
       if (canBle) TransportType.ble,
+      // Credentials travel over Bluetooth, so only with Bluetooth.
+      if (canBle && _wifiDirectSupported) TransportType.wifiDirect,
     };
 
     final serverPort = _lanServer?.boundPort ?? 53531;
@@ -1168,6 +1219,8 @@ class AppContainer {
     if (_wifiDirectService?.isHosting ?? false) {
       _wifiDirectService?.removeGroup();
     }
+    _linkUpgradeService?.dispose();
+    _linkUpgradeService = null;
     _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();

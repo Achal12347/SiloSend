@@ -269,7 +269,7 @@ void main() {
     });
 
     test(
-      'Wi-Fi Direct is truthfully reported as unimplemented and disqualified',
+      'Wi-Fi Direct is disqualified on a phone that cannot hand it over',
       () async {
         final peer = DiscoveredPeer(
           deviceId: '66778899aabbccddeeff001122334455',
@@ -289,12 +289,13 @@ void main() {
           TransportSelectionRequest(targetPeer: peer),
         );
 
-        // WifiDirect was evaluated but marked unavailable
+        // This selector has no link upgrade service: Wi-Fi Direct is
+        // evaluated but never offered.
         final wifiCandidate = result.rankedCandidates.firstWhere(
           (c) => c.transport == TransportType.wifiDirect,
         );
         expect(wifiCandidate.isAvailable, isFalse);
-        expect(wifiCandidate.disqualifyReason, 'transport_unimplemented');
+        expect(wifiCandidate.disqualifyReason, 'local_hardware_unsupported');
         expect(wifiCandidate.score, 0.0);
       },
     );

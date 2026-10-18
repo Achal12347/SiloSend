@@ -24,9 +24,16 @@ abstract class WifiDirectService {
 
   bool get isHosting;
 
+  /// Whether this phone can join a 5 GHz group (false on 2.4 GHz-only
+  /// phones such as the Poco C3, and where Wi-Fi Direct is missing).
+  Future<bool> supports5Ghz();
+
   /// Creates a group (or reports the one already up). Failures use the
   /// hotspot error kinds so screens explain them the same way.
-  Future<({WifiDirectGroup? group, HotspotStartError? error})> createGroup();
+  /// [allow5Ghz] false makes a 2.4 GHz group for a phone without 5 GHz.
+  Future<({WifiDirectGroup? group, HotspotStartError? error})> createGroup({
+    bool allow5Ghz = true,
+  });
 
   Future<void> removeGroup();
 
@@ -47,8 +54,11 @@ class UnsupportedWifiDirectService implements WifiDirectService {
   @override
   bool get isHosting => false;
   @override
-  Future<({WifiDirectGroup? group, HotspotStartError? error})>
-  createGroup() async => (group: null, error: HotspotStartError.unsupported);
+  Future<bool> supports5Ghz() async => false;
+  @override
+  Future<({WifiDirectGroup? group, HotspotStartError? error})> createGroup({
+    bool allow5Ghz = true,
+  }) async => (group: null, error: HotspotStartError.unsupported);
   @override
   Future<void> removeGroup() async {}
   @override
@@ -84,12 +94,28 @@ class AndroidWifiDirectService implements WifiDirectService {
     }
   }
 
+  bool? _fiveGhz;
+
   @override
-  Future<({WifiDirectGroup? group, HotspotStartError? error})>
-  createGroup() async {
+  Future<bool> supports5Ghz() async {
+    final known = _fiveGhz;
+    if (known != null) return known;
+    try {
+      return _fiveGhz =
+          await _channel.invokeMethod<bool>('supports5Ghz') ?? false;
+    } catch (_) {
+      return _fiveGhz = false;
+    }
+  }
+
+  @override
+  Future<({WifiDirectGroup? group, HotspotStartError? error})> createGroup({
+    bool allow5Ghz = true,
+  }) async {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'createGroup',
+        {'allow5Ghz': allow5Ghz},
       );
       if (result == null) {
         return (group: null, error: HotspotStartError.failed);

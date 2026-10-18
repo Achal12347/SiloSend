@@ -45,6 +45,16 @@ class TransferEngineImpl implements TransferEngine {
   final StreamController<IncomingBatchRequest> _incomingBatchesController =
       StreamController<IncomingBatchRequest>.broadcast();
   final Map<String, StreamSubscription<VayuPacket>> _sessionSubscriptions = {};
+  // The engine is the one subscriber of every session's packets (a later
+  // subscriber could miss the first ones), so it hands Wi-Fi Direct upgrade
+  // messages on to the connection layer.
+  final StreamController<({SecureSession session, VayuPacket packet})>
+  _linkUpgradePackets = StreamController.broadcast();
+
+  /// Link upgrade requests and answers (packets 0x40/0x41) of any session.
+  Stream<({SecureSession session, VayuPacket packet})> get linkUpgradePackets =>
+      _linkUpgradePackets.stream;
+
   final StreamController<IncomingTransferRequest> _incomingRequestsController =
       StreamController<IncomingTransferRequest>.broadcast();
   StreamSubscription<SecureSession>? _newSessionSubscription;
@@ -351,6 +361,13 @@ class TransferEngineImpl implements TransferEngine {
 
       case PacketType.transferDigest:
         _handleDigestPacket(session, packet);
+        break;
+
+      case PacketType.linkUpgradeRequest:
+      case PacketType.linkUpgradeResponse:
+        if (!_linkUpgradePackets.isClosed) {
+          _linkUpgradePackets.add((session: session, packet: packet));
+        }
         break;
 
       default:
@@ -835,6 +852,7 @@ class TransferEngineImpl implements TransferEngine {
       await sub.cancel();
     }
     _sessionSubscriptions.clear();
+    await _linkUpgradePackets.close();
 
     for (final task in _tasks.values.toList()) {
       await task.cancel('TransferEngine disposed');
