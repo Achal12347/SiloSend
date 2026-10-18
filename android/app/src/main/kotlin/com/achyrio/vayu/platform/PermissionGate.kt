@@ -8,6 +8,8 @@ import android.os.Build
 import android.os.SystemClock
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 
 /**
  * Every runtime permission Vayu asks for goes through here.
@@ -109,6 +111,33 @@ class PermissionGate(private val activity: Activity) {
     private var rationaleBefore: Map<String, Boolean> = emptyMap()
     private var askedAt = 0L
 
+    // Android only shows a dialog to a resumed activity; a request made in the
+    // background waits here until the user is back.
+    private var resumed = (activity as? LifecycleOwner)
+        ?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) == true
+    private var pausedSinceAsk = false
+
+    /** Called from the activity's onResume. */
+    fun onResume() {
+        resumed = true
+        val lost = current
+        if (lost != null && pausedSinceAsk) {
+            // Android delivers the answer before onResume. Reaching here with
+            // the request still open means the answer was dropped; without
+            // this, the caller (and every later request) would wait forever.
+            current = null
+            pausedSinceAsk = false
+            lost.callback(status(lost.permissions))
+        }
+        pump()
+    }
+
+    /** Called from the activity's onPause. */
+    fun onPause() {
+        resumed = false
+        if (current != null) pausedSinceAsk = true
+    }
+
     private val prefs get() = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun granted(permission: String) =
@@ -149,8 +178,17 @@ class PermissionGate(private val activity: Activity) {
         pump()
     }
 
+    /**
+     * True when Android would show the explanation-worthy "denied once" state:
+     * the user refused before and the dialog can still be shown.
+     */
+    fun rationale(permissions: List<String>): Boolean =
+        permissions.any {
+            !granted(it) && ActivityCompat.shouldShowRequestPermissionRationale(activity, it)
+        }
+
     private fun pump() {
-        if (current != null) return
+        if (current != null || !resumed) return
         while (true) {
             val next = queue.removeFirstOrNull() ?: return
             // An earlier dialog may already have granted these.
@@ -160,6 +198,7 @@ class PermissionGate(private val activity: Activity) {
                 continue
             }
             current = next
+            pausedSinceAsk = false
             rationaleBefore = missing.associateWith {
                 ActivityCompat.shouldShowRequestPermissionRationale(activity, it)
             }
@@ -184,6 +223,7 @@ class PermissionGate(private val activity: Activity) {
         if (requestCode != REQUEST_CODE) return false
         val request = current ?: return true
         current = null
+        pausedSinceAsk = false
 
         // Empty results mean the request was interrupted (activity paused,
         // another dialog): nothing was answered, so nothing is recorded.

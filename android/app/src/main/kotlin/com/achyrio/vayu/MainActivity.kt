@@ -103,10 +103,12 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        permissionGate.onResume()
         nfcHandler?.onResume()
     }
 
     override fun onPause() {
+        permissionGate.onPause()
         nfcHandler?.onPause()
         super.onPause()
     }

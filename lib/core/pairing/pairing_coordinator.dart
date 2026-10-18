@@ -156,11 +156,15 @@ class PairingCoordinator {
   /// network (or [forceHotspot]), on a phone-hosted hotspot.
   /// Returns the payload (null if none could be made) and the hotspot error,
   /// if starting it failed.
+  ///
+  /// [tryWifiDirect] false skips the Wi-Fi Direct group (its permission is
+  /// only asked for when a direct connection is actually needed).
   Future<(PairingPayload?, HotspotStartError?)> prepareShowableCode({
     bool forceHotspot = false,
+    bool tryWifiDirect = true,
   }) async {
     var payload = await buildLocalPayload();
-    if (!forceHotspot && await wifiDirect.isSupported()) {
+    if (!forceHotspot && tryWifiDirect && await wifiDirect.isSupported()) {
       _groupRelease?.cancel();
       _groupRelease = null;
       final created = await wifiDirect.createGroup();

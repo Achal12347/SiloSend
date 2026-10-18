@@ -87,7 +87,11 @@ class TransferServiceHandler(
             return
         }
         val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_ASKED_NOTIFICATIONS, false)) {
+        // The gate's record is the one the Permissions screen shows; the old
+        // flag still counts for installs that asked before the gate existed.
+        if (permissions.status(listOf(permission)) != PermissionGate.NOT_REQUESTED ||
+            prefs.getBoolean(KEY_ASKED_NOTIFICATIONS, false)
+        ) {
             result.success(false)
             return
         }

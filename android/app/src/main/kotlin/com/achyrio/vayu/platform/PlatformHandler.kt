@@ -232,7 +232,14 @@ class PlatformHandler(
         // Location services must be on for Bluetooth scans before Android 12
         // and for phone-to-phone Wi-Fi before Android 13.
         val locationNeeded = sdk < Build.VERSION_CODES.TIRAMISU
+        // Groups refused once that Android will still ask for: the app should
+        // explain why before asking again.
+        val rationale = listOf("nearby", "directWifi", "camera", "notifications", "storage")
+            .filter { group ->
+                PermissionGate.permissionsFor(group)?.let { permissions.rationale(it) } == true
+            }
         return mapOf(
+            "rationale" to rationale,
             "sdkVersion" to sdk,
             "nearby" to permissions.status(PermissionGate.nearbyPermissions()),
             // Before Android 12 this is the same location permission as "nearby".
