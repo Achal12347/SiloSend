@@ -7,6 +7,7 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/device_capabilities.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
+import 'package:vayu/domain/identity/permission_report.dart';
 import 'package:vayu/platform/platform_service.dart';
 import 'package:vayu/ui/home/capability_setup_banner.dart';
 
@@ -50,6 +51,14 @@ class _FakeBannerPlatformService extends PlatformService {
   @override
   Future<bool> requestEnableBluetooth() async {
     bluetoothEnableRequested = true;
+    return true;
+  }
+
+  final openedPages = <SettingsPage>[];
+
+  @override
+  Future<bool> openSettingsPage(SettingsPage page) async {
+    openedPages.add(page);
     return true;
   }
 }
@@ -143,6 +152,54 @@ void main() {
       await tester.pump();
 
       expect(find.text('Bluetooth is off'), findsNothing);
+
+      container.dispose();
+    },
+  );
+
+  testWidgets(
+    'Android 10 with Location off offers Turn on Location, not "unavailable"',
+    (tester) async {
+      final fakePlatform = _FakeBannerPlatformService(
+        const SystemCapabilities(
+          platformName: 'android',
+          bluetoothState: RadioState.enabled,
+          nearbyPermission: PermissionStatus.granted,
+          locationRequiredForBle: true,
+          locationEnabled: false,
+          wifiEnabled: true,
+          lanState: NetworkState.lanAvailable,
+          sdkVersion: 29,
+        ),
+      );
+
+      final container = AppContainer.standard(
+        storage: InMemoryIdentityStorage(
+          LocalDeviceIdentity(
+            deviceId: Uint8List.fromList(List.filled(16, 1)),
+            displayName: 'TestDev',
+            platform: 'android',
+            createdAt: DateTime.now(),
+          ),
+        ),
+        platformService: fakePlatform,
+      );
+      await container.initialize();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: CapabilitySetupBanner(container: container)),
+        ),
+      );
+      await tester.pump();
+
+      expect(find.text('Location is off'), findsOneWidget);
+      expect(find.textContaining('Android 10'), findsOneWidget);
+      expect(find.text("Bluetooth isn't available"), findsNothing);
+
+      await tester.tap(find.text('Turn on Location'));
+      await tester.pump();
+      expect(fakePlatform.openedPages, [SettingsPage.location]);
 
       container.dispose();
     },

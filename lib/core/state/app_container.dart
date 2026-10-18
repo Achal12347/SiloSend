@@ -12,6 +12,7 @@ import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
 import 'package:vayu/core/contacts/my_card_store.dart';
 import 'package:vayu/core/contacts/received_cards.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -254,6 +255,20 @@ class AppContainer {
     );
     return caps;
   }
+
+  /// Permission and system-switch state for every screen. After any change it
+  /// refreshes the capability state, so discovery and the home banner follow.
+  late final PermissionManager permissionManager = PermissionManager(
+    platformService,
+    onChanged: () async {
+      final coordinator = _capabilityCoordinator;
+      if (coordinator != null) {
+        await coordinator.refresh();
+      } else {
+        await refreshCapabilities();
+      }
+    },
+  );
 
   /// Capability coordinator managing dynamic capability UX and recovery.
   CapabilityCoordinator get capabilityCoordinator {

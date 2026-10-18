@@ -7,6 +7,7 @@ import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/core/state/app_scope.dart';
@@ -30,6 +31,7 @@ import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/receive/receive_page.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
+import 'package:vayu/ui/widgets/permission_flow.dart';
 
 /// Primary Home screen.
 ///
@@ -621,13 +623,11 @@ class _VayuHomePageState extends State<VayuHomePage>
         await container.stopDiscoveryAndAdvertising();
       } else {
         final raw = container.capabilityCoordinator.rawCapabilities;
+        // Explain, then ask; if Android will not ask any more, the sheet
+        // offers the settings page. Either way Wi-Fi discovery starts below.
         if (raw.isNearbyPermissionNotRequested ||
             (raw.isNearbyPermissionMissing && !raw.canUseLan)) {
-          final status = await container.capabilityCoordinator
-              .requestNearbyAccess();
-          if (status.isPermanentlyDenied) {
-            await container.capabilityCoordinator.openAppSettings();
-          }
+          await ensureFeature(context, container, VayuFeature.findPhones);
         }
         await container.startDiscoveryAndAdvertising();
         container.discoverFor(AppContainer.discoveryWindow);

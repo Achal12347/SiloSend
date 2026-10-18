@@ -15,7 +15,6 @@ import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
-import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 

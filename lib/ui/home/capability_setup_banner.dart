@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
 import 'package:vayu/domain/identity/permission_report.dart';
 import 'package:vayu/ui/settings/permissions_page.dart';
+import 'package:vayu/ui/widgets/permission_flow.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Contextual capability and permission setup card.
@@ -110,8 +112,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(
-            onPressed: () =>
-                widget.container.capabilityCoordinator.openAppSettings(),
+            onPressed: _isProcessing ? null : _fixNearby,
             icon: const Icon(Icons.settings_rounded, size: 16),
             label: const Text('Open settings'),
           ),
@@ -125,6 +126,17 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
           ),
         );
       }
+      actions.add(
+        OutlinedButton.icon(
+          onPressed: () => widget.container.platformService.openWifiSettings(),
+          icon: const Icon(Icons.wifi_rounded, size: 16),
+          label: const Text('Connect to Wi-Fi'),
+        ),
+      );
+    } else if (_locationBlocksBluetooth(caps)) {
+      title = "Can't find phones yet";
+      explanation = _locationExplanation(caps);
+      actions.add(_turnOnLocationButton());
       actions.add(
         OutlinedButton.icon(
           onPressed: () => widget.container.platformService.openWifiSettings(),
@@ -181,8 +193,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       if (caps.isPermanentlyDenied) {
         actions.add(
           FilledButton.icon(
-            onPressed: () =>
-                widget.container.capabilityCoordinator.openAppSettings(),
+            onPressed: _isProcessing ? null : _fixNearby,
             icon: const Icon(Icons.settings_rounded, size: 16),
             label: const Text('Open settings'),
           ),
@@ -196,6 +207,10 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
           ),
         );
       }
+    } else if (_locationBlocksBluetooth(caps)) {
+      title = 'Location is off';
+      explanation = _locationExplanation(caps);
+      actions.add(_turnOnLocationButton());
     } else {
       title = "Bluetooth isn't available";
       explanation = 'You can still share with phones on your Wi-Fi.';
@@ -326,26 +341,50 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
     );
   }
 
-  Future<void> _requestNearbyPermission() async {
+  // The banner already says why, so Allow shows the system dialog at once.
+  // If Android will not ask any more, the sheet explains and opens the
+  // exact page, then re-checks when the user comes back.
+  Future<void> _requestNearbyPermission() => _runFlow(alreadyExplained: true);
+
+  Future<void> _fixNearby() => _runFlow(alreadyExplained: false);
+
+  Future<void> _runFlow({required bool alreadyExplained}) async {
     setState(() => _isProcessing = true);
     try {
-      final status = await widget.container.capabilityCoordinator
-          .requestNearbyAccess();
-      if (status == PermissionStatus.permanentlyDenied && mounted) {
-        showVayuNotice(
-          context,
-          'Allow Nearby devices for Vayu in your phone\'s settings.',
-          actionLabel: 'Settings',
-          onAction: () =>
-              widget.container.capabilityCoordinator.openAppSettings(),
-        );
-      }
+      await ensureFeature(
+        context,
+        widget.container,
+        VayuFeature.findPhones,
+        alreadyExplained: alreadyExplained,
+      );
     } finally {
       if (mounted) {
         setState(() => _isProcessing = false);
       }
     }
   }
+
+  /// Before Android 12, Bluetooth scans find nothing while Location is off.
+  static bool _locationBlocksBluetooth(SystemCapabilities caps) =>
+      caps.locationRequiredForBle &&
+      !caps.locationEnabled &&
+      !caps.isBluetoothOff &&
+      !caps.isNearbyPermissionMissing &&
+      caps.bluetoothState != RadioState.unsupported;
+
+  static String _locationExplanation(SystemCapabilities caps) {
+    final version = PermissionManager.androidVersionName(caps.sdkVersion ?? 0);
+    final android = version.isEmpty ? 'Android' : 'Android $version';
+    return '$android only finds Bluetooth devices while Location is on. Vayu never reads your location.';
+  }
+
+  Widget _turnOnLocationButton() => FilledButton.tonalIcon(
+    onPressed: () => widget.container.permissionManager.openSettingsFor(
+      const Blocker.switchOff(BlockerKind.locationOff),
+    ),
+    icon: const Icon(Icons.location_on_outlined, size: 16),
+    label: const Text('Turn on Location'),
+  );
 
   /// The system "Turn on Bluetooth?" dialog; when the phone cannot show it,
   /// offers the Bluetooth settings page instead.

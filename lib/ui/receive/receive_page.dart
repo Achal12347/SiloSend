@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
 import 'package:vayu/core/pairing/nfc_pairing_service.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
@@ -16,6 +17,7 @@ import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/nfc_off_row.dart';
+import 'package:vayu/ui/widgets/permission_flow.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// "Ready to receive": this phone is visible, shows a one-time code (QR and
@@ -48,6 +50,11 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   bool _preparing = true;
   bool _useHotspot = false;
   String? _problem;
+
+  /// Why the direct connection failed, when the user can fix it (a
+  /// permission or Location); fixed on return from Settings, the code is
+  /// prepared again by itself.
+  HotspotStartError? _fixable;
   bool _nfcReady = false;
   bool _nfcOff = false;
   DateTime? _endsAt;
@@ -70,11 +77,24 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
     // Back from the NFC settings page: serve the code by tap now.
     final payload = _payload;
-    if (state == AppLifecycleState.resumed && payload != null && !_nfcReady) {
+    if (payload != null && !_nfcReady) {
       _serveByTap(payload);
     }
+    // Back from Settings after allowing what the direct connection needed.
+    if (_fixable != null && !_preparing) _retryIfFixed();
+  }
+
+  Future<void> _retryIfFixed() async {
+    final blockers = await _c.permissionManager.check(VayuFeature.directWifi);
+    if (mounted && blockers.isEmpty && _fixable != null) _start();
+  }
+
+  /// "Fix" on the problem line: explain, allow, then prepare the code again.
+  Future<void> _fix() async {
+    if (await ensureFeature(context, _c, VayuFeature.directWifi)) _start();
   }
 
   Future<void> _serveByTap(PairingPayload payload) async {
@@ -108,19 +128,40 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     setState(() {
       _preparing = true;
       _problem = null;
+      _fixable = null;
     });
     try {
-      // Being findable is the point of this screen.
+      // Being findable is the point of this screen: explain and ask once.
       final raw = _c.capabilityCoordinator.rawCapabilities;
       if (raw.isNearbyPermissionNotRequested) {
-        await _c.capabilityCoordinator.requestNearbyAccess();
+        await ensureFeature(context, _c, VayuFeature.findPhones);
       }
       // Stay findable for as long as this screen is open.
       _c.holdDiscovery(this);
 
+      // A direct connection is needed without a shared Wi-Fi, or when the
+      // user asked for one: explain its permission before Android asks.
+      // On a shared Wi-Fi it is only an extra, tried when already allowed.
+      final needDirect = _useHotspot || !raw.canUseLan;
+      if (needDirect && mounted) {
+        await ensureFeature(context, _c, VayuFeature.directWifi);
+      }
+      final directReady = (await _c.permissionManager.check(
+        VayuFeature.directWifi,
+      )).isEmpty;
+
       final (payload, hotspotError) = await _c.pairingCoordinator
-          .prepareShowableCode(forceHotspot: _useHotspot);
-      if (hotspotError != null) _problem = _hotspotProblem(hotspotError);
+          .prepareShowableCode(
+            forceHotspot: _useHotspot,
+            tryWifiDirect: needDirect || directReady,
+          );
+      if (hotspotError != null) {
+        _problem = _hotspotProblem(hotspotError);
+        if (hotspotError == HotspotStartError.permissionDenied ||
+            hotspotError == HotspotStartError.locationOff) {
+          _fixable = hotspotError;
+        }
+      }
       if (payload != null) {
         _c.fileSharingCoordinator.startReceiveSession(
           payload.pairingToken,
@@ -307,7 +348,16 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
               ),
             ],
             const SizedBox(height: 24),
-            if (expired || _problem != null)
+            if (_fixable != null)
+              FilledButton(
+                onPressed: _preparing ? null : _fix,
+                child: Text(
+                  _fixable == HotspotStartError.locationOff
+                      ? 'Turn on Location'
+                      : 'Allow',
+                ),
+              )
+            else if (expired || _problem != null)
               FilledButton(
                 onPressed: _preparing ? null : _start,
                 child: const Text('Start again'),

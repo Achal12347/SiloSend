@@ -68,6 +68,10 @@ class PermissionReport {
   final SwitchState battery;
   final int? sdkVersion;
 
+  /// Groups the user refused once that Android will still ask for. Vayu
+  /// explains why before asking again.
+  final Set<PermissionGroup> rationale;
+
   const PermissionReport({
     required this.permissions,
     required this.bluetooth,
@@ -76,6 +80,7 @@ class PermissionReport {
     required this.nfc,
     required this.battery,
     this.sdkVersion,
+    this.rationale = const {},
   });
 
   /// A platform with nothing to grant (desktop, tests).
@@ -103,8 +108,16 @@ class PermissionReport {
         nfc: SwitchState.parse(map['nfc']),
         battery: SwitchState.parse(map['battery']),
         sdkVersion: map['sdkVersion'] as int?,
+        rationale: {
+          for (final name in (map['rationale'] as List?) ?? const [])
+            for (final group in PermissionGroup.values)
+              if (group.name == name) group,
+        },
       );
 
   PermissionStatus statusOf(PermissionGroup group) =>
       permissions[group] ?? PermissionStatus.unknown;
+
+  /// Whether [group] was refused once and can still be asked for.
+  bool needsRationale(PermissionGroup group) => rationale.contains(group);
 }

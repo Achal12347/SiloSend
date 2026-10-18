@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/permission_report.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
@@ -53,11 +54,10 @@ class _PermissionsPageState extends State<PermissionsPage>
   }
 
   Future<void> _refresh() async {
-    final report = await _c.platformService.permissionReport();
+    // Discovery and the home banner follow the new state too.
+    final report = await _c.permissionManager.recheck();
     if (!mounted) return;
     setState(() => _report = report);
-    // Discovery and the home banner follow the new state too.
-    _c.refreshCapabilities().ignore();
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -80,8 +80,8 @@ class _PermissionsPageState extends State<PermissionsPage>
           await _openSettings(settingsPage);
           return;
         }
-        final result = await _c.platformService.requestPermissionGroup(group);
-        if (result == PermissionStatus.permanentlyDenied && mounted) {
+        final result = await _c.permissionManager.request(group);
+        if (result == PermissionState.permanentlyDenied && mounted) {
           showVayuNotice(
             context,
             'Android will not ask again. Allow it on the page that opens.',
@@ -101,13 +101,8 @@ class _PermissionsPageState extends State<PermissionsPage>
     }
   }
 
-  Future<void> _turnOnBluetooth() => _run(() async {
-    final report = _report;
-    final canAsk =
-        report?.statusOf(PermissionGroup.nearby) == PermissionStatus.granted;
-    if (canAsk && await _c.platformService.requestEnableBluetooth()) return;
-    await _openSettings(SettingsPage.bluetooth);
-  });
+  Future<void> _turnOnBluetooth() =>
+      _run(() => _c.permissionManager.turnOnBluetooth());
 
   @override
   Widget build(BuildContext context) {
@@ -309,15 +304,10 @@ class _PermissionsPageState extends State<PermissionsPage>
     );
   }
 
-  static String _versionName(int sdk) => switch (sdk) {
-    26 => '8',
-    27 => '8.1',
-    28 => '9',
-    29 => '10',
-    30 => '11',
-    31 || 32 => '12',
-    _ => 'on this version',
-  };
+  static String _versionName(int sdk) {
+    final name = PermissionManager.androidVersionName(sdk);
+    return name.isEmpty ? 'on this version' : name;
+  }
 }
 
 enum _Tone { good, warn, bad, neutral }
