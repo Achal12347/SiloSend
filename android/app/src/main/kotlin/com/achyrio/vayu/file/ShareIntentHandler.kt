@@ -82,7 +82,17 @@ class ShareIntentHandler(private val activity: Activity) : MethodChannel.MethodC
             }
             else -> return emptyList()
         }
-        return uris.mapNotNull { describe(it, intent.type) }
+        return uris.filter(::isForeignContent).mapNotNull { describe(it, intent.type) }
+    }
+
+    /**
+     * Only content shared by another app. A file:// path or a link into Vayu's own
+     * provider would let any app make Vayu offer its private files for sending.
+     */
+    private fun isForeignContent(uri: Uri): Boolean {
+        if (uri.scheme != "content") return false
+        val authority = uri.authority ?: return false
+        return !authority.startsWith(activity.packageName)
     }
 
     private fun describe(uri: Uri, fallbackType: String?): Map<String, Any?>? {

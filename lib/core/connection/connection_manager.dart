@@ -57,8 +57,15 @@ class ConnectionManager {
   int _packetSequence = 1;
   bool _isDisposed = false;
 
+  /// Current display name for handshakes. The name can change while the app
+  /// runs (onboarding, rename); [localIdentity] is the identity at start.
+  final String Function()? displayName;
+
+  String get _displayName => displayName?.call() ?? localIdentity.displayName;
+
   ConnectionManager({
     required this.localIdentity,
+    this.displayName,
     this.supportedTransports = const {TransportType.lan},
     this.handshakeTimeout = const Duration(seconds: 10),
     this.pingInterval = ConnectionSession.defaultPingInterval,
@@ -230,7 +237,7 @@ class ConnectionManager {
       protocolVersion: localIdentity.protocolVersion,
       sessionId: sessionId,
       deviceIdHex: localIdentity.idHex,
-      displayName: localIdentity.displayName,
+      displayName: _displayName,
       platform: localIdentity.platform,
       supportedTransports: supportedTransports,
       accepted: true,
@@ -303,7 +310,34 @@ class ConnectionManager {
       await transport.close(reason: 'manager_disposed');
       return;
     }
+    // Anyone on the same network can connect. Bounding the peers that have
+    // not authenticated yet bounds what they can make a small phone buffer.
+    final unauthenticated =
+        _pendingIncoming +
+        _activeSessions.values
+            .where((s) => !s.isInitiator && s.state != SessionState.secured)
+            .length;
+    if (unauthenticated >= maxUnauthenticatedIncoming) {
+      AppLogger.warning(
+        'ConnectionManager',
+        'Refusing a connection: $unauthenticated peers still unauthenticated',
+      );
+      await transport.close(reason: 'too_many_pending');
+      return;
+    }
+    _pendingIncoming++;
+    try {
+      await _acceptIncomingTransport(transport);
+    } finally {
+      _pendingIncoming--;
+    }
+  }
 
+  /// Peers allowed to be connected but not yet authenticated at once.
+  static const int maxUnauthenticatedIncoming = 4;
+  int _pendingIncoming = 0;
+
+  Future<void> _acceptIncomingTransport(TransportConnection transport) async {
     final framed = FramedTransportConnection(transport);
     AppLogger.info(
       'ConnectionManager',
@@ -327,7 +361,7 @@ class ConnectionManager {
           protocolVersion: localIdentity.protocolVersion,
           sessionId: initPayload.sessionId,
           deviceIdHex: localIdentity.idHex,
-          displayName: localIdentity.displayName,
+          displayName: _displayName,
           platform: localIdentity.platform,
           supportedTransports: supportedTransports,
           accepted: false,
@@ -355,7 +389,7 @@ class ConnectionManager {
         protocolVersion: localIdentity.protocolVersion,
         sessionId: initPayload.sessionId,
         deviceIdHex: localIdentity.idHex,
-        displayName: localIdentity.displayName,
+        displayName: _displayName,
         platform: localIdentity.platform,
         supportedTransports: supportedTransports,
         accepted: true,

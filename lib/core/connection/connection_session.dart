@@ -291,6 +291,7 @@ class ConnectionSession {
 
   void _updateState(SessionState newState) {
     if (_info.state == newState) return;
+    if (newState == SessionState.secured) connection.allowFullSizePackets();
     _info = _info.copyWith(state: newState);
     if (!_stateController.isClosed) {
       _stateController.add(_info);

@@ -9,25 +9,21 @@ void main() {
       const settings = UserSettings();
       expect(settings.batterySaverMode, BatterySaverMode.system);
       expect(settings.customDisplayName, isNull);
-      expect(settings.customDownloadsPath, isNull);
     });
 
     test('Serializes and deserializes correctly to/from JSON', () {
       const settings = UserSettings(
         batterySaverMode: BatterySaverMode.on,
         customDisplayName: 'Pixel-Lab-01',
-        customDownloadsPath: '/sdcard/Download/CustomSilo',
       );
 
       final json = settings.toJson();
       expect(json['batterySaverMode'], 'on');
       expect(json['customDisplayName'], 'Pixel-Lab-01');
-      expect(json['customDownloadsPath'], '/sdcard/Download/CustomSilo');
 
       final reconstructed = UserSettings.fromJson(json);
       expect(reconstructed.batterySaverMode, BatterySaverMode.on);
       expect(reconstructed.customDisplayName, 'Pixel-Lab-01');
-      expect(reconstructed.customDownloadsPath, '/sdcard/Download/CustomSilo');
     });
 
     test('Handles malformed or missing JSON gracefully without crashing', () {

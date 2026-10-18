@@ -9,8 +9,10 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.cardemulation.CardEmulation
 import android.nfc.tech.IsoDep
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
@@ -40,7 +42,21 @@ class NfcHandler(private val activity: Activity) :
         const val CARD_MIME = "application/vnd.achyrio.vayu.card"
         private const val READ_CHUNK = 240
         private const val MAX_PAYLOAD = 8 * 1024
+
+        // Phones as cards answer presence checks slowly; the default (125 ms)
+        // made the reader drop a phone mid-read.
+        private const val PRESENCE_CHECK_MS = 1000
+
+        // One tap is often read more than once while the phones touch.
+        private const val SAME_TAP_MS = 2500L
     }
+
+    // What Dart asked for. Android turns reader mode and the preferred card
+    // service off whenever the activity pauses; these restore them on resume.
+    private var readingWanted = false
+    private var servingWanted = false
+    private var lastRead: ByteArray? = null
+    private var lastReadAt = 0L
 
     private var methods: MethodChannel? = null
     private var events: EventChannel? = null
@@ -98,6 +114,20 @@ class NfcHandler(private val activity: Activity) :
         return null
     }
 
+    /** From MainActivity.onResume. */
+    fun onResume() {
+        if (readingWanted) enableReader()
+        if (servingWanted) preferVayu(true)
+    }
+
+    /** From MainActivity.onPause. */
+    fun onPause() {
+        if (servingWanted) preferVayu(false)
+        try {
+            adapter?.disableReaderMode(activity)
+        } catch (_: Exception) {}
+    }
+
     // While Vayu shares something, prefer its card emulation over other apps
     // that register the same standard NDEF application.
     private fun preferVayu(on: Boolean) {
@@ -118,6 +148,8 @@ class NfcHandler(private val activity: Activity) :
     }
 
     fun unregister() {
+        readingWanted = false
+        servingWanted = false
         stopReading()
         PairingHceService.payload = null
         PairingHceService.ndefMessage = null
@@ -145,6 +177,7 @@ class NfcHandler(private val activity: Activity) :
                 // Pairing codes and receive tickets: Vayu-only, never a standard tag.
                 PairingHceService.ndefMessage = null
                 PairingHceService.payload = call.argument<ByteArray>("bytes")
+                servingWanted = true
                 preferVayu(true)
                 result.success(true)
             }
@@ -157,12 +190,14 @@ class NfcHandler(private val activity: Activity) :
                 PairingHceService.payload = card
                 PairingHceService.ndefMessage =
                     NdefMessage(NdefRecord.createMime(CARD_MIME, card)).toByteArray()
+                servingWanted = true
                 preferVayu(true)
                 result.success(true)
             }
             "stopServing" -> {
                 PairingHceService.payload = null
                 PairingHceService.ndefMessage = null
+                servingWanted = false
                 preferVayu(false)
                 result.success(true)
             }
@@ -177,20 +212,34 @@ class NfcHandler(private val activity: Activity) :
                     result.error("UNAVAILABLE", "NFC is off or missing", null)
                     return
                 }
-                nfc.enableReaderMode(
-                    activity,
-                    { tag -> readPeer(tag) },
-                    NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
-                        NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
-                    null,
-                )
+                readingWanted = true
+                // A paused activity cannot enable reader mode; onResume will.
+                enableReader()
                 result.success(true)
             }
             "stopReading" -> {
+                readingWanted = false
                 stopReading()
                 result.success(true)
             }
             else -> result.notImplemented()
+        }
+    }
+
+    private fun enableReader() {
+        val nfc = adapter ?: return
+        try {
+            nfc.enableReaderMode(
+                activity,
+                { tag -> readPeer(tag) },
+                NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or
+                    NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK,
+                Bundle().apply {
+                    putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, PRESENCE_CHECK_MS)
+                },
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Reader mode not enabled now: ${e.javaClass.simpleName}")
         }
     }
 
@@ -208,7 +257,11 @@ class NfcHandler(private val activity: Activity) :
             iso.timeout = 3000
             val select = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, PairingHceService.AID.size.toByte()) +
                 PairingHceService.AID + byteArrayOf(0x00)
-            if (!ok(iso.transceive(select))) return
+            if (!ok(iso.transceive(select))) {
+                // A phone (or card) that is not sharing anything from Vayu.
+                main.post { sink?.success("not_sharing") }
+                return
+            }
             val lengthReply = iso.transceive(byteArrayOf(0x80.toByte(), 0xCA.toByte(), 0x00, 0x00, 0x02))
             if (!ok(lengthReply) || lengthReply.size < 4) return
             val length = ((lengthReply[0].toInt() and 0xFF) shl 8) or (lengthReply[1].toInt() and 0xFF)
@@ -225,10 +278,18 @@ class NfcHandler(private val activity: Activity) :
             }
             if (out.size() == length) {
                 val bytes = out.toByteArray()
-                main.post { sink?.success(bytes) }
+                val now = SystemClock.elapsedRealtime()
+                val repeat = lastRead?.contentEquals(bytes) == true && now - lastReadAt < SAME_TAP_MS
+                lastRead = bytes
+                lastReadAt = now
+                if (!repeat) main.post { sink?.success(bytes) }
+            } else {
+                main.post { sink?.success("read_incomplete") }
             }
         } catch (e: Exception) {
+            // Usually the phones moved apart mid-read; the UI asks to hold still.
             Log.w(TAG, "Peer read failed: ${e.javaClass.simpleName}")
+            main.post { sink?.success("read_failed") }
         } finally {
             try {
                 iso.close()

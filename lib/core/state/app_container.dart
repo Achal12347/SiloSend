@@ -11,6 +11,7 @@ import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
 import 'package:vayu/core/contacts/my_card_store.dart';
+import 'package:vayu/core/contacts/received_cards.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
@@ -27,6 +28,7 @@ import 'package:vayu/core/security/aead_cipher.dart';
 import 'package:vayu/core/security/crypto_service.dart';
 import 'package:vayu/core/security/trust_record_storage.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
+import 'package:vayu/core/pairing/wifi_direct_service.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
 import 'package:vayu/platform/android_nfc_adapter.dart';
 import 'package:vayu/platform/contact_picker.dart';
@@ -105,6 +107,7 @@ class AppContainer {
   TransferEngine? _transferEngine;
   TransferHistory? _transferHistory;
   MyCardStore? _myCardStore;
+  ReceivedCards? _receivedCards;
   VayuCard? _myCard;
   final StreamController<VayuCard?> _myCardController =
       StreamController<VayuCard?>.broadcast();
@@ -116,6 +119,7 @@ class AppContainer {
   FileSharingCoordinator? _fileSharingCoordinator;
   PairingCoordinator? _pairingCoordinator;
   LocalHotspotService? _hotspotService;
+  WifiDirectService? _wifiDirectService;
   AppOrchestrator? _orchestrator;
 
   UserSettings _userSettings = const UserSettings();
@@ -123,11 +127,8 @@ class AppContainer {
       StreamController<UserSettings>.broadcast();
 
   bool _isInitialized = false;
-  Object? _initError;
   DeviceCapabilities _capabilities = DeviceCapabilities.unknown;
   SystemCapabilities _systemCapabilities = SystemCapabilities.baseline();
-  final StreamController<SystemCapabilities> _capabilitiesController =
-      StreamController<SystemCapabilities>.broadcast();
 
   AppContainer({
     required this.identityStorage,
@@ -230,9 +231,6 @@ class AppContainer {
   /// Whether the core foundation and persistent identity have been initialized.
   bool get isInitialized => _isInitialized;
 
-  /// Initialization error if startup failed.
-  Object? get initError => _initError;
-
   /// Current persistent local device identity.
   LocalDeviceIdentity? get identity => identityManager.currentIdentity;
 
@@ -242,17 +240,10 @@ class AppContainer {
   /// Current real-time system capabilities (radios, permissions, network).
   SystemCapabilities get systemCapabilities => _systemCapabilities;
 
-  /// Reactive stream of real-time system capabilities.
-  Stream<SystemCapabilities> get capabilitiesStream =>
-      _capabilitiesController.stream;
-
   /// Probes real-time system capabilities and notifies listeners.
   Future<SystemCapabilities> refreshCapabilities() async {
     final caps = await platformService.checkCapabilities();
     _systemCapabilities = caps;
-    if (!_capabilitiesController.isClosed) {
-      _capabilitiesController.add(caps);
-    }
     _capabilities = _capabilities.copyWith(
       ble: caps.bluetoothState == RadioState.unsupported
           ? CapabilityStatus.unavailable
@@ -674,6 +665,10 @@ class AppContainer {
       } else {
         _connectionManager = ConnectionManager(
           localIdentity: loadedIdentity,
+          // Read live: a rename (or the name chosen in onboarding) must reach
+          // the next handshake, not only the next app start.
+          displayName: () =>
+              identity?.displayName ?? loadedIdentity.displayName,
           supportedTransports: {
             TransportType.lan,
             if (_capabilities.supportsBle) TransportType.ble,
@@ -789,6 +784,15 @@ class AppContainer {
           ? FileMyCardStore(File('${AppPaths.androidFilesDir}/my_card.json'))
           : InMemoryMyCardStore();
       _myCard = await _myCardStore!.load();
+      _receivedCards = ReceivedCards(
+        storage: Platform.isAndroid && !_isTestEnvironment
+            ? FileReceivedCardsStorage(
+                File('${AppPaths.androidFilesDir}/received_cards.json'),
+              )
+            : InMemoryReceivedCardsStorage(),
+        directory: _receivedCardsDirectory,
+      );
+      await _receivedCards!.load();
       _fileSharingCoordinator =
           _injectedFileSharingCoordinator ??
           FileSharingCoordinator(
@@ -802,16 +806,25 @@ class AppContainer {
                 ? const ContactPicker().privateDirectory
                 : null,
             history: _transferHistory,
+            onContactReceived: (path, peerName) => _receivedCards
+                ?.addFile(path, via: ReceivedVia.nearby, fromName: peerName)
+                .ignore(),
             keepAliveController: TransferKeepAliveController(
               keepAlive: Platform.isAndroid
                   ? const AndroidTransferKeepAlive()
                   : const NoopTransferKeepAlive(),
             ),
           );
+      // Only the Receive screen accepts files (owner decision, 2026-10-16):
+      // nobody nearby can make this phone show prompts.
+      _fileSharingCoordinator!.acceptOffersOutsideReceive = false;
 
       _hotspotService = Platform.isAndroid && !_isTestEnvironment
           ? AndroidHotspotService()
           : const UnsupportedHotspotService();
+      _wifiDirectService = Platform.isAndroid && !_isTestEnvironment
+          ? AndroidWifiDirectService()
+          : const UnsupportedWifiDirectService();
       _pairingCoordinator = PairingCoordinator(
         identity: () => identity,
         lanPort: () => _lanServer?.boundPort,
@@ -823,6 +836,7 @@ class AppContainer {
         transportSelector: _transportSelector!,
         fileSharingCoordinator: _fileSharingCoordinator!,
         hotspot: _hotspotService!,
+        wifiDirect: _wifiDirectService!,
         activeSessionCount: () =>
             _connectionManager?.activeSessions.length ?? 0,
         sessionChanges: _connectionManager?.activeSessionsStream,
@@ -856,13 +870,11 @@ class AppContainer {
       lifecycleManager.addListener(_onLifecycleStateChanged);
 
       _isInitialized = true;
-      _initError = null;
       AppLogger.info(
         'AppContainer',
         'Vayu core container initialized successfully for: ${identity?.displayName} (${identity?.idHex.substring(0, 8)}...)',
       );
     } catch (e, stack) {
-      _initError = e;
       AppLogger.error(
         'AppContainer',
         'Fatal error during core container initialization',
@@ -874,17 +886,90 @@ class AppContainer {
   }
 
   void _onLifecycleStateChanged(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      AppLogger.info(
-        'AppContainer',
-        'App backgrounded: discovery coordinator notified',
-      );
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      // Searching in the background drained the battery (Bluetooth scan
+      // and advertising, Wi-Fi beacons and a low-latency Wi-Fi lock). Only
+      // an open Receive or Send screen keeps it going.
+      _inBackground = true;
+      AppLogger.info('AppContainer', 'App backgrounded: pausing search');
+      _reconcileDiscovery();
     } else if (state == AppLifecycleState.resumed) {
+      _inBackground = false;
       AppLogger.info(
         'AppContainer',
         'App resumed: refreshing platform capabilities',
       );
       refreshCapabilities().ignore();
+      // Coming back usually means sharing: search for a while.
+      discoverFor(discoveryWindow);
+    }
+  }
+
+  // ------------------------------------------------------------- discovery
+  //
+  // Discovery runs only when something needs it: an open Receive or Send
+  // screen ([holdDiscovery]), or a short window after home is shown or the
+  // user taps Search ([discoverFor]). Otherwise it stops to save battery.
+
+  /// How long home keeps searching before stopping by itself.
+  static const Duration discoveryWindow = Duration(minutes: 2);
+
+  final Set<Object> _discoveryHolders = {};
+  Timer? _discoveryWindowTimer;
+  bool _inBackground = false;
+  bool _discoveryDisposed = false;
+  Future<void> _discoveryApplying = Future<void>.value();
+
+  bool get _discoveryWanted =>
+      _discoveryHolders.isNotEmpty ||
+      (!_inBackground && (_discoveryWindowTimer?.isActive ?? false));
+
+  /// Keeps discovery running while [holder] (a Receive or Send screen) is open.
+  void holdDiscovery(Object holder) {
+    _discoveryHolders.add(holder);
+    _reconcileDiscovery();
+  }
+
+  void releaseDiscovery(Object holder) {
+    if (_discoveryHolders.remove(holder)) _reconcileDiscovery();
+  }
+
+  /// Searches for [duration], then stops unless a screen holds it.
+  void discoverFor(Duration duration) {
+    _discoveryWindowTimer?.cancel();
+    _discoveryWindowTimer = Timer(duration, _reconcileDiscovery);
+    _reconcileDiscovery();
+  }
+
+  /// Ends the home search window now (the user tapped Stop).
+  void endDiscoveryWindow() {
+    _discoveryWindowTimer?.cancel();
+    _discoveryWindowTimer = null;
+    _reconcileDiscovery();
+  }
+
+  void _reconcileDiscovery() {
+    _discoveryApplying = _discoveryApplying
+        .then((_) => _applyDiscoveryDemand())
+        .catchError((Object e) {
+          AppLogger.info('AppContainer', 'Discovery not changed: $e');
+        });
+  }
+
+  Future<void> _applyDiscoveryDemand() async {
+    if (_discoveryDisposed ||
+        !_isInitialized ||
+        _discoveryCoordinator == null) {
+      return;
+    }
+    final running = discoveryStatus != DiscoveryStatus.idle;
+    if (_discoveryWanted && !running) {
+      if (capabilityCoordinator.state.hasAnyReady) {
+        await startDiscoveryAndAdvertising();
+      }
+    } else if (!_discoveryWanted && running) {
+      await stopDiscoveryAndAdvertising();
     }
   }
 
@@ -894,9 +979,6 @@ class AppContainer {
         _capabilityCoordinator?.rawCapabilities ??
         await platformService.checkCapabilities();
     _systemCapabilities = caps;
-    if (!_capabilitiesController.isClosed) {
-      _capabilitiesController.add(caps);
-    }
 
     // The GATT server cannot start before Nearby Devices permission is granted,
     // which often happens after launch; retry once BLE becomes usable.
@@ -943,6 +1025,10 @@ class AppContainer {
         }
       }
     }
+
+    // A radio that just came back (Wi-Fi joined, Bluetooth on) lets a wanted
+    // search start now.
+    _reconcileDiscovery();
   }
 
   /// Starts discovery scanning and advertising across all supported transports.
@@ -1024,6 +1110,9 @@ class AppContainer {
 
   /// Disposes active resources, servers, discovery timers, and connection sessions.
   void dispose() {
+    _discoveryDisposed = true;
+    _discoveryWindowTimer?.cancel();
+    _discoveryHolders.clear();
     if (Platform.isAndroid) {
       try {
         platformService.releaseMulticastLock();
@@ -1042,6 +1131,9 @@ class AppContainer {
     if (_hotspotService?.isHosting ?? false) {
       _hotspotService?.stop();
     }
+    if (_wifiDirectService?.isHosting ?? false) {
+      _wifiDirectService?.removeGroup();
+    }
     _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
@@ -1051,12 +1143,10 @@ class AppContainer {
     _nfcPairingService?.dispose();
     lifecycleManager.dispose();
     identityManager.dispose();
-    if (!_capabilitiesController.isClosed) {
-      _capabilitiesController.close();
-    }
     if (!_userSettingsController.isClosed) {
       _userSettingsController.close();
     }
+    _receivedCards?.dispose();
     if (!_myCardController.isClosed) {
       _myCardController.close();
     }
@@ -1119,6 +1209,25 @@ class AppContainer {
   /// The user's own business card, or null before one is created.
   VayuCard? get myCard => _myCard;
 
+  /// Cards received by tap or from nearby phones (null before initialize).
+  ReceivedCards? get receivedCards => _receivedCards;
+
+  String? _cardsDirCache;
+
+  Future<String> _receivedCardsDirectory() async {
+    final cached = _cardsDirCache;
+    if (cached != null) return cached;
+    String? dir;
+    if (Platform.isAndroid && !_isTestEnvironment) {
+      dir =
+          await const ContactPicker().privateDirectory() ??
+          '${AppPaths.androidFilesDir}/cards';
+    } else {
+      dir = (await Directory.systemTemp.createTemp('vayu_cards_')).path;
+    }
+    return _cardsDirCache = dir;
+  }
+
   /// Emits whenever the user's card is saved.
   Stream<VayuCard?> get myCardStream => _myCardController.stream;
 
@@ -1176,15 +1285,6 @@ class AppContainer {
     _userSettings = _userSettings.copyWith(
       onboardingVersion: UserSettings.currentOnboardingVersion,
     );
-    await settingsStorage.saveSettings(_userSettings);
-    if (!_userSettingsController.isClosed) {
-      _userSettingsController.add(_userSettings);
-    }
-  }
-
-  /// Updates custom downloads directory path.
-  Future<void> updateCustomDownloadsPath(String path) async {
-    _userSettings = _userSettings.copyWith(customDownloadsPath: path);
     await settingsStorage.saveSettings(_userSettings);
     if (!_userSettingsController.isClosed) {
       _userSettingsController.add(_userSettings);

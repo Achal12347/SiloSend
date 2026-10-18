@@ -1,0 +1,12 @@
+# Copy to android/key.properties (never commit that file) and fill in.
+# Create the key once, and keep it and its passwords safe: every update on
+# Google Play must be signed with this same key.
+#
+#   keytool -genkey -v -keystore vayu-release.jks -keyalg RSA -keysize 2048 \
+#           -validity 10000 -alias vayu
+#
+# storeFile is relative to the android/ folder.
+storeFile=vayu-release.jks
+storePassword=CHANGE_ME
+keyAlias=vayu
+keyPassword=CHANGE_ME

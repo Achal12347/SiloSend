@@ -1,5 +1,6 @@
 package com.achyrio.vayu.discovery
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.AdvertiseCallback
@@ -142,6 +143,8 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         }
     }
 
+    // Any failure, a SecurityException included, is caught: stopping is best effort.
+    @SuppressLint("MissingPermission")
     private fun stopScan() {
         if (!isScanning) return
         try {
@@ -227,6 +230,7 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         }
     }
 
+    @SuppressLint("MissingPermission")
     private fun stopAdvertising() {
         if (!isAdvertising) return
         try {

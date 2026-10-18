@@ -116,11 +116,8 @@ class ActiveConnectionsCard extends StatelessWidget {
     ConnectionSession session,
   ) {
     final info = session.info;
-    final remoteName = info.remoteDisplayName ?? 'Unknown Peer';
+    final remoteName = info.remoteDisplayName ?? 'Nearby device';
     final remoteId = info.remoteDeviceId;
-    final truncatedId = remoteId.length >= 12
-        ? '${remoteId.substring(0, 8)}...${remoteId.substring(remoteId.length - 4)}'
-        : remoteId;
 
     final metrics = session.currentMetrics;
     final isLan = info.activeTransport == TransportType.lan;
@@ -148,25 +145,11 @@ class ActiveConnectionsCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      remoteName,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'ID: $truncatedId',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                        fontFamily: 'monospace',
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  remoteName,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               Row(

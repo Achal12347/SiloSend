@@ -11,17 +11,29 @@ class PacketStreamTransformer
   /// Maximum permitted payload size to prevent memory exhaustion attacks (16 MB).
   static const int maxPayloadLength = 16 * 1024 * 1024;
 
+  /// Largest payload accepted before the peer has authenticated. Handshake
+  /// packets are tiny; the margin covers a batch offer that the sender may
+  /// send a moment before this side finishes authenticating it.
+  static const int unauthenticatedMaxPayloadLength = 4 * 1024 * 1024;
+
+  /// Current limit; [FramedTransportConnection] raises it once secured.
+  final int Function() maxPayload;
+
+  PacketStreamTransformer({int Function()? maxPayload})
+    : maxPayload = maxPayload ?? (() => maxPayloadLength);
+
   @override
   Stream<VayuPacket> bind(Stream<Uint8List> stream) {
     return Stream<VayuPacket>.eventTransformed(
       stream,
-      (sink) => _PacketSink(sink),
+      (sink) => _PacketSink(sink, maxPayload),
     );
   }
 }
 
 class _PacketSink implements EventSink<Uint8List> {
   final EventSink<VayuPacket> _outputSink;
+  final int Function() _maxPayload;
 
   // Contiguous byte buffer with a read cursor. The previous List<int> stored one
   // boxed element per byte and shifted the whole remainder on every packet, which
@@ -30,7 +42,7 @@ class _PacketSink implements EventSink<Uint8List> {
   int _start = 0;
   int _end = 0;
 
-  _PacketSink(this._outputSink);
+  _PacketSink(this._outputSink, this._maxPayload);
 
   int get _available => _end - _start;
 
@@ -110,7 +122,7 @@ class _PacketSink implements EventSink<Uint8List> {
       ).getUint32(0, Endian.big);
 
       // Bounds check payload length
-      if (payloadLength > PacketStreamTransformer.maxPayloadLength) {
+      if (payloadLength > _maxPayload()) {
         AppLogger.warning(
           'PacketFraming',
           'Payload length $payloadLength exceeds limit; dropping corrupt magic header',

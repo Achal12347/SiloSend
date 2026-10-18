@@ -87,12 +87,7 @@ class VayuPacket {
     }
 
     // CRC32 over Header + Payload
-    final dataToCheck = Uint8List.sublistView(
-      buffer,
-      0,
-      headerSize + payload.length,
-    );
-    final checksum = Crc32.compute(dataToCheck);
+    final checksum = Crc32.computeRange(buffer, 0, headerSize + payload.length);
     byteData.setUint32(totalSize - checksumSize, checksum, Endian.big);
 
     return buffer;
@@ -131,8 +126,8 @@ class VayuPacket {
     final packetId = byteData.getInt64(4, Endian.big);
 
     // 5. Source and Destination IDs
-    final sourceId = Uint8List.fromList(bytes.sublist(12, 28));
-    final destId = Uint8List.fromList(bytes.sublist(28, 44));
+    final sourceId = bytes.sublist(12, 28);
+    final destId = bytes.sublist(28, 44);
 
     // 6. TTL & Payload Length
     final ttl = byteData.getUint8(44);
@@ -150,8 +145,10 @@ class VayuPacket {
       expectedTotalSize - checksumSize,
       Endian.big,
     );
-    final computedChecksum = Crc32.compute(
-      bytes.sublist(0, headerSize + payloadLength),
+    final computedChecksum = Crc32.computeRange(
+      bytes,
+      0,
+      headerSize + payloadLength,
     );
     if (computedChecksum != expectedChecksum) {
       throw FormatException(
@@ -159,10 +156,8 @@ class VayuPacket {
       );
     }
 
-    // 8. Extract payload
-    final payload = Uint8List.fromList(
-      bytes.sublist(headerSize, headerSize + payloadLength),
-    );
+    // 8. Extract payload (one copy: [bytes] may be a reused framing buffer).
+    final payload = bytes.sublist(headerSize, headerSize + payloadLength);
 
     return VayuPacket(
       version: version,

@@ -7,6 +7,10 @@ import 'package:vayu/ui/theme/vayu_theme.dart';
 final GlobalKey<ScaffoldMessengerState> rootMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
+/// App-wide navigator, so sheets that are not started by a screen (a card
+/// tapped from another phone) can open over whatever screen is showing.
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 enum VayuNoticeTone { neutral, success, problem }
 
 /// Short notice attached to the bottom edge (never floating mid-screen).

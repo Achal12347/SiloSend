@@ -5,6 +5,8 @@ import 'package:vayu/core/settings/user_settings.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
+import 'package:vayu/ui/settings/permissions_page.dart';
+import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
 import 'package:vayu/ui/widgets/rename_device_sheet.dart';
 import 'package:vayu/ui/card/my_card_page.dart';
@@ -255,6 +257,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       'Battery saver',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
+                    InfoDot(
+                      title: 'Battery saver',
+                      message: settings.batterySaverMode.description,
+                    ),
                   ],
                 ),
                 Container(
@@ -288,7 +294,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ButtonSegment(value: BatterySaverMode.on, label: Text('On')),
                 ButtonSegment(
                   value: BatterySaverMode.system,
-                  label: Text('Automatic'),
+                  label: Text('Auto'),
                 ),
               ],
               selected: {settings.batterySaverMode},
@@ -297,13 +303,6 @@ class _SettingsPageState extends State<SettingsPage> {
                   container.setBatterySaverMode(selected.first);
                 }
               },
-            ),
-            const SizedBox(height: 12),
-            Text(
-              settings.batterySaverMode.description,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
             ),
           ],
         ),
@@ -339,22 +338,35 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           ListTile(
             leading: Icon(
+              Icons.call_received_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            title: const Text('Receiving'),
+            subtitle: const Text('Only on the Receive screen'),
+            trailing: const InfoDot(
+              title: 'Receiving',
+              message: 'Files are accepted only while Receive is open, so nobody nearby can send you popups.',
+            ),
+          ),
+          const Divider(height: 1, thickness: 0.5),
+          ListTile(
+            leading: Icon(
+              Icons.verified_user_outlined,
+              color: theme.colorScheme.primary,
+            ),
+            title: const Text('Permissions & settings'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => PermissionsPage.open(context, container),
+          ),
+          const Divider(height: 1, thickness: 0.5),
+          ListTile(
+            leading: Icon(
               Icons.shield_outlined,
               color: theme.colorScheme.primary,
             ),
             title: const Text('Why Vayu asks for permissions'),
             trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () => PermissionsRationaleDialog.show(context),
-          ),
-          const Divider(height: 1, thickness: 0.5),
-          ListTile(
-            leading: Icon(
-              Icons.settings_outlined,
-              color: theme.colorScheme.primary,
-            ),
-            title: const Text('Phone settings for Vayu'),
-            trailing: const Icon(Icons.open_in_new_rounded, size: 18),
-            onTap: () => container.platformService.openAppSettings(),
           ),
         ],
       ),

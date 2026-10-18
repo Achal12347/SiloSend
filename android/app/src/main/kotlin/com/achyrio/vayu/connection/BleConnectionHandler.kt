@@ -1,5 +1,6 @@
 package com.achyrio.vayu.connection
 
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
@@ -38,6 +39,10 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Events carry a "role" so client links and accepted server links are routed separately.
  */
+// Every entry point (onMethodCall) checks BLUETOOTH_CONNECT first, and Android
+// kills the process when a runtime permission is revoked, so GATT callbacks
+// never run without it.
+@SuppressLint("MissingPermission")
 class BleConnectionHandler(private val context: Context) :
     MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 

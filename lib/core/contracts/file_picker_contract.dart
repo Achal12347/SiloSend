@@ -17,11 +17,17 @@ class SelectedDocument {
   /// MIME type of the document, if resolved.
   final String? mimeType;
 
+  /// Folder the document sits in when a whole folder is sent, as a
+  /// '/'-separated path starting with the picked folder's name
+  /// (`Photos/2024`). Null for individually picked files.
+  final String? folder;
+
   const SelectedDocument({
     required this.identifier,
     required this.name,
     required this.sizeBytes,
     this.mimeType,
+    this.folder,
   });
 
   Map<String, dynamic> toJson() => {
@@ -29,6 +35,7 @@ class SelectedDocument {
     'name': name,
     'sizeBytes': sizeBytes,
     'mimeType': mimeType,
+    if (folder != null) 'folder': folder,
   };
 
   @override
@@ -46,7 +53,31 @@ abstract class FilePickerService {
   /// Returns an empty list if the user cancelled or none were selected.
   Future<List<SelectedDocument>> pickMultipleDocuments();
 
+  /// Launches the platform folder picker and lists every file inside the
+  /// chosen folder and its subfolders. Null if the user cancelled.
+  Future<PickedFolder?> pickFolder();
+
   /// Creates a [PayloadSource] for the given [document], enabling streaming/chunk reads
   /// without copying the document or loading the full content into memory.
   PayloadSource createPayloadSource(SelectedDocument document);
+}
+
+/// A folder chosen to be sent whole.
+class PickedFolder {
+  final String name;
+
+  /// Every file inside, each with its [SelectedDocument.folder] set.
+  final List<SelectedDocument> documents;
+
+  /// True when the folder held more files than Vayu lists at once.
+  final bool truncated;
+
+  const PickedFolder({
+    required this.name,
+    required this.documents,
+    this.truncated = false,
+  });
+
+  int get totalBytes =>
+      documents.fold(0, (sum, d) => sum + (d.sizeBytes > 0 ? d.sizeBytes : 0));
 }

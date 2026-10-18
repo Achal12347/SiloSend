@@ -5,10 +5,15 @@ abstract class StorageService {
   /// (e.g. public Downloads/Vayu on Android, %USERPROFILE%\Downloads\Vayu on Windows).
   Future<String> getDownloadsDirectory();
 
-  /// Resolves a collision-safe destination file path in [baseDirectory] for [requestedFileName].
+  /// Reserves a destination for one incoming file in [baseDirectory] and
+  /// returns its path.
   ///
-  /// If `file.txt` exists, returns `file (1).txt`, then `file (2).txt`, etc.
-  Future<String> resolveUniqueDestinationPath(
+  /// The name is sanitized; if `file.txt` exists or another transfer holds
+  /// it, `file (1).txt`, `file (2).txt`, … is used. The reservation is the
+  /// transfer's own staging file (`<path>.vayu.tmp`), created exclusively so
+  /// two transfers can never get the same path. The caller owns that file and
+  /// must delete it if the transfer never starts.
+  Future<String> reserveDestinationPath(
     String baseDirectory,
     String requestedFileName,
   );

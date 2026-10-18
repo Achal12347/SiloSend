@@ -278,6 +278,10 @@ abstract class TransferEngine {
   /// files must be offered one by one).
   bool supportsBatchOffers(String targetDeviceId);
 
+  /// Whether [targetDeviceId]'s build accepts an offer whose SHA-256 follows
+  /// later (`late-hash-v1`), so sending need not wait for hashing.
+  bool supportsLateHash(String targetDeviceId);
+
   /// Offers [files] to [targetDeviceId] as one batch and waits for the
   /// receiver's single answer. Throws [TransferBatchDeclinedException] when
   /// refused and [TransferConnectionException] if the session closes first.
@@ -293,10 +297,15 @@ abstract class TransferEngine {
   Stream<IncomingBatchRequest> get incomingBatchRequests;
 
   /// Initiates an outbound data transfer to [targetDeviceId].
+  ///
+  /// With [lateSha256], [metadata] carries [TransferMetadata.deferredSha256]
+  /// and the hash is sent once that future completes (only to peers where
+  /// [supportsLateHash] is true).
   Future<TransferTask> sendPayload({
     required String targetDeviceId,
     required PayloadSource source,
     required TransferMetadata metadata,
+    Future<String>? lateSha256,
   });
 
   /// Stream of incoming transfer requests from remote peers.

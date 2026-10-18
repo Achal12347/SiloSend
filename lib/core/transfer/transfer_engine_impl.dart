@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/security/secure_session_impl.dart';
 import 'package:vayu/core/security/secure_session_manager.dart';
 import 'package:vayu/core/transfer/consent_registry.dart';
+import 'package:vayu/core/transfer/resumable_transfers.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/core/transfer/transfer_task_impl.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
@@ -76,19 +78,34 @@ class TransferEngineImpl implements TransferEngine {
   static const int bleChunkSize = 64 * 1024;
 
   /// Chunk size for Wi-Fi/LAN links. Larger chunks mean fewer encrypt, read
-  /// and ACK round trips per megabyte (each a native bridge call on Android).
-  static const int wifiChunkSize = 256 * 1024;
+  /// and ACK round trips per megabyte (each a native bridge call on Android);
+  /// 1 MiB measured fastest in the loopback benchmark. Receivers of any
+  /// version accept it (the size travels in the metadata).
+  static const int wifiChunkSize = 1024 * 1024;
 
   /// Bytes the sender keeps in flight on Wi-Fi/LAN. Bounded so that, even at
-  /// ~1 MB/s, the last chunk in flight is acknowledged well inside the
-  /// 10-second chunk timeout.
-  static const int wifiInFlightBytes = 4 * 1024 * 1024;
+  /// ~1 MB/s, the last chunk in flight is acknowledged inside the 10-second
+  /// chunk timeout.
+  static const int wifiInFlightBytes = 6 * 1024 * 1024;
 
   TransportType? _transportOf(String remoteDeviceId) {
     final session = _resolveSession(remoteDeviceId);
     return session is SecureSessionImpl
         ? session.connectionSession.info.activeTransport
         : null;
+  }
+
+  /// Link name for speed diagnostics. TCP over a Wi-Fi Direct group is told
+  /// apart by Android's fixed group subnet.
+  String? _linkOf(String remoteDeviceId) {
+    final session = _resolveSession(remoteDeviceId);
+    if (session is! SecureSessionImpl) return null;
+    final info = session.connectionSession.info;
+    if (info.activeTransport == TransportType.lan &&
+        (info.remoteAddress?.startsWith('192.168.49.') ?? false)) {
+      return 'wifiDirect';
+    }
+    return info.activeTransport.name;
   }
 
   @override
@@ -103,10 +120,11 @@ class TransferEngineImpl implements TransferEngine {
   int _windowFor(String targetDeviceId, int chunkSize) {
     final transport = _transportOf(targetDeviceId);
     if (transport == null || transport == TransportType.ble) return 8;
-    return (wifiInFlightBytes ~/ max(1, chunkSize)).clamp(8, 32);
+    return (wifiInFlightBytes ~/ max(1, chunkSize)).clamp(4, 32);
   }
 
-  void _recordStats(TransferStats stats) {
+  void _recordStats(TransferStats stats, String remoteDeviceId) {
+    stats = stats.withLink(_linkOf(remoteDeviceId));
     statsLog.record(stats);
     AppLogger.info('TransferStats', stats.summary());
   }
@@ -116,16 +134,19 @@ class TransferEngineImpl implements TransferEngine {
       _incomingBatchesController.stream;
 
   @override
-  bool supportsBatchOffers(String targetDeviceId) {
+  bool supportsBatchOffers(String targetDeviceId) =>
+      _peerSupports(targetDeviceId, AppConstants.featureBatchOffer);
+
+  @override
+  bool supportsLateHash(String targetDeviceId) =>
+      _peerSupports(targetDeviceId, AppConstants.featureLateHash);
+
+  bool _peerSupports(String targetDeviceId, String feature) {
     final resolver = featureResolver;
-    if (resolver != null) {
-      return resolver(targetDeviceId, AppConstants.featureBatchOffer);
-    }
+    if (resolver != null) return resolver(targetDeviceId, feature);
     final session = _resolveSession(targetDeviceId);
     return session is SecureSessionImpl &&
-        session.connectionSession.info.remoteFeatures.contains(
-          AppConstants.featureBatchOffer,
-        );
+        session.connectionSession.info.remoteFeatures.contains(feature);
   }
 
   @override
@@ -246,9 +267,15 @@ class TransferEngineImpl implements TransferEngine {
     required String targetDeviceId,
     required PayloadSource source,
     required TransferMetadata metadata,
+    Future<String>? lateSha256,
   }) async {
     if (_isDisposed) {
       throw StateError('Cannot initiate transfer on disposed TransferEngine');
+    }
+    if ((lateSha256 != null) != metadata.hashDeferred) {
+      throw ArgumentError(
+        'A late hash needs the deferred placeholder in the metadata, and the reverse',
+      );
     }
 
     final session = _resolveSession(targetDeviceId);
@@ -268,8 +295,9 @@ class TransferEngineImpl implements TransferEngine {
       secureSession: session,
       source: source,
       metadata: metadata,
-      onStats: _recordStats,
+      onStats: (stats) => _recordStats(stats, targetDeviceId),
       windowSize: _windowFor(targetDeviceId, metadata.chunkSize),
+      lateDigest: lateSha256,
     );
 
     _tasks[metadata.transferId] = task;
@@ -319,6 +347,10 @@ class TransferEngineImpl implements TransferEngine {
 
       case PacketType.transferBatchResponse:
         _handleBatchResponsePacket(session, packet);
+        break;
+
+      case PacketType.transferDigest:
+        _handleDigestPacket(session, packet);
         break;
 
       default:
@@ -392,12 +424,8 @@ class TransferEngineImpl implements TransferEngine {
         senderDeviceId: session.remoteDeviceId,
         metadata: metadata,
         authorizedBatchId: authorized ? marker.batchIdHex : null,
-        onAccept: (savePath) => accept(
-          FilePayloadDestination(
-            targetFilePath: savePath,
-            totalBytes: metadata.totalBytes,
-          ),
-        ),
+        onAccept: (savePath) =>
+            _acceptToFile(session, metadata, savePath, accept),
         onAcceptCustom: accept,
         onDecline: ([reason]) => _rejectOffer(
           session,
@@ -527,12 +555,114 @@ class TransferEngineImpl implements TransferEngine {
     await session.sendEncryptedPacket(cancelPacket);
   }
 
+  /// Accepts into [savePath]; continues an interrupted copy of the same file
+  /// from this sender when one was kept.
+  Future<TransferTask> _acceptToFile(
+    SecureSession session,
+    TransferMetadata metadata,
+    String savePath,
+    Future<TransferTask> Function(PayloadDestination destination) accept,
+  ) {
+    final partial = metadata.hashDeferred
+        ? resumable.take(_resumeKey(session, metadata))
+        // A known hash may continue a copy started under a late hash.
+        : resumable.take(_resumeKey(session, metadata)) ??
+              resumable.take(_resumeKeyByName(session, metadata));
+    var resumeBytes = 0;
+    if (partial != null) {
+      // Continue under the interrupted copy's own name when it is still
+      // free, giving back the fresh reservation made for this offer.
+      const suffix = FilePayloadDestination.stagingSuffix;
+      final original = partial.stagingPath.endsWith(suffix)
+          ? partial.stagingPath.substring(
+              0,
+              partial.stagingPath.length - suffix.length,
+            )
+          : null;
+      if (original != null &&
+          original != savePath &&
+          File(original).parent.path == File(savePath).parent.path &&
+          !File(original).existsSync()) {
+        try {
+          final reserved = File('$savePath$suffix');
+          if (reserved.existsSync() && reserved.lengthSync() == 0) {
+            reserved.deleteSync();
+          }
+          savePath = original;
+        } catch (_) {}
+      }
+      final staging = '$savePath$suffix';
+      try {
+        if (partial.stagingPath != staging) {
+          File(partial.stagingPath).renameSync(staging);
+        }
+        resumeBytes = partial.contiguousBytes;
+        _resumeChunks[metadata.transferId] = partial.contiguousChunks;
+        AppLogger.info(
+          'TransferEngine',
+          'Resuming ${metadata.fileName} from byte $resumeBytes',
+        );
+      } catch (e) {
+        AppLogger.warning('TransferEngine', 'Could not resume, restarting: $e');
+      }
+    }
+    return accept(
+      FilePayloadDestination(
+        targetFilePath: savePath,
+        totalBytes: metadata.totalBytes,
+        resumeFromBytes: resumeBytes,
+      ),
+    );
+  }
+
+  static String _resumeKey(SecureSession session, TransferMetadata metadata) =>
+      metadata.hashDeferred
+      ? _resumeKeyByName(session, metadata)
+      : ResumableTransfers.keyFor(
+          senderDeviceId: session.remoteDeviceId,
+          sha256: metadata.sha256Checksum,
+          totalBytes: metadata.totalBytes,
+          chunkSize: metadata.chunkSize,
+        );
+
+  static String _resumeKeyByName(
+    SecureSession session,
+    TransferMetadata metadata,
+  ) => ResumableTransfers.keyForName(
+    senderDeviceId: session.remoteDeviceId,
+    fileName: metadata.fileName,
+    totalBytes: metadata.totalBytes,
+    chunkSize: metadata.chunkSize,
+  );
+
+  /// Chunks already on disk for transfers being resumed, by transfer ID.
+  final Map<String, int> _resumeChunks = {};
+
+  /// Interrupted receives kept for a resume (see [ResumableTransfers]).
+  final ResumableTransfers resumable = ResumableTransfers();
+
+  /// Offers the sender cancelled before this side answered them.
+  final Set<String> _cancelledOffers = <String>{};
+
   Future<TransferTask> _acceptTransfer(
     SecureSession session,
     TransferMetadataPayload metaPayload,
     TransferMetadata metadata,
     PayloadDestination destination,
   ) async {
+    if (_cancelledOffers.remove(metadata.transferId)) {
+      await destination.abortAndCleanup();
+      throw TransferCancelledException(
+        metadata.transferId,
+        'The sender stopped sending this file',
+      );
+    }
+    final resumeChunks = _resumeChunks.remove(metadata.transferId) ?? 0;
+    final resumeBytes = min(
+      resumeChunks * metadata.chunkSize,
+      metadata.totalBytes,
+    );
+    final resumeKey = _resumeKey(session, metadata);
     final inboundTask = InboundTransferTask(
       transferId: metadata.transferId,
       localDeviceId: localDeviceId,
@@ -540,7 +670,12 @@ class TransferEngineImpl implements TransferEngine {
       secureSession: session,
       destination: destination,
       metadata: metadata,
-      onStats: _recordStats,
+      onStats: (stats) => _recordStats(stats, session.remoteDeviceId),
+      initialContiguousChunkIndex: resumeChunks - 1,
+      initialBytesReceived: resumeBytes,
+      onInterrupted: _isDisposed
+          ? null
+          : (partial) => resumable.keep(resumeKey, partial),
     );
 
     _tasks[metadata.transferId] = inboundTask;
@@ -553,13 +688,18 @@ class TransferEngineImpl implements TransferEngine {
       _tasks.remove(metadata.transferId);
     }).ignore();
 
-    // Send initial ACK (offer accepted)
+    // Initial ACK: accepted, or accepted from a checkpoint when part of the
+    // file is already here (every sender build continues from it).
     final ack = TransferAckPayload(
       transferId: metaPayload.transferId,
-      ackType: TransferAckType.offerAccepted,
-      highestContiguousChunkIndex: TransferAckPayload.noneAcked,
-      bytesReceived: 0,
-      selectiveBitmapOffset: 0,
+      ackType: resumeChunks > 0
+          ? TransferAckType.resumeCheckpoint
+          : TransferAckType.offerAccepted,
+      highestContiguousChunkIndex: resumeChunks > 0
+          ? resumeChunks - 1
+          : TransferAckPayload.noneAcked,
+      bytesReceived: resumeBytes,
+      selectiveBitmapOffset: resumeChunks,
       selectiveBitmap: Uint8List(0),
     );
 
@@ -601,6 +741,20 @@ class TransferEngineImpl implements TransferEngine {
       }
     } catch (e) {
       AppLogger.warning('TransferEngine', 'Failed to handle chunk packet: $e');
+    }
+  }
+
+  void _handleDigestPacket(SecureSession session, VayuPacket packet) {
+    try {
+      final digest = TransferDigestPayload.fromBytes(packet.payload);
+      final task = _tasks[digest.transferIdHex];
+      // Only the sender of that file may supply its hash.
+      if (task is InboundTransferTask &&
+          identical(task.secureSession, session)) {
+        task.handleDigest(digest);
+      }
+    } catch (e) {
+      AppLogger.warning('TransferEngine', 'Failed to handle digest packet: $e');
     }
   }
 
@@ -655,6 +809,13 @@ class TransferEngineImpl implements TransferEngine {
         task.handleCancel(cancel);
       } else if (task is InboundTransferTask) {
         await task.handleCancel(cancel);
+      } else if (task == null) {
+        // Cancelled while its offer still awaits an answer here: accepting it
+        // later would wait forever for chunks that never come.
+        _cancelledOffers.add(tIdHex);
+        if (_cancelledOffers.length > 64) {
+          _cancelledOffers.remove(_cancelledOffers.first);
+        }
       }
     } catch (e) {
       AppLogger.warning('TransferEngine', 'Failed to handle Cancel packet: $e');
@@ -665,6 +826,7 @@ class TransferEngineImpl implements TransferEngine {
   Future<void> dispose() async {
     if (_isDisposed) return;
     _isDisposed = true;
+    resumable.dispose();
 
     await _newSessionSubscription?.cancel();
     _newSessionSubscription = null;

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show File, Platform;
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:vayu/core/constants/app_constants.dart';
@@ -15,7 +15,6 @@ import 'package:vayu/ui/home/capability_setup_banner.dart';
 import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/ui/home/local_device_card.dart';
 import 'package:vayu/platform/contact_picker.dart';
-import 'package:vayu/platform/nfc_card_inbox.dart';
 import 'package:vayu/platform/share_intent_service.dart';
 import 'package:vayu/ui/settings/settings_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
@@ -24,18 +23,13 @@ import 'package:vayu/ui/transfer/incoming_transfer_dialog.dart';
 import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/transfer/transfer_progress_card.dart';
+import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
-import 'package:flutter/services.dart';
-import 'package:vayu/core/transfer/transfer_history.dart';
-import 'package:vayu/domain/contacts/contact_card.dart';
-import 'package:vayu/domain/contacts/vayu_card.dart';
-import 'package:vayu/ui/card/my_card_page.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/receive/receive_page.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
-import 'package:vayu/ui/widgets/route_observer.dart';
 
 /// Primary Home screen.
 ///
@@ -50,8 +44,35 @@ class VayuHomePage extends StatefulWidget {
 }
 
 class _VayuHomePageState extends State<VayuHomePage>
-    with SingleTickerProviderStateMixin, RouteAware, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
+
+  AppContainer? _container;
+
+  // The scanning pulse runs only while a search is active, at most 8 s, and
+  // never with Android's "Remove animations": a forever-repeating animation
+  // redraws home every frame, which costs battery on low-end phones.
+  StreamSubscription<DiscoveryStatus>? _statusSub;
+  Timer? _pulseStop;
+
+  void _updatePulse(bool scanning) {
+    if (!mounted) return;
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final isTesting = Platform.environment.containsKey('FLUTTER_TEST');
+    if (scanning && !reduceMotion && !isTesting) {
+      if (!_pulseController.isAnimating) {
+        _pulseController.repeat();
+        _pulseStop?.cancel();
+        _pulseStop = Timer(const Duration(seconds: 8), () {
+          if (mounted) _pulseController.stop();
+        });
+      }
+    } else {
+      _pulseStop?.cancel();
+      _pulseController.stop();
+      _pulseController.value = 0;
+    }
+  }
 
   bool _isTogglingDiscovery = false;
   bool _isPickingHeroFile = false;
@@ -60,16 +81,6 @@ class _VayuHomePageState extends State<VayuHomePage>
   StreamSubscription<IncomingBatchRequest>? _incomingBatchesSub;
   ShareIntentService? _shareIntents;
   StreamSubscription<List<SelectedDocument>>? _sharedSub;
-
-  // Cards received by tap while home is the visible screen.
-  StreamSubscription<Uint8List>? _cardInboxSub;
-  StreamSubscription<VayuCard?>? _myCardSub;
-  bool _routeVisible = true;
-  bool _appVisible = true;
-  bool _subscribedToRoutes = false;
-  Timer? _shareTimer;
-  // Cards that arrived while another screen covered home; shown on return.
-  final List<Uint8List> _waitingCards = [];
 
   @override
   void initState() {
@@ -81,141 +92,13 @@ class _VayuHomePageState extends State<VayuHomePage>
     final isTesting =
         Platform.environment.containsKey('FLUTTER_TEST') ||
         WidgetsBinding.instance.runtimeType.toString().contains('Test');
-    if (!isTesting) {
-      _pulseController.repeat();
-    }
 
-    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _autoStartDiscoveryIfReady();
       if (Platform.isAndroid && !isTesting) {
         _listenForSharedFiles();
-        _listenForTappedCards();
-        _scheduleCardSharing();
       }
     });
-  }
-
-  // ------------------------------------------------------------ tap to share
-  //
-  // While home is on screen this phone shares the user's card over NFC, both
-  // to Vayu and as a standard tag, so a phone tapped against it receives the
-  // card even when Vayu is closed there. Cards from other phones arrive
-  // through Android's tag reader (NfcCardInbox). Sharing stops whenever
-  // another screen covers home or the app leaves the screen.
-
-  bool get _nfcEnabledHere =>
-      Platform.isAndroid &&
-      !Platform.environment.containsKey('FLUTTER_TEST') &&
-      !WidgetsBinding.instance.runtimeType.toString().contains('Test');
-
-  /// Starts sharing shortly after home becomes visible: the screen that just
-  /// closed stops its own sharing as it is torn down, which happens after
-  /// home is already visible again.
-  void _scheduleCardSharing() {
-    _shareTimer?.cancel();
-    if (!_nfcEnabledHere) return;
-    _shareTimer = Timer(const Duration(milliseconds: 600), _shareCardNow);
-  }
-
-  void _shareCardNow() {
-    if (!mounted || !_routeVisible || !_appVisible) return;
-    final container = AppScope.of(context);
-    final card = container.myCard;
-    if (card == null) return;
-    container.nfcPairingService.shareCard(card.toVcard()).ignore();
-  }
-
-  void _stopCardSharing() {
-    _shareTimer?.cancel();
-    if (!_nfcEnabledHere || !mounted) return;
-    AppScope.of(context).nfcPairingService.stopSharing().ignore();
-  }
-
-  Future<void> _listenForTappedCards() async {
-    const inbox = NfcCardInbox();
-    _cardInboxSub = inbox.cards.listen(_onCardTapped);
-    final pending = await inbox.takePending();
-    if (pending != null) _onCardTapped(pending);
-  }
-
-  @override
-  void didPushNext() {
-    // Another screen (pairing, receive, profile, a sheet) now owns NFC.
-    _routeVisible = false;
-    _stopCardSharing();
-  }
-
-  @override
-  void didPopNext() {
-    _routeVisible = true;
-    _scheduleCardSharing();
-    if (_waitingCards.isNotEmpty) {
-      final next = _waitingCards.removeAt(0);
-      WidgetsBinding.instance.addPostFrameCallback((_) => _onCardTapped(next));
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Never share the card while Vayu is not on screen.
-    _appVisible = state == AppLifecycleState.resumed;
-    if (_appVisible) {
-      _scheduleCardSharing();
-    } else {
-      _stopCardSharing();
-    }
-  }
-
-  Future<void> _onCardTapped(Uint8List bytes) async {
-    if (!mounted) return;
-    final card = ContactCard.tryParse(bytes);
-    if (card == null) return;
-    if (!_routeVisible) {
-      _waitingCards.add(bytes);
-      return;
-    }
-    HapticFeedback.mediumImpact();
-    final container = AppScope.of(context);
-    await showReceivedCardSheet(
-      context,
-      container: container,
-      card: card,
-      onSave: () => _saveTappedCard(container, card),
-    );
-  }
-
-  /// Keeps the card in app-private storage, records it in History, and hands
-  /// it to the phone's contacts app, where the user confirms the save.
-  Future<void> _saveTappedCard(AppContainer container, ContactCard card) async {
-    try {
-      final dir =
-          await const ContactPicker().privateDirectory() ??
-          await container.storageService.getDownloadsDirectory();
-      final path = await container.storageService.resolveUniqueDestinationPath(
-        dir,
-        ContactCard.fileNameFor(card.displayName),
-      );
-      await File(path).writeAsBytes(card.vcard, flush: true);
-      await container.fileSharingCoordinator.history?.add(
-        TransferHistoryRecord(
-          transferId: 'tap-${DateTime.now().microsecondsSinceEpoch}',
-          outbound: false,
-          peerDeviceId: '',
-          peerName: card.displayName,
-          fileName: ContactCard.fileNameFor(card.displayName),
-          sizeBytes: card.vcard.length,
-          mimeType: 'text/vcard',
-          isContact: true,
-          outcome: TransferOutcome.completed,
-          finishedAt: DateTime.now(),
-          savedPath: path,
-        ),
-      );
-      await container.platformService.openFile(path, mimeType: 'text/x-vcard');
-    } catch (e) {
-      if (mounted) _showError(friendlyError(e));
-    }
   }
 
   /// "Share to Vayu" from other apps lands here: go straight to device choice.
@@ -241,10 +124,8 @@ class _VayuHomePageState extends State<VayuHomePage>
     try {
       // Nearby access is asked in onboarding, by the setup banner, or when
       // the user taps Send; never unprompted here.
-      if (container.capabilityCoordinator.state.hasAnyReady &&
-          container.discoveryStatus == DiscoveryStatus.idle) {
-        await container.startDiscoveryAndAdvertising();
-      }
+      // Searches for a short while, then stops to save battery.
+      container.discoverFor(AppContainer.discoveryWindow);
     } catch (_) {}
   }
 
@@ -252,15 +133,13 @@ class _VayuHomePageState extends State<VayuHomePage>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final container = AppScope.of(context);
-    final route = ModalRoute.of(context);
-    if (!_subscribedToRoutes && route != null) {
-      vayuRouteObserver.subscribe(this, route);
-      _subscribedToRoutes = true;
-    }
+    _container = container;
     if (container.isInitialized) {
-      // Re-share when the card is created or edited.
-      _myCardSub ??= container.myCardStream.listen(
-        (_) => _scheduleCardSharing(),
+      _statusSub ??= container.discoveryStatusStream.listen(
+        (status) => _updatePulse(status.isActive),
+      );
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _updatePulse(container.discoveryStatus.isActive),
       );
     }
     _incomingRequestsSub?.cancel();
@@ -287,11 +166,10 @@ class _VayuHomePageState extends State<VayuHomePage>
 
   @override
   void dispose() {
-    vayuRouteObserver.unsubscribe(this);
-    WidgetsBinding.instance.removeObserver(this);
-    _cardInboxSub?.cancel();
-    _myCardSub?.cancel();
-    _stopCardSharing();
+    // Home owns its search window; nothing searches for a home that is gone.
+    _container?.endDiscoveryWindow();
+    _statusSub?.cancel();
+    _pulseStop?.cancel();
     _pulseController.dispose();
     _incomingRequestsSub?.cancel();
     _incomingBatchesSub?.cancel();
@@ -326,7 +204,10 @@ class _VayuHomePageState extends State<VayuHomePage>
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: () => container.capabilityCoordinator.refresh(),
+          onRefresh: () async {
+            await container.capabilityCoordinator.refresh();
+            container.discoverFor(AppContainer.discoveryWindow);
+          },
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             children: [
@@ -387,18 +268,25 @@ class _VayuHomePageState extends State<VayuHomePage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _ReadinessLine(container: container, color: palette.onHero),
-                Text(
-                  'Share files nearby',
-                  style: theme.textTheme.headlineMedium?.copyWith(
-                    color: palette.onHero,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Direct and encrypted. No internet needed.',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: palette.onHeroMuted,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        'Share files nearby',
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          color: palette.onHero,
+                        ),
+                      ),
+                    ),
+                    InfoDot(
+                      title: 'How Vayu shares',
+                      message:
+                          'Phones connect directly and everything is encrypted. No internet or mobile data is used.\n\n'
+                          'Send: pick files, then touch or scan a phone that shows Receive.\n'
+                          'Receive: show your code; files arrive by themselves.',
+                      color: palette.heroGlow,
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -452,15 +340,28 @@ class _VayuHomePageState extends State<VayuHomePage>
                   ],
                 ),
                 const SizedBox(height: 6),
-                Center(
-                  child: TextButton.icon(
-                    onPressed: () => _shareContactFromHero(container),
-                    style: TextButton.styleFrom(
-                      foregroundColor: palette.onHeroMuted,
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  children: [
+                    TextButton.icon(
+                      onPressed: _isPickingHeroFile
+                          ? null
+                          : () => _onSendFolderPressed(container),
+                      style: TextButton.styleFrom(
+                        foregroundColor: palette.onHeroMuted,
+                      ),
+                      icon: const Icon(Icons.folder_outlined, size: 18),
+                      label: const Text('Send a folder'),
                     ),
-                    icon: const Icon(Icons.person_outline_rounded, size: 18),
-                    label: const Text('Send a contact'),
-                  ),
+                    TextButton.icon(
+                      onPressed: () => _shareContactFromHero(container),
+                      style: TextButton.styleFrom(
+                        foregroundColor: palette.onHeroMuted,
+                      ),
+                      icon: const Icon(Icons.person_outline_rounded, size: 18),
+                      label: const Text('Send a contact'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -563,7 +464,7 @@ class _VayuHomePageState extends State<VayuHomePage>
     if (!isScanning) {
       icon = Icons.wifi_tethering_off_rounded;
       title = 'Search is paused';
-      body = 'Start searching to find phones with Vayu open nearby.';
+      body = 'Vayu stops searching after 2 minutes to save battery. Search again to find phones nearby.';
       action = FilledButton.tonalIcon(
         onPressed: () => _toggleDiscovery(container, false),
         icon: const Icon(Icons.search_rounded),
@@ -572,7 +473,7 @@ class _VayuHomePageState extends State<VayuHomePage>
     } else if (opState == DiscoveryOperationalState.noDevices) {
       icon = Icons.devices_other_rounded;
       title = 'No devices found yet';
-      body = 'Open Vayu on the other phone and keep both on the same Wi-Fi, or turn on Bluetooth.';
+      body = 'Open Vayu on the other phone.';
       action = OutlinedButton.icon(
         onPressed: () async {
           await _toggleDiscovery(container, true);
@@ -672,6 +573,43 @@ class _VayuHomePageState extends State<VayuHomePage>
     }
   }
 
+  /// Folder flow: system folder picker, then choose a nearby device. The
+  /// receiver gets the same folder structure.
+  Future<void> _onSendFolderPressed(AppContainer container) async {
+    setState(() => _isPickingHeroFile = true);
+    try {
+      final raw = container.capabilityCoordinator.rawCapabilities;
+      if (raw.isNearbyPermissionNotRequested) {
+        await container.capabilityCoordinator.requestNearbyAccess();
+      }
+      final folder = await container.filePickerService.pickFolder();
+      if (folder == null || !mounted) return;
+      if (folder.documents.isEmpty) {
+        showVayuNotice(context, '"${folder.name}" has no files to send');
+        return;
+      }
+      if (folder.truncated) {
+        showVayuNotice(
+          context,
+          'Only the first ${folder.documents.length} files of "${folder.name}" will be sent',
+        );
+      }
+      await PeerSelectionSheet.show(
+        context,
+        documents: folder.documents,
+        container: container,
+      );
+    } catch (e) {
+      if (mounted) {
+        _showError('Couldn\'t open that folder. Please try again.');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isPickingHeroFile = false);
+      }
+    }
+  }
+
   Future<void> _toggleDiscovery(
     AppContainer container,
     bool isCurrentlyScanning,
@@ -679,6 +617,7 @@ class _VayuHomePageState extends State<VayuHomePage>
     setState(() => _isTogglingDiscovery = true);
     try {
       if (isCurrentlyScanning) {
+        container.endDiscoveryWindow();
         await container.stopDiscoveryAndAdvertising();
       } else {
         final raw = container.capabilityCoordinator.rawCapabilities;
@@ -691,6 +630,7 @@ class _VayuHomePageState extends State<VayuHomePage>
           }
         }
         await container.startDiscoveryAndAdvertising();
+        container.discoverFor(AppContainer.discoveryWindow);
       }
     } catch (error) {
       if (mounted) {

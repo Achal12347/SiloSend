@@ -63,6 +63,8 @@ void main() {
   test(
     'a contact arrives as a verified vCard the receiver can preview',
     () async {
+      // The receiver is on its Receive screen (offers are only taken there).
+      receiver.fileSharingCoordinator.startReceiveSession('00' * 16);
       final offer = receiver.fileSharingCoordinator.incomingRequests.first;
       final sending = await sender.fileSharingCoordinator.sendContactToPeer(
         receiverPeer,

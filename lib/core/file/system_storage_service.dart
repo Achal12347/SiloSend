@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:vayu/core/contracts/storage_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
 
 /// Concrete implementation of [StorageService] managing incoming downloads
 /// on Android (via `com.achyrio.vayu/storage`) and desktop operating systems.
@@ -70,7 +72,7 @@ class SystemStorageService implements StorageService {
   }
 
   @override
-  Future<String> resolveUniqueDestinationPath(
+  Future<String> reserveDestinationPath(
     String baseDirectory,
     String requestedFileName,
   ) async {
@@ -84,35 +86,47 @@ class SystemStorageService implements StorageService {
       rawName = rawName.replaceAll('..', '');
     }
     final cleanName = rawName.replaceAll(RegExp(r'^\.+'), '');
-    final safeName = cleanName.isEmpty ? 'vayu_file' : cleanName;
+    final safeName = _fitFileName(cleanName.isEmpty ? 'vayu_file' : cleanName);
 
-    final dotIndex = safeName.lastIndexOf('.');
-    final String base;
-    final String ext;
-
-    if (dotIndex > 0) {
-      base = safeName.substring(0, dotIndex);
-      ext = safeName.substring(dotIndex);
-    } else {
-      base = safeName;
-      ext = '';
-    }
-
-    // Check if original name is available
-    final initialPath = '$baseDirectory/$base$ext';
-    if (!File(initialPath).existsSync()) {
-      return initialPath;
-    }
-
-    // Disambiguate with (1), (2), ...
-    int counter = 1;
-    while (true) {
-      final candidate = '$baseDirectory/$base ($counter)$ext';
-      if (!File(candidate).existsSync()) {
-        return candidate;
+    for (var n = 0; ; n++) {
+      final candidate = numberedPath('$baseDirectory/$safeName', n);
+      if (File(candidate).existsSync()) continue;
+      // Creating the staging file exclusively is atomic: a transfer that
+      // already holds this name (or a partial kept for resume) makes it fail.
+      final staging = File('$candidate${FilePayloadDestination.stagingSuffix}');
+      try {
+        await staging.create(exclusive: true);
+      } on FileSystemException {
+        if (staging.existsSync()) continue;
+        rethrow;
       }
-      counter++;
+      // A transfer may have finished under this name in the meantime.
+      if (File(candidate).existsSync()) {
+        await staging.delete();
+        continue;
+      }
+      return candidate;
     }
+  }
+
+  /// File names are limited to 255 bytes on Android and Windows. The staging
+  /// suffix and a ` (n)` number must still fit, or the file can never be
+  /// created; long names are shortened before the extension.
+  static const int _maxNameBytes =
+      255 - FilePayloadDestination.stagingSuffix.length - 8;
+
+  static String _fitFileName(String name) {
+    if (utf8.encode(name).length <= _maxNameBytes) return name;
+    final dot = name.lastIndexOf('.');
+    final ext = dot > 0 && name.length - dot <= 16 ? name.substring(dot) : '';
+    final base = ext.isEmpty ? name : name.substring(0, dot);
+    final budget = _maxNameBytes - utf8.encode(ext).length;
+    // Shorten by characters so a multi-byte character is never split.
+    var cut = base;
+    while (utf8.encode(cut).length > budget) {
+      cut = String.fromCharCodes(cut.runes.take(cut.runes.length - 1));
+    }
+    return '$cut$ext';
   }
 
   @override

@@ -690,6 +690,11 @@ class SecureSessionManager {
           'SecureSessionManager',
           'Failed to handle inbound auth init on session ${session.sessionId}: $e',
         );
+        // A peer that did not authenticate gets nothing from this link, and
+        // leaving it open would hold one of the few unauthenticated slots.
+        if (_sessions[session.sessionId]?.isEstablished != true) {
+          await session.close(reason: 'authentication_failed');
+        }
       }
     }
   }

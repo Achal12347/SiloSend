@@ -6,9 +6,9 @@ import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 DateTime? _lastNotice;
 
-/// Catches errors nothing else handled: logs them locally (nothing leaves
-/// the phone) and shows one calm notice instead of a red screen or a silent
-/// failure. Debug builds still print the full Flutter error.
+/// Catches errors nothing else handled and logs them locally (nothing leaves
+/// the phone). A screen that fails to draw also shows one calm notice;
+/// background errors stay silent. Debug builds still print the full error.
 void installErrorHandlers() {
   final previous = FlutterError.onError;
   FlutterError.onError = (details) {
@@ -22,9 +22,11 @@ void installErrorHandlers() {
     );
     _notify();
   };
+  // Background errors (a radio event, a dropped socket) are logged only: the
+  // user did not ask for anything, so a "Something went wrong" notice would
+  // be an unwanted popup. Actions the user starts report their own errors.
   PlatformDispatcher.instance.onError = (error, stack) {
     AppLogger.error('Unhandled', 'Uncaught error: $error', stackTrace: stack);
-    _notify();
     return true;
   };
   if (!kDebugMode) {

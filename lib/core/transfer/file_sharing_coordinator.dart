@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -12,12 +13,14 @@ import 'package:vayu/core/security/secure_session_manager.dart';
 import 'package:vayu/core/session/session_lifecycle_policy.dart';
 import 'package:vayu/core/transfer/receive_ticket.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
+import 'package:vayu/core/transfer/transfer_engine_impl.dart';
 import 'package:vayu/core/transfer/transfer_history.dart';
 import 'package:vayu/core/transfer/transfer_keep_alive_controller.dart';
 import 'package:vayu/core/transfer/transfer_task_impl.dart';
 import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/transfer/batch_payloads.dart';
+import 'package:vayu/domain/transfer/payload_destination.dart';
 import 'package:vayu/domain/transfer/payload_source.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
@@ -37,6 +40,17 @@ class FileSharingCoordinator {
 
   /// App-private folder for received contact cards (Android); null elsewhere.
   final Future<String?> Function()? contactDirectory;
+
+  /// Told about every contact card received and verified (path, sender).
+  final void Function(String path, String peerName)? onContactReceived;
+
+  /// After a batch loses its connection, the sender retries the unfinished
+  /// files by itself every [autoResumeDelay] for [autoResumeWindow]. While
+  /// the receiver is still on Receive, its consent for the batch and the
+  /// part it already has are kept, so the files continue without a prompt.
+  final Duration autoResumeDelay;
+  final Duration autoResumeWindow;
+  final Set<String> _autoResuming = {};
 
   /// Finished transfers kept across restarts; null keeps none.
   final TransferHistory? history;
@@ -64,6 +78,35 @@ class FileSharingCoordinator {
   // Sending side: tickets scanned or tapped from receivers, by device ID.
   final Map<String, (String, DateTime)> _ticketsFromReceivers = {};
 
+  /// When false, offers are accepted (or asked about) only while the
+  /// Receive screen is open; all others are declined automatically with the
+  /// reason, so nobody nearby can cause popups. Files of a batch already
+  /// accepted keep arriving either way. The app always sets false; true
+  /// (the default) lets engine-level tests offer files without a screen.
+  bool acceptOffersOutsideReceive = true;
+
+  /// True when an offer arriving now may reach the user.
+  bool get _offersWelcome =>
+      acceptOffersOutsideReceive || isReceiveScreenOpen || isReceiving;
+
+  int _receiveScreens = 0;
+
+  /// True while a Receive screen is open. Offers are welcome then (and
+  /// asked about) even without a valid ticket: when no code could be made,
+  /// or after the code's ten minutes ran out.
+  bool get isReceiveScreenOpen => _receiveScreens > 0;
+
+  void openReceiveScreen() => _receiveScreens++;
+
+  void closeReceiveScreen() {
+    if (_receiveScreens > 0) _receiveScreens--;
+  }
+
+  String get _notReceivingMessage {
+    final name = secureSessionManager.localIdentity.displayName;
+    return "$name isn't receiving right now. Ask them to tap Receive.";
+  }
+
   /// How long a Receive ticket (shown or scanned) stays valid.
   static const Duration receiveTicketLifetime = Duration(minutes: 10);
 
@@ -80,6 +123,9 @@ class FileSharingCoordinator {
     required this.sessionLifecyclePolicy,
     this.keepAliveController,
     this.contactDirectory,
+    this.onContactReceived,
+    this.autoResumeDelay = const Duration(seconds: 3),
+    this.autoResumeWindow = const Duration(seconds: 30),
     this.history,
   }) {
     _engineRequestsSub = transferEngine.incomingTransferRequests.listen(
@@ -116,9 +162,6 @@ class FileSharingCoordinator {
       _receiveTicket != null &&
       _receiveUntil != null &&
       DateTime.now().isBefore(_receiveUntil!);
-
-  /// When the current Receive session ends, if one is open.
-  DateTime? get receiveSessionEndsAt => isReceiving ? _receiveUntil : null;
 
   /// Opens a Receive session for [ticketHex] (the secret in the code this
   /// phone shows). Offers carrying a valid proof for it are accepted without
@@ -189,6 +232,19 @@ class FileSharingCoordinator {
       }
       return;
     }
+    if (!_offersWelcome) {
+      AppLogger.info(
+        'FileSharingCoordinator',
+        'Declined a batch: not on the Receive screen',
+      );
+      request
+          .declineWithCode(
+            TransferCancelReason.notReceiving,
+            _notReceivingMessage,
+          )
+          .catchError((_) {});
+      return;
+    }
     if (!_incomingBatchesController.isClosed) {
       _incomingBatchesController.add(request);
     }
@@ -223,6 +279,17 @@ class FileSharingCoordinator {
       _acceptAuthorizedFile(request);
       return;
     }
+    if (!_offersWelcome) {
+      AppLogger.info(
+        'FileSharingCoordinator',
+        'Declined an offer: not on the Receive screen',
+      );
+      // The plain "declined" code keeps older builds able to show the reason.
+      request
+          .declineWithCode(TransferCancelReason.declined, _notReceivingMessage)
+          .catchError((_) {});
+      return;
+    }
     if (!_incomingRequestsController.isClosed) {
       _incomingRequestsController.add(request);
     }
@@ -234,7 +301,10 @@ class FileSharingCoordinator {
     final index = BatchFileMarker.tryDecode(request.metadata.extraMetadata)
         ?.index;
     try {
-      final task = await acceptIncomingTransfer(request);
+      final task = await acceptIncomingTransfer(
+        request,
+        subfolder: index == null ? null : batch?.folderOf(index),
+      );
       if (batch != null && index != null && index < batch.fileCount) {
         batch.tasks[index] = task;
         batch.failures.remove(index);
@@ -283,6 +353,7 @@ class FileSharingCoordinator {
       outbound: false,
       fileNames: [for (final f in request.files) f.fileName],
       fileSizes: [for (final f in request.files) f.sizeBytes],
+      folders: [for (final f in request.files) f.folder],
     );
     _batches[batch.batchId] = batch;
     await request.accept();
@@ -307,6 +378,7 @@ class FileSharingCoordinator {
       batch.state = batch.failures.isEmpty
           ? TransferBatchState.completed
           : TransferBatchState.completedWithFailures;
+      _pruneFinished();
     }
     _notifyTransfersChanged();
   }
@@ -462,8 +534,12 @@ class FileSharingCoordinator {
       sessionLifecyclePolicy.markTransferStarted(session.sessionId);
       transferStarted = true;
 
-      // 2. Compute streaming SHA-256 digest
-      final sha256Checksum = await source.computeSha256();
+      // 2. SHA-256: hashed while sending when the receiver allows it, so
+      // the offer reaches it at once; otherwise hashed first.
+      final lateSha256 = _lateHashFor(peer, source, declaredSize);
+      final sha256Checksum = lateSha256 != null
+          ? TransferMetadata.deferredSha256
+          : await source.computeSha256();
 
       // 3. Construct TransferMetadata
       final chunkSize = transferEngine.chunkSizeFor(peer.deviceId);
@@ -485,6 +561,7 @@ class FileSharingCoordinator {
         targetDeviceId: peer.deviceId,
         source: source,
         metadata: metadata,
+        lateSha256: lateSha256,
       );
 
       _taskPeers[task.transferId] = peer;
@@ -502,6 +579,22 @@ class FileSharingCoordinator {
       await source.close();
       rethrow;
     }
+  }
+
+  /// Starts hashing [source] in the background when [peer] accepts the hash
+  /// after the offer; null when it must be hashed before offering. Needs a
+  /// known size, since the offer states it before the file is read.
+  Future<String>? _lateHashFor(
+    DiscoveredPeer peer,
+    PayloadSource source,
+    int declaredSize,
+  ) {
+    if (declaredSize <= 0 || !transferEngine.supportsLateHash(peer.deviceId)) {
+      return null;
+    }
+    // The task reports a hashing failure; this only stops it from also
+    // surfacing as unhandled if the task never starts.
+    return source.computeSha256()..ignore();
   }
 
   /// Outbound: orchestrates sending multiple documents [documents] to [peer]
@@ -528,7 +621,19 @@ class FileSharingCoordinator {
       'Sending ${documents.length} file${documents.length == 1 ? '' : 's'}',
     );
     try {
-      return await _sendBatch(peer, documents, chunkSize);
+      // A batch offer lists at most maxFiles files; a bigger selection (a
+      // large folder) goes as several batches, one after another.
+      const perBatch = TransferBatchOfferPayload.maxFiles;
+      if (documents.length <= perBatch ||
+          !transferEngine.supportsBatchOffers(peer.deviceId)) {
+        return await _sendBatch(peer, documents, chunkSize);
+      }
+      final tasks = <TransferTask>[];
+      for (var i = 0; i < documents.length; i += perBatch) {
+        final part = documents.sublist(i, min(i + perBatch, documents.length));
+        tasks.addAll(await _sendBatch(peer, part, chunkSize));
+      }
+      return tasks;
     } finally {
       releaseKeepAlive();
     }
@@ -586,6 +691,7 @@ class FileSharingCoordinator {
                 fileName: d.name,
                 sizeBytes: d.sizeBytes,
                 mimeType: d.mimeType ?? 'application/octet-stream',
+                folder: d.folder,
               ),
           ],
           receiveProof: ticket == null
@@ -636,7 +742,10 @@ class FileSharingCoordinator {
       var tracked = false;
       try {
         sessionLifecyclePolicy.markTransferStarted(sessionId);
-        final sha256Checksum = await source.computeSha256();
+        final lateSha256 = _lateHashFor(peer, source, doc.sizeBytes);
+        final sha256Checksum = lateSha256 != null
+            ? TransferMetadata.deferredSha256
+            : await source.computeSha256();
         final totalBytes = doc.sizeBytes > 0 ? doc.sizeBytes : source.length;
 
         final metadata = TransferMetadata(
@@ -656,6 +765,7 @@ class FileSharingCoordinator {
           targetDeviceId: peer.deviceId,
           source: source,
           metadata: metadata,
+          lateSha256: lateSha256,
         );
 
         _taskPeers[task.transferId] = peer;
@@ -693,7 +803,49 @@ class FileSharingCoordinator {
     batch.state = batch.failures.isEmpty
         ? TransferBatchState.completed
         : TransferBatchState.completedWithFailures;
+    _pruneFinished();
     _notifyTransfersChanged();
+    _maybeAutoResume(batch);
+  }
+
+  static bool _isConnectionLoss(Object error) =>
+      error is TransferConnectionException || error is TransferTimeoutException;
+
+  void _maybeAutoResume(TransferBatch batch) {
+    if (_isDisposed ||
+        !batch.outbound ||
+        batch.failures.isEmpty ||
+        !batch.failures.values.every(_isConnectionLoss) ||
+        !_autoResuming.add(batch.batchId)) {
+      return;
+    }
+    _autoResume(batch)
+        .whenComplete(() => _autoResuming.remove(batch.batchId))
+        .ignore();
+  }
+
+  Future<void> _autoResume(TransferBatch batch) async {
+    final deadline = DateTime.now().add(autoResumeWindow);
+    while (!_isDisposed && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(autoResumeDelay);
+      // Finished meanwhile, or the user already pressed Retry.
+      if (_isDisposed || batch.failures.isEmpty || !batch.isFinished) return;
+      AppLogger.info(
+        'FileSharingCoordinator',
+        'Connection lost; resuming ${batch.failures.length} file(s) automatically',
+      );
+      try {
+        await retryFailedFiles(batch.batchId);
+      } catch (e) {
+        // Not reachable yet; try again until the window closes.
+        AppLogger.info('FileSharingCoordinator', 'Auto-resume attempt: $e');
+        continue;
+      }
+      if (batch.failures.isEmpty ||
+          !batch.failures.values.every(_isConnectionLoss)) {
+        return;
+      }
+    }
   }
 
   /// Sends again only the files of [batchId] that failed. Files that already
@@ -745,10 +897,12 @@ class FileSharingCoordinator {
   }
 
   /// Accepts an incoming file transfer request, saving the verified file to the
-  /// platform downloads directory (or [customSaveDirectory]).
+  /// platform downloads directory (or [customSaveDirectory]), inside
+  /// [subfolder] when the file came as part of a folder.
   Future<TransferTask> acceptIncomingTransfer(
     IncomingTransferRequest request, {
     String? customSaveDirectory,
+    String? subfolder,
   }) async {
     if (_isDisposed) {
       throw StateError('FileSharingCoordinator is disposed');
@@ -761,15 +915,43 @@ class FileSharingCoordinator {
     }
     // Contact cards stay app-private until the user saves them to contacts.
     final privateDir = isContact ? await contactDirectory?.call() : null;
-    final downloadsDir =
+    final baseDir =
         customSaveDirectory ??
         privateDir ??
         await storageService.getDownloadsDirectory();
+    // Sanitized again here: the path must never leave the save folder.
+    final folder = isContact
+        ? null
+        : BatchManifestEntry.sanitizeFolder(subfolder);
+    final downloadsDir = folder == null
+        ? baseDir
+        : [baseDir, ...folder.split('/')].join(Platform.pathSeparator);
+    if (folder != null) {
+      try {
+        await Directory(downloadsDir).create(recursive: true);
+      } on FileSystemException catch (e) {
+        await request.declineWithCode(
+          TransferCancelReason.ioError,
+          'The receiving device could not create the folder',
+        );
+        throw TransferStorageException(
+          request.transferId,
+          'Could not create $downloadsDir: $e',
+          outOfSpace: isOutOfSpaceError(e),
+        );
+      }
+    }
+    _cleanStaleStaging(downloadsDir);
     await _ensureFreeSpace(request, downloadsDir);
-    final destinationPath = await storageService.resolveUniqueDestinationPath(
+    // Each transfer gets its own name and staging file, even when several
+    // arrive at once with the same file name.
+    final destinationPath = await storageService.reserveDestinationPath(
       downloadsDir,
       request.metadata.fileName,
     );
+    final stagingPath =
+        '$destinationPath${FilePayloadDestination.stagingSuffix}';
+    _reservedStaging.add(stagingPath);
 
     AppLogger.info(
       'FileSharingCoordinator',
@@ -807,9 +989,16 @@ class FileSharingCoordinator {
     } catch (_) {
       releaseKeepAlive();
       sessionLifecyclePolicy.markTransferEnded(sessionId);
+      // The transfer never started: give the reserved name back.
+      _reservedStaging.remove(stagingPath);
+      try {
+        final staging = File(stagingPath);
+        if (staging.existsSync()) staging.deleteSync();
+      } catch (_) {}
       rethrow;
     }
     task.done.whenComplete(releaseKeepAlive).ignore();
+    task.done.whenComplete(() => _reservedStaging.remove(stagingPath)).ignore();
     final knownPeer = _knownPeers[request.senderDeviceId];
     if (knownPeer != null) {
       _taskPeers[task.transferId] = knownPeer;
@@ -870,9 +1059,17 @@ class FileSharingCoordinator {
     String sessionId, {
     String? mediaScanPath,
   }) {
+    // Saving may move a file to the next free name; report where it is.
+    String? savedPath() {
+      final destination = task is InboundTransferTask ? task.destination : null;
+      return destination is FilePayloadDestination
+          ? destination.targetFilePath
+          : mediaScanPath;
+    }
+
     task.done.then(
-      (_) => _onTaskSettled(task, null, mediaScanPath),
-      onError: (Object e) => _onTaskSettled(task, e, mediaScanPath),
+      (_) => _onTaskSettled(task, null, savedPath()),
+      onError: (Object e) => _onTaskSettled(task, e, savedPath()),
     );
     task.progressStream.listen((progress) {
       _notifyTransfersChanged();
@@ -886,9 +1083,12 @@ class FileSharingCoordinator {
     }, onError: (_) {});
 
     task.done.whenComplete(() async {
-      if (mediaScanPath != null && task.status == TransferStatus.completed) {
+      final scanPath = savedPath();
+      if (mediaScanPath != null &&
+          scanPath != null &&
+          task.status == TransferStatus.completed) {
         try {
-          await storageService.notifyMediaScanner(mediaScanPath);
+          await storageService.notifyMediaScanner(scanPath);
         } catch (_) {}
       }
       if (!_recentCompletedTasks.any((t) => t.transferId == task.transferId)) {
@@ -897,15 +1097,85 @@ class FileSharingCoordinator {
           _recentCompletedTasks.removeLast();
         }
       }
+      _pruneFinished();
       sessionLifecyclePolicy.markTransferEnded(sessionId);
       _notifyTransfersChanged();
     }).ignore();
   }
 
+  /// Finished batches kept in memory (for their screens and "Retry failed").
+  static const int keepFinishedBatches = 20;
+
+  // Without this every batch and task of the session stayed in memory; a few
+  // big folders (thousands of tasks) weigh on low-memory phones. Finished
+  // transfers live on in the persistent history.
+  void _pruneFinished() {
+    final finished = _batches.values.where((b) => b.isFinished).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final excess = finished.length - keepFinishedBatches;
+    for (final batch in finished.take(max(0, excess))) {
+      _batches.remove(batch.batchId);
+      for (final task in batch.tasks.values) {
+        _taskBatch.remove(task.transferId);
+      }
+    }
+    final inUse = <String>{
+      for (final t in transferEngine.activeTransfers) t.transferId,
+      for (final t in _recentCompletedTasks) t.transferId,
+      ..._taskBatch.keys,
+    };
+    _taskPeers.removeWhere((id, _) => !inUse.contains(id));
+  }
+
+  final Set<String> _cleanedStagingDirs = {};
+
+  /// Staging files reserved by receives that are being set up or running;
+  /// the stale-file sweep must never delete them.
+  final Set<String> _reservedStaging = {};
+
+  /// Deletes partial files (`*.vayu.tmp`) left by a receive the app never
+  /// finished (killed, phone restarted). Runs once per folder, only while
+  /// nothing is being received, and keeps partials held for a resume.
+  void _cleanStaleStaging(String dir) {
+    if (_cleanedStagingDirs.contains(dir)) return;
+    if (transferEngine.activeTransfers.any((t) => t is InboundTransferTask)) {
+      return;
+    }
+    _cleanedStagingDirs.add(dir);
+    final engine = transferEngine;
+    final kept = engine is TransferEngineImpl
+        ? engine.resumable.keptPaths
+        : const <String>{};
+    try {
+      for (final entry in Directory(dir).listSync(followLinks: false)) {
+        if (entry is File &&
+            entry.path.endsWith(FilePayloadDestination.stagingSuffix) &&
+            !kept.contains(entry.path) &&
+            !_reservedStaging.contains(entry.path)) {
+          entry.deleteSync();
+        }
+      }
+    } catch (e) {
+      AppLogger.warning('FileSharingCoordinator', 'Staging cleanup failed: $e');
+    }
+  }
+
   void _onTaskSettled(TransferTask task, Object? error, String? savedPath) {
     _onBatchTaskSettled(task, error);
     _recordHistory(task, error, savedPath);
+    if (error == null &&
+        savedPath != null &&
+        task is InboundTransferTask &&
+        task.metadata.payloadType == PayloadType.contact &&
+        !_isDisposed) {
+      onContactReceived?.call(savedPath, _peerNameFor(task));
+    }
   }
+
+  String _peerNameFor(TransferTask task) =>
+      _taskPeers[task.transferId]?.displayName ??
+      _knownPeers[task.remoteDeviceId]?.displayName ??
+      'Nearby device';
 
   void _recordHistory(TransferTask task, Object? error, String? savedPath) {
     final log = history;
@@ -915,10 +1185,7 @@ class FileSharingCoordinator {
         : task.status == TransferStatus.cancelled
         ? TransferOutcome.cancelled
         : TransferOutcome.failed;
-    final peerName =
-        _taskPeers[task.transferId]?.displayName ??
-        _knownPeers[task.remoteDeviceId]?.displayName ??
-        'Nearby device';
+    final peerName = _peerNameFor(task);
     log
         .add(
           TransferHistoryRecord(

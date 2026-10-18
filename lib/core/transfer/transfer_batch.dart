@@ -39,6 +39,10 @@ class TransferBatch {
   /// (its build supports it); false when each file is offered on its own.
   final bool offeredAsBatch;
 
+  /// Receiver only: the folder each file is saved in, from the consented
+  /// manifest (null entries are saved directly in the save folder).
+  final List<String?> folders;
+
   TransferBatchState state;
 
   /// Latest task per file index (a retry replaces the failed one).
@@ -60,8 +64,13 @@ class TransferBatch {
     required this.fileSizes,
     this.documents = const [],
     this.offeredAsBatch = false,
+    this.folders = const [],
     this.state = TransferBatchState.transferring,
   });
+
+  /// The folder file [index] is saved in, if it came as part of a folder.
+  String? folderOf(int index) =>
+      index >= 0 && index < folders.length ? folders[index] : null;
 
   int get fileCount => fileNames.length;
 

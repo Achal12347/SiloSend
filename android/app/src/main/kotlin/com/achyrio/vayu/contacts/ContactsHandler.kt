@@ -6,8 +6,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.achyrio.vayu.platform.PermissionGate
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -24,11 +24,13 @@ import java.io.File
  * are kept (app-private), and import goes through the contacts app via
  * PlatformHandler.openFile so the user confirms every save.
  */
-class ContactsHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class ContactsHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         private const val CHANNEL = "com.achyrio.vayu/contacts"
         private const val REQUEST_PICK = 4106
-        private const val REQUEST_PERMISSION = 4107
         private const val MAX_VCARD_BYTES = 1024 * 1024
     }
 
@@ -87,17 +89,6 @@ class ContactsHandler(private val activity: Activity) : MethodChannel.MethodCall
         return true
     }
 
-    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray): Boolean {
-        if (requestCode != REQUEST_PERMISSION) return false
-        if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            readPicked(allowPermissionRequest = false)
-        } else {
-            pending?.error("PERMISSION", "Contacts access denied", null)
-            pending = null
-        }
-        return true
-    }
-
     private fun readPicked(allowPermissionRequest: Boolean) {
         val result = pending ?: return
         val uri = pickedUri ?: return
@@ -136,11 +127,14 @@ class ContactsHandler(private val activity: Activity) : MethodChannel.MethodCall
             val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.READ_CONTACTS) ==
                 PackageManager.PERMISSION_GRANTED
             if (allowPermissionRequest && !granted) {
-                ActivityCompat.requestPermissions(
-                    activity,
-                    arrayOf(Manifest.permission.READ_CONTACTS),
-                    REQUEST_PERMISSION,
-                )
+                permissions.request(PermissionGate.contactsPermissions()) { status ->
+                    if (status == PermissionGate.GRANTED) {
+                        readPicked(allowPermissionRequest = false)
+                    } else {
+                        pending?.error("PERMISSION", "Contacts access denied", null)
+                        pending = null
+                    }
+                }
             } else {
                 pending = null
                 result.error("PERMISSION", "Contacts access denied", null)

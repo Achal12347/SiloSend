@@ -7,6 +7,7 @@ import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/discovery/discovery_coordinator.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
+import 'package:vayu/core/pairing/wifi_direct_service.dart';
 import 'package:vayu/core/security/secure_session_manager.dart';
 import 'package:vayu/core/transfer/file_sharing_coordinator.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
@@ -39,6 +40,7 @@ class PairingCoordinator {
   final TransportSelector transportSelector;
   final FileSharingCoordinator fileSharingCoordinator;
   final LocalHotspotService hotspot;
+  final WifiDirectService wifiDirect;
 
   /// Resolves this phone's local IPv4 addresses (overridable in tests).
   final Future<List<String>> Function() localAddresses;
@@ -52,6 +54,7 @@ class PairingCoordinator {
 
   _IdleRelease? _hostRelease;
   _IdleRelease? _joinRelease;
+  _IdleRelease? _groupRelease;
 
   PairingCoordinator({
     required this.identity,
@@ -63,6 +66,7 @@ class PairingCoordinator {
     required this.transportSelector,
     required this.fileSharingCoordinator,
     required this.hotspot,
+    this.wifiDirect = const UnsupportedWifiDirectService(),
     Future<List<String>> Function()? localAddresses,
     int Function()? activeSessionCount,
     Stream<Object?>? sessionChanges,
@@ -82,6 +86,18 @@ class PairingCoordinator {
   /// Called when the pairing screen closes: stop hosting once no session has
   /// used the hotspot for [hotspotIdleTimeout].
   void releaseHotspotWhenIdle() {
+    if (wifiDirect.isHosting) {
+      _groupRelease?.cancel();
+      _groupRelease = _IdleRelease(
+        activeSessionCount: activeSessionCount,
+        changes: sessionChanges,
+        timeout: hotspotIdleTimeout,
+        onIdle: () {
+          _groupRelease = null;
+          wifiDirect.removeGroup();
+        },
+      );
+    }
     if (!hotspot.isHosting) return;
     _hostRelease?.cancel();
     _hostRelease = _IdleRelease(
@@ -99,6 +115,8 @@ class PairingCoordinator {
   /// address is the hotspot's, and the joiner is told to join that network.
   Future<PairingPayload> buildLocalPayload({
     HotspotCredentials? hotspotCredentials,
+    bool wifiDirect = false,
+    String? fallbackLanAddress,
   }) async {
     final id = identity();
     if (id == null) {
@@ -127,17 +145,50 @@ class PairingCoordinator {
       ed25519PubKeyHex: pubKey,
       wifiSsid: hotspotCredentials?.ssid,
       wifiPassphrase: hotspotCredentials?.passphrase,
+      wifiDirect: wifiDirect && hotspotCredentials != null,
+      fallbackLanAddress: fallbackLanAddress,
     );
   }
 
-  /// For the Receive screen: a code on the shared Wi-Fi, or, when this phone
-  /// has no shared network (or [forceHotspot]), on a phone-hosted hotspot.
+  /// For the Receive screen: a code on this phone's Wi-Fi Direct group (the
+  /// fast path, Android 10+) with the shared Wi-Fi as fallback; without a
+  /// group, a code on the shared Wi-Fi or, when this phone has no shared
+  /// network (or [forceHotspot]), on a phone-hosted hotspot.
   /// Returns the payload (null if none could be made) and the hotspot error,
   /// if starting it failed.
   Future<(PairingPayload?, HotspotStartError?)> prepareShowableCode({
     bool forceHotspot = false,
   }) async {
     var payload = await buildLocalPayload();
+    if (!forceHotspot && await wifiDirect.isSupported()) {
+      _groupRelease?.cancel();
+      _groupRelease = null;
+      final created = await wifiDirect.createGroup();
+      final group = created.group;
+      if (group != null) {
+        AppLogger.info(
+          'PairingCoordinator',
+          'Wi-Fi Direct group up (${group.frequencyMhz} MHz)',
+        );
+        final direct = await buildLocalPayload(
+          hotspotCredentials: group.credentials,
+          wifiDirect: true,
+          fallbackLanAddress: payload.lanAddress,
+        );
+        return (direct, null);
+      }
+      // Otherwise carry on exactly as without Wi-Fi Direct.
+      AppLogger.info(
+        'PairingCoordinator',
+        'No Wi-Fi Direct group (${created.error?.name}); using Wi-Fi or hotspot',
+      );
+    }
+    if (forceHotspot && wifiDirect.isHosting) {
+      // Most phones cannot host a group and a hotspot at once.
+      _groupRelease?.cancel();
+      _groupRelease = null;
+      await wifiDirect.removeGroup();
+    }
     if (payload.lanAddress == null || forceHotspot) {
       final started = await startHotspot();
       if (!started.isSuccess) {
@@ -220,38 +271,88 @@ class PairingCoordinator {
     }
 
     final ssid = payload.wifiSsid;
+    if (ssid != null && payload.wifiDirect) {
+      return _joinViaWifiDirect(payload, ssid);
+    }
     if (ssid != null) {
-      final joined = await hotspot.join(
-        ssid: ssid,
-        passphrase: payload.wifiPassphrase ?? '',
+      await _joinHotspot(ssid, payload.wifiPassphrase ?? '');
+    }
+    return _connectTo(payload, payload.lanAddress!);
+  }
+
+  /// Wi-Fi Direct first (fast, no dialog, normal Wi-Fi stays on), then the
+  /// shared router, then the group joined like a hotspot (the only way for
+  /// phones without Wi-Fi Direct when there is no shared router).
+  Future<DiscoveredPeer> _joinViaWifiDirect(
+    PairingPayload payload,
+    String ssid,
+  ) async {
+    final passphrase = payload.wifiPassphrase ?? '';
+    final groupAddress = payload.lanAddress!;
+    if (await wifiDirect.isSupported()) {
+      final owner = await wifiDirect.connect(
+        networkName: ssid,
+        passphrase: passphrase,
       );
-      if (!joined) {
-        throw PairingException(
-          'Could not join "$ssid". Connect to it in Wi-Fi settings, then try again.',
-        );
-      }
-      // Return to the normal network once the peer is no longer used.
-      _joinRelease?.cancel();
-      _joinRelease = _IdleRelease(
-        activeSessionCount: activeSessionCount,
-        changes: sessionChanges,
-        timeout: hotspotIdleTimeout,
-        onIdle: () {
+      if (owner != null) {
+        _releaseJoinWhenIdle(wifiDirect.disconnect);
+        try {
+          return await _connectTo(payload, groupAddress);
+        } on PairingException {
+          _joinRelease?.cancel();
           _joinRelease = null;
-          hotspot.leave();
-        },
+          await wifiDirect.disconnect();
+        }
+      }
+      AppLogger.info('PairingCoordinator', 'Wi-Fi Direct join failed');
+    }
+    final fallback = payload.fallbackLanAddress;
+    if (fallback != null) {
+      try {
+        return await _connectTo(payload, fallback);
+      } on PairingException {
+        AppLogger.info('PairingCoordinator', 'Shared Wi-Fi not reachable');
+      }
+    }
+    await _joinHotspot(ssid, passphrase);
+    return _connectTo(payload, groupAddress);
+  }
+
+  Future<void> _joinHotspot(String ssid, String passphrase) async {
+    final joined = await hotspot.join(ssid: ssid, passphrase: passphrase);
+    if (!joined) {
+      throw PairingException(
+        'Could not join "$ssid". Connect to it in Wi-Fi settings, then try again.',
       );
     }
+    // Return to the normal network once the peer is no longer used.
+    _releaseJoinWhenIdle(hotspot.leave);
+  }
 
+  void _releaseJoinWhenIdle(Future<void> Function() leave) {
+    _joinRelease?.cancel();
+    _joinRelease = _IdleRelease(
+      activeSessionCount: activeSessionCount,
+      changes: sessionChanges,
+      timeout: hotspotIdleTimeout,
+      onIdle: () {
+        _joinRelease = null;
+        leave();
+      },
+    );
+  }
+
+  Future<DiscoveredPeer> _connectTo(
+    PairingPayload payload,
+    String address,
+  ) async {
     final peer = DiscoveredPeer(
       deviceId: payload.deviceIdHex.toLowerCase(),
       displayName: payload.displayName,
       transportType: TransportType.lan,
       availableTransports: payload.supportedTransports,
       rssi: 0,
-      transportEndpoints: {
-        TransportType.lan: '${payload.lanAddress}:${payload.lanPort}',
-      },
+      transportEndpoints: {TransportType.lan: '$address:${payload.lanPort}'},
       lastSeen: DateTime.now(),
     );
     discoveryCoordinator.addPairedPeer(peer);

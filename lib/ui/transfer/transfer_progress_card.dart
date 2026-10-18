@@ -167,6 +167,10 @@ class _TransferRow extends StatelessWidget {
                         const SizedBox(height: 8),
                         LinearProgressIndicator(
                           value: progress?.fraction,
+                          semanticsLabel: 'Transfer progress',
+                          semanticsValue: progress == null
+                              ? null
+                              : '${(progress.fraction * 100).round()}%',
                           minHeight: 6,
                           borderRadius: BorderRadius.circular(3),
                         ),

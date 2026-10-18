@@ -55,7 +55,9 @@ enum TransferCancelReason {
   // The receiver could not write or promote the file for a reason other than space.
   ioError(0x07),
   // The sender could not read its own source file.
-  sourceUnreadable(0x08);
+  sourceUnreadable(0x08),
+  // The receiver is not on its Receive screen (and accepts nothing outside it).
+  notReceiving(0x09);
 
   final int code;
   const TransferCancelReason(this.code);
@@ -374,7 +376,7 @@ class TransferChunkPayload {
     }
 
     final byteData = ByteData.sublistView(bytes);
-    final transferId = Uint8List.fromList(bytes.sublist(0, 16));
+    final transferId = bytes.sublist(0, 16);
     final chunkIndex = byteData.getUint32(16, Endian.big);
     final chunkOffset = byteData.getUint64(20, Endian.big);
     final chunkLength = byteData.getUint32(28, Endian.big);
@@ -386,8 +388,12 @@ class TransferChunkPayload {
       );
     }
 
-    final chunkData = Uint8List.fromList(
-      bytes.sublist(headerSize, headerSize + chunkLength),
+    // A view, not a copy: [bytes] is the freshly decrypted packet payload,
+    // owned by this chunk alone.
+    final chunkData = Uint8List.sublistView(
+      bytes,
+      headerSize,
+      headerSize + chunkLength,
     );
 
     return TransferChunkPayload(
@@ -695,6 +701,52 @@ class TransferCancelPayload {
       transferId: transferId,
       reason: reason,
       message: message,
+    );
+  }
+}
+
+/// Packet 0x17: the SHA-256 of a file whose offer was sent before the sender
+/// finished hashing it (`late-hash-v1`). Layout: transferId (16) + digest (32).
+class TransferDigestPayload {
+  static const int size = 48;
+
+  final Uint8List transferId;
+  final Uint8List sha256Hash;
+
+  TransferDigestPayload({required this.transferId, required this.sha256Hash}) {
+    if (transferId.length != 16) {
+      throw ArgumentError.value(
+        transferId.length,
+        'transferId',
+        'Must be 16 bytes',
+      );
+    }
+    if (sha256Hash.length != 32) {
+      throw ArgumentError.value(
+        sha256Hash.length,
+        'sha256Hash',
+        'Must be 32 bytes',
+      );
+    }
+  }
+
+  String get transferIdHex =>
+      transferId.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+  String get sha256Hex =>
+      sha256Hash.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+  Uint8List toBytes() => Uint8List(size)
+    ..setRange(0, 16, transferId)
+    ..setRange(16, size, sha256Hash);
+
+  factory TransferDigestPayload.fromBytes(Uint8List bytes) {
+    if (bytes.length != size) {
+      throw FormatException('Invalid digest payload length (${bytes.length})');
+    }
+    return TransferDigestPayload(
+      transferId: Uint8List.fromList(bytes.sublist(0, 16)),
+      sha256Hash: Uint8List.fromList(bytes.sublist(16, size)),
     );
   }
 }

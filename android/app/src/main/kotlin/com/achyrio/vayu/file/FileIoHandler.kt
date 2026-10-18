@@ -2,6 +2,8 @@ package com.achyrio.vayu.file
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -12,6 +14,8 @@ import java.nio.ByteBuffer
 import java.nio.channels.FileChannel
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 /**
  * Reads picked documents for outbound transfers on a background task queue.
@@ -24,6 +28,11 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
     companion object {
         const val CHANNEL = "com.achyrio.vayu/file_io"
         private const val HASH_BUFFER = 1024 * 1024
+
+        // Hashing runs beside the transfer (the offer no longer waits for it), so
+        // it must not hold the serial channel queue that chunk reads go through.
+        // One pool per process: handlers are recreated with the activity.
+        private val hashers: ExecutorService = Executors.newFixedThreadPool(2)
     }
 
     private class OpenFile(val descriptor: ParcelFileDescriptor) {
@@ -42,6 +51,8 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
 
     private var channel: MethodChannel? = null
     private val openFiles = ConcurrentHashMap<String, OpenFile>()
+
+    private val main = Handler(Looper.getMainLooper())
 
     fun register(messenger: BinaryMessenger) {
         val queue = messenger.makeBackgroundTaskQueue()
@@ -65,7 +76,7 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
         }
         when (call.method) {
             "readChunk" -> readChunk(uriString, call, result)
-            "sha256" -> sha256(uriString, result)
+            "sha256" -> hashers.execute { sha256(uriString, result) }
             "closeFile" -> {
                 openFiles.remove(uriString)?.close()
                 result.success(null)
@@ -117,9 +128,9 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
                 }
             }
             val hex = digest.digest().joinToString("") { "%02x".format(it) }
-            result.success(mapOf("sha256" to hex, "size" to total))
+            main.post { result.success(mapOf("sha256" to hex, "size" to total)) }
         } catch (e: Exception) {
-            result.error("HASH_FAILED", "Failed to hash document: ${e.message}", null)
+            main.post { result.error("HASH_FAILED", "Failed to hash document: ${e.message}", null) }
         }
     }
 }

@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/services.dart';
 
 import 'package:vayu/domain/identity/device_capabilities.dart';
+import 'package:vayu/domain/identity/permission_report.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
 import 'package:vayu/platform/platform_service.dart';
 
@@ -134,24 +135,78 @@ class SystemPlatformService implements PlatformService {
       final statusStr = await _channel.invokeMethod<String>(
         'requestNearbyPermissions',
       );
-      switch (statusStr) {
-        case 'granted':
-          return PermissionStatus.granted;
-        case 'permanently_denied':
-          return PermissionStatus.permanentlyDenied;
-        case 'denied':
-          return PermissionStatus.denied;
-        case 'not_required':
-          return PermissionStatus.notRequired;
-        default:
-          return PermissionStatus.unknown;
-      }
+      return parsePermissionStatus(statusStr);
     } on MissingPluginException {
       return PermissionStatus.denied;
     } on PlatformException {
       return PermissionStatus.denied;
     } catch (_) {
       return PermissionStatus.denied;
+    }
+  }
+
+  @override
+  Future<PermissionReport> permissionReport() async {
+    if (!_isActualAndroid) return PermissionReport.notApplicable();
+    try {
+      final map = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'permissionReport',
+      );
+      return map == null
+          ? PermissionReport.notApplicable()
+          : PermissionReport.fromMap(map);
+    } catch (_) {
+      return PermissionReport.notApplicable();
+    }
+  }
+
+  final Map<PermissionGroup, Future<PermissionStatus>> _pendingGroupRequests =
+      {};
+
+  @override
+  Future<PermissionStatus> requestPermissionGroup(PermissionGroup group) {
+    if (group == PermissionGroup.nearby) return requestNearbyPermissions();
+    return _pendingGroupRequests[group] ??= _requestGroupOnce(group)
+        .whenComplete(() => _pendingGroupRequests.remove(group));
+  }
+
+  Future<PermissionStatus> _requestGroupOnce(PermissionGroup group) async {
+    if (!_isActualAndroid) return PermissionStatus.notRequired;
+    try {
+      // No timeout: completes when the user answers the system dialog.
+      final status = await _channel.invokeMethod<String>(
+        'requestPermissionGroup',
+        {'group': group.name},
+      );
+      return parsePermissionStatus(status);
+    } catch (_) {
+      return PermissionStatus.unknown;
+    }
+  }
+
+  @override
+  Future<bool> openUri(Uri uri) async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('openUri', {
+            'uri': uri.toString(),
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> openSettingsPage(SettingsPage page) async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('openSettingsPage', {
+            'page': page.name,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -206,6 +261,19 @@ class SystemPlatformService implements PlatformService {
           .invokeMethod<void>('openWifiSettings')
           .timeout(const Duration(seconds: 2));
     } catch (_) {}
+  }
+
+  @override
+  Future<WifiLinkInfo?> wifiLinkInfo() async {
+    if (!_isActualAndroid) return null;
+    try {
+      final map = await _channel
+          .invokeMethod<Map<Object?, Object?>>('wifiLinkInfo')
+          .timeout(const Duration(seconds: 2));
+      return WifiLinkInfo.fromMap(map);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

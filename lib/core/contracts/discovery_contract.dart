@@ -36,11 +36,7 @@ enum DiscoveryOperationalState {
   noDevices,
 
   /// Discovery cannot proceed until a required capability or transport is enabled.
-  actionRequired;
-
-  bool get isSearching => this == DiscoveryOperationalState.searching;
-  bool get isReady => this == DiscoveryOperationalState.ready;
-  bool get isIdle => this == DiscoveryOperationalState.idle;
+  actionRequired,
 }
 
 /// Represents a nearby device discovered via radio beacons or network discovery.

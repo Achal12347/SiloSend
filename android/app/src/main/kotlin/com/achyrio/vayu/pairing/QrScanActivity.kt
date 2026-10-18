@@ -43,14 +43,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * CameraX delivers frames; ZXing decodes the luminance plane on a background
  * executor. Only `vayu://` (or legacy `silosend://`) codes are accepted, so a
- * random QR code can never start a connection. The camera permission is asked
+ * random QR code can never start a connection; with [EXTRA_ACCEPT_CARDS] a
+ * contact card (vCard, as shown on another phone's My card) is accepted too. The camera permission is asked
  * here, at the moment the user chose to scan.
  */
 class QrScanActivity : ComponentActivity() {
     companion object {
         const val EXTRA_TEXT = "text"
         const val EXTRA_ERROR = "error"
+        const val EXTRA_ACCEPT_CARDS = "accept_cards"
     }
+
+    private val acceptCards by lazy { intent.getBooleanExtra(EXTRA_ACCEPT_CARDS, false) }
 
     private lateinit var analysisExecutor: ExecutorService
     private val delivered = AtomicBoolean(false)
@@ -82,7 +86,11 @@ class QrScanActivity : ComponentActivity() {
         root.addView(ViewfinderOverlay(this), FrameLayout.LayoutParams(MATCH, MATCH))
 
         hint = TextView(this).apply {
-            text = "Point at the Vayu code on the other phone"
+            text = if (acceptCards) {
+                "Point at the card on the other phone"
+            } else {
+                "Point at the Vayu code on the other phone"
+            }
             setTextColor(Color.parseColor("#F4F1EA"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             gravity = Gravity.CENTER
@@ -164,7 +172,9 @@ class QrScanActivity : ComponentActivity() {
                 reader.reset()
             }
             if (text != null) {
-                if (text.startsWith("vayu://") || text.startsWith("silosend://")) {
+                val isVayuCode = text.startsWith("vayu://") || text.startsWith("silosend://")
+                val isCard = acceptCards && text.trimStart().startsWith("BEGIN:VCARD", ignoreCase = true)
+                if (isVayuCode || isCard) {
                     if (delivered.compareAndSet(false, true)) {
                         runOnUiThread {
                             setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_TEXT, text))
@@ -172,7 +182,9 @@ class QrScanActivity : ComponentActivity() {
                         }
                     }
                 } else {
-                    runOnUiThread { hint.text = "That is not a Vayu code" }
+                    runOnUiThread {
+                        hint.text = if (acceptCards) "That is not a contact card" else "That is not a Vayu code"
+                    }
                 }
             }
         } catch (_: Exception) {
@@ -204,17 +216,22 @@ class QrScanActivity : ComponentActivity() {
             strokeCap = Paint.Cap.ROUND
         }
 
+        // Shapes are built once per size, not on every draw.
+        private val window = RectF()
+        private val path = Path().apply { fillType = Path.FillType.EVEN_ODD }
+        private val radius = 28f * resources.displayMetrics.density
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            val size = minOf(w, h) * 0.68f
+            val left = (w - size) / 2f
+            val top = (h - size) / 2.4f
+            window.set(left, top, left + size, top + size)
+            path.reset()
+            path.addRect(0f, 0f, w.toFloat(), h.toFloat(), Path.Direction.CW)
+            path.addRoundRect(window, radius, radius, Path.Direction.CW)
+        }
+
         override fun onDraw(canvas: Canvas) {
-            val size = minOf(width, height) * 0.68f
-            val left = (width - size) / 2f
-            val top = (height - size) / 2.4f
-            val window = RectF(left, top, left + size, top + size)
-            val radius = 28f * resources.displayMetrics.density
-            val path = Path().apply {
-                fillType = Path.FillType.EVEN_ODD
-                addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
-                addRoundRect(window, radius, radius, Path.Direction.CW)
-            }
             canvas.drawPath(path, scrim)
             canvas.drawRoundRect(window, radius, radius, corner)
         }

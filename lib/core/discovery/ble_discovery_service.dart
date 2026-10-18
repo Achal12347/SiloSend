@@ -26,8 +26,6 @@ class BleDiscoveryService implements DiscoveryService {
   bool _isAdvertising = false;
   DeviceAdvertisement? _currentAdvertisement;
 
-  DeviceAdvertisement? get currentAdvertisement => _currentAdvertisement;
-
   BleDiscoveryService({
     required this.localDeviceId,
     MethodChannel? methodChannel,
@@ -45,7 +43,6 @@ class BleDiscoveryService implements DiscoveryService {
 
   bool get isScanning => _isScanning;
   bool get isAdvertising => _isAdvertising;
-  bool get isBatterySaverEnabled => _batterySaver;
 
   /// Sets battery saver mode and dynamically reapplies radio power settings.
   void setBatterySaver(bool enabled) {

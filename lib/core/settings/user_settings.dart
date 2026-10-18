@@ -60,7 +60,6 @@ class UserSettings {
   final BatterySaverMode batterySaverMode;
   final AppThemePreference themePreference;
   final String? customDisplayName;
-  final String? customDownloadsPath;
 
   /// The person's own name (for their card), separate from the device name.
   final String? profileName;
@@ -78,7 +77,6 @@ class UserSettings {
     this.batterySaverMode = BatterySaverMode.system,
     this.themePreference = AppThemePreference.system,
     this.customDisplayName,
-    this.customDownloadsPath,
     this.profileName,
     this.onboardingVersion = 0,
     this.profilePromptDismissed = false,
@@ -90,7 +88,6 @@ class UserSettings {
     BatterySaverMode? batterySaverMode,
     AppThemePreference? themePreference,
     String? customDisplayName,
-    String? customDownloadsPath,
     String? profileName,
     int? onboardingVersion,
     bool? profilePromptDismissed,
@@ -99,7 +96,6 @@ class UserSettings {
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
       themePreference: themePreference ?? this.themePreference,
       customDisplayName: customDisplayName ?? this.customDisplayName,
-      customDownloadsPath: customDownloadsPath ?? this.customDownloadsPath,
       profileName: profileName ?? this.profileName,
       onboardingVersion: onboardingVersion ?? this.onboardingVersion,
       profilePromptDismissed:
@@ -111,7 +107,6 @@ class UserSettings {
     'batterySaverMode': batterySaverMode.name,
     'themePreference': themePreference.name,
     if (customDisplayName != null) 'customDisplayName': customDisplayName,
-    if (customDownloadsPath != null) 'customDownloadsPath': customDownloadsPath,
     if (profileName != null) 'profileName': profileName,
     'onboardingVersion': onboardingVersion,
     if (profilePromptDismissed) 'profilePromptDismissed': true,
@@ -140,7 +135,6 @@ class UserSettings {
       batterySaverMode: mode,
       themePreference: theme,
       customDisplayName: json['customDisplayName'] as String?,
-      customDownloadsPath: json['customDownloadsPath'] as String?,
       profileName: json['profileName'] as String?,
       onboardingVersion: json['onboardingVersion'] as int? ?? 0,
       profilePromptDismissed: json['profilePromptDismissed'] as bool? ?? false,

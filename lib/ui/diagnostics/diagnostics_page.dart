@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vayu/platform/platform_service.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/battery/battery_snapshot.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
@@ -31,11 +32,19 @@ class DiagnosticsPage extends StatefulWidget {
 
 class _DiagnosticsPageState extends State<DiagnosticsPage> {
   BatterySnapshot _batterySnapshot = BatterySnapshot.unknown();
+  WifiLinkInfo? _wifiLink;
 
   @override
   void initState() {
     super.initState();
     _refreshBattery();
+    _refreshWifiLink();
+  }
+
+  // The router link usually sets the ceiling for transfers over shared Wi-Fi.
+  Future<void> _refreshWifiLink() async {
+    final link = await widget.container.platformService.wifiLinkInfo();
+    if (mounted) setState(() => _wifiLink = link);
   }
 
   Future<void> _refreshBattery() async {
@@ -64,6 +73,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
             onPressed: () async {
               await container.capabilityCoordinator.refresh();
               await _refreshBattery();
+              await _refreshWifiLink();
               if (context.mounted) {
                 showVayuNotice(context, 'Refreshed');
               }
@@ -302,6 +312,10 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
 
                   _buildSectionHeader(theme, 'Recent Transfer Speed'),
                   _buildCard(theme, [
+                    _buildRow(
+                      'Wi-Fi now',
+                      _wifiLink?.summary() ?? 'Not connected to Wi-Fi',
+                    ),
                     if (container.transferStatsLog?.recent.isEmpty ?? true)
                       _buildRow('Measurements', 'No finished transfers yet')
                     else

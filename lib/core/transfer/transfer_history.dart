@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 /// How a recorded transfer ended.
 enum TransferOutcome { completed, failed, cancelled }
@@ -17,6 +18,7 @@ enum TransferFailureKind {
   corrupted,
   unconfirmed,
   declined,
+  notReceiving,
   cancelled,
   other,
 }
@@ -45,9 +47,14 @@ TransferFailureKind transferFailureKind(Object error) {
     return TransferFailureKind.unconfirmed;
   }
   if (error is TransferBatchDeclinedException) {
-    return TransferFailureKind.declined;
+    return error.reason == TransferCancelReason.notReceiving
+        ? TransferFailureKind.notReceiving
+        : TransferFailureKind.declined;
   }
   if (error is TransferCancelledException) {
+    if (error.reason.contains("isn't receiving")) {
+      return TransferFailureKind.notReceiving;
+    }
     return error.reason.toLowerCase().contains('declined')
         ? TransferFailureKind.declined
         : TransferFailureKind.cancelled;

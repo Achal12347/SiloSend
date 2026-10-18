@@ -59,6 +59,20 @@ abstract class NfcPlatformAdapter {
   Future<void> stopServing();
 }
 
+/// Why a tap did not deliver anything.
+enum NfcTapProblem {
+  /// The phones moved apart before the read finished.
+  readFailed,
+
+  /// The other phone is not sharing anything (not on Receive or My card).
+  notSharing,
+}
+
+/// An adapter that reports taps that delivered nothing.
+abstract class TapProblemReporting {
+  Stream<NfcTapProblem> get tapProblems;
+}
+
 /// An adapter that can also share a card as a standard NFC tag, so phones
 /// with Vayu closed read it through Android's own tag reader.
 abstract class CardSharingNfcAdapter {
@@ -98,6 +112,14 @@ class NfcPairingService {
   /// vCards received by tap (a phone showing its Vayu card). Pairing codes
   /// keep arriving on [onPayloadReceived] as before.
   Stream<Uint8List> get onCardReceived => _cardController.stream;
+
+  /// Taps that delivered nothing, so screens can say what to do.
+  Stream<NfcTapProblem> get onTapProblem {
+    final adapter = platformAdapter;
+    return adapter is TapProblemReporting
+        ? (adapter as TapProblemReporting).tapProblems
+        : const Stream<NfcTapProblem>.empty();
+  }
 
   /// Whether NFC hardware is present and supported on this device.
   Future<bool> get isNfcAvailable async {

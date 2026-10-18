@@ -93,11 +93,17 @@ class EncryptedEnvelope {
     final sequenceNumber = byteData.getUint64(1, Endian.big);
 
     final ciphertextLength = bytes.length - minEnvelopeSize;
-    final ciphertext = Uint8List.fromList(
-      bytes.sublist(headerOverhead, headerOverhead + ciphertextLength),
+    // Views into [bytes]: ciphertext and tag stay adjacent, so the platform
+    // cipher can decrypt them without joining them again.
+    final ciphertext = Uint8List.sublistView(
+      bytes,
+      headerOverhead,
+      headerOverhead + ciphertextLength,
     );
-    final authTag = Uint8List.fromList(
-      bytes.sublist(bytes.length - tagLength, bytes.length),
+    final authTag = Uint8List.sublistView(
+      bytes,
+      bytes.length - tagLength,
+      bytes.length,
     );
 
     return EncryptedEnvelope(

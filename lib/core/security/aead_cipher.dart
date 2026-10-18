@@ -121,13 +121,7 @@ class PlatformAeadCipher implements AeadCipher {
     required Uint8List aad,
   }) async {
     if (!_platformMissing) {
-      final sealed = Uint8List(ciphertext.length + authTag.length)
-        ..setRange(0, ciphertext.length, ciphertext)
-        ..setRange(
-          ciphertext.length,
-          ciphertext.length + authTag.length,
-          authTag,
-        );
+      final sealed = _joined(ciphertext, authTag);
       try {
         final plain = await channel.invokeMethod<Uint8List>('decrypt', {
           'key': key,
@@ -155,5 +149,27 @@ class PlatformAeadCipher implements AeadCipher {
       nonce: nonce,
       aad: aad,
     );
+  }
+
+  /// ciphertext || tag. Packets arrive with the two adjacent in one buffer,
+  /// so this is normally a view, not a copy of the whole chunk.
+  static Uint8List _joined(Uint8List ciphertext, Uint8List authTag) {
+    // ByteBuffer == compares the backing store (`.buffer` is a fresh wrapper).
+    if (ciphertext.buffer == authTag.buffer &&
+        ciphertext.offsetInBytes + ciphertext.lengthInBytes ==
+            authTag.offsetInBytes) {
+      return Uint8List.view(
+        ciphertext.buffer,
+        ciphertext.offsetInBytes,
+        ciphertext.length + authTag.length,
+      );
+    }
+    return Uint8List(ciphertext.length + authTag.length)
+      ..setRange(0, ciphertext.length, ciphertext)
+      ..setRange(
+        ciphertext.length,
+        ciphertext.length + authTag.length,
+        authTag,
+      );
   }
 }

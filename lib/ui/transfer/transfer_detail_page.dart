@@ -250,9 +250,10 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
     }
 
     final inbound = task is InboundTransferTask;
-    final peer = widget.container.fileSharingCoordinator.getPeerForTask(
-      task.transferId,
-    );
+    final coordinator = widget.container.fileSharingCoordinator;
+    final peer =
+        coordinator.getPeerForTask(task.transferId) ??
+        coordinator.getKnownPeer(task.remoteDeviceId);
     final peerName = peer?.displayName ?? 'nearby device';
     final status = task.status;
 
@@ -836,8 +837,12 @@ class _BatchSummary extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Text(
-                '${batch.completedCount} of ${batch.fileCount} files done'
-                '${failed > 0 ? ' · $failed failed' : ''}',
+                batch.isFinished
+                    ? '${batch.completedCount} of ${batch.fileCount} files done'
+                          '${failed > 0 ? ' · $failed failed' : ''}'
+                    : '${batch.outbound ? 'Sending' : 'Receiving'} '
+                          '${(batch.completedCount + failed + 1).clamp(1, batch.fileCount)}'
+                          ' of ${batch.fileCount}…',
                 style: theme.textTheme.titleSmall,
               ),
             ),
@@ -845,6 +850,8 @@ class _BatchSummary extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 2),
               child: LinearProgressIndicator(
                 value: fraction,
+                semanticsLabel: 'Files progress',
+                semanticsValue: '${(fraction * 100).round()}%',
                 minHeight: 6,
                 borderRadius: BorderRadius.circular(3),
                 color: failed > 0 && batch.isFinished

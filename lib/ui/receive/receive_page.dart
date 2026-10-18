@@ -3,16 +3,19 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
+import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/pairing/pairing_page.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
+import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
+import 'package:vayu/ui/widgets/info_dot.dart';
+import 'package:vayu/ui/widgets/nfc_off_row.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// "Ready to receive": this phone is visible, shows a one-time code (QR and
@@ -40,12 +43,13 @@ class ReceivePage extends StatefulWidget {
   State<ReceivePage> createState() => _ReceivePageState();
 }
 
-class _ReceivePageState extends State<ReceivePage> {
+class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
   PairingPayload? _payload;
   bool _preparing = true;
   bool _useHotspot = false;
   String? _problem;
   bool _nfcReady = false;
+  bool _nfcOff = false;
   DateTime? _endsAt;
   Timer? _ticker;
   StreamSubscription<TransferBatch>? _acceptedSub;
@@ -55,6 +59,9 @@ class _ReceivePageState extends State<ReceivePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Offers are welcome while this screen is open, code or no code.
+    _c.fileSharingCoordinator.openReceiveScreen();
     _acceptedSub = _c.fileSharingCoordinator.autoAcceptedBatches.listen(
       _onAccepted,
     );
@@ -62,10 +69,31 @@ class _ReceivePageState extends State<ReceivePage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the NFC settings page: serve the code by tap now.
+    final payload = _payload;
+    if (state == AppLifecycleState.resumed && payload != null && !_nfcReady) {
+      _serveByTap(payload);
+    }
+  }
+
+  Future<void> _serveByTap(PairingPayload payload) async {
+    final nfc = await _c.nfcPairingService.writePayload(payload);
+    if (!mounted) return;
+    setState(() {
+      _nfcReady = nfc.isSuccess;
+      _nfcOff = nfc.status == NfcOperationStatus.hardwareDisabled;
+    });
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _acceptedSub?.cancel();
     try {
+      _c.releaseDiscovery(this);
+      _c.fileSharingCoordinator.closeReceiveScreen();
       _c.fileSharingCoordinator.endReceiveSession();
       _c.nfcPairingService.stopSharing();
       _c.pairingCoordinator.releaseHotspotWhenIdle();
@@ -87,10 +115,8 @@ class _ReceivePageState extends State<ReceivePage> {
       if (raw.isNearbyPermissionNotRequested) {
         await _c.capabilityCoordinator.requestNearbyAccess();
       }
-      if (_c.discoveryStatus == DiscoveryStatus.idle &&
-          _c.capabilityCoordinator.state.hasAnyReady) {
-        await _c.startDiscoveryAndAdvertising();
-      }
+      // Stay findable for as long as this screen is open.
+      _c.holdDiscovery(this);
 
       final (payload, hotspotError) = await _c.pairingCoordinator
           .prepareShowableCode(forceHotspot: _useHotspot);
@@ -102,6 +128,7 @@ class _ReceivePageState extends State<ReceivePage> {
         );
         final nfc = await _c.nfcPairingService.writePayload(payload);
         _nfcReady = nfc.isSuccess;
+        _nfcOff = nfc.status == NfcOperationStatus.hardwareDisabled;
         _endsAt = DateTime.now().add(widget.sessionLength);
         _ticker?.cancel();
         _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
@@ -189,17 +216,48 @@ class _ReceivePageState extends State<ReceivePage> {
               style: theme.textTheme.titleLarge,
             ),
             const SizedBox(height: 6),
-            Text(
-              payload != null
-                  ? (_nfcReady
-                        ? 'Tap phones or scan this code to send here.'
-                        : 'Scan this code on the other phone to send here.')
-                  : ' ',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            if (payload != null)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _nfcReady
+                        ? 'Tap or scan to send here'
+                        : 'Scan to send here',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  InfoDot(
+                    title: 'Receiving',
+                    message: _nfcReady
+                        ? "Touch this phone to the sender's Send screen, or let them scan this code. Files are accepted automatically while this screen is open."
+                        : 'Let the sender scan this code. Files are accepted automatically while this screen is open.',
+                  ),
+                ],
               ),
-            ),
+            if (payload != null && _nfcOff) ...[
+              const SizedBox(height: 8),
+              NfcOffRow(container: _c),
+            ],
+            if (payload != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.circle,
+                    size: 8,
+                    color: VayuPalette.of(context).success,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Waiting for a sender…',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 24),
             Center(
               child: SizedBox(
@@ -254,7 +312,8 @@ class _ReceivePageState extends State<ReceivePage> {
                 onPressed: _preparing ? null : _start,
                 child: const Text('Start again'),
               ),
-            if (!_useHotspot && !_preparing)
+            // A Wi-Fi Direct code already works without shared Wi-Fi.
+            if (!_useHotspot && !_preparing && !(_payload?.wifiDirect ?? false))
               TextButton(
                 onPressed: () {
                   setState(() => _useHotspot = true);

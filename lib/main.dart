@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/card/incoming_card_watcher.dart';
 
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
@@ -12,7 +13,6 @@ import 'package:vayu/ui/home/vayu_home_page.dart';
 import 'package:vayu/ui/onboarding/onboarding_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
-import 'package:vayu/ui/widgets/route_observer.dart';
 import 'package:vayu/ui/widgets/vayu_mark.dart';
 
 void main(List<String> args) {
@@ -81,7 +81,13 @@ class _VayuAppState extends State<VayuApp> {
             title: AppConstants.appName,
             debugShowCheckedModeBanner: false,
             scaffoldMessengerKey: rootMessengerKey,
-            navigatorObservers: [vayuRouteObserver],
+            navigatorKey: rootNavigatorKey,
+            // Cards tapped from another phone open here, on any screen.
+            builder: (context, child) => IncomingCardWatcher(
+              container: _container,
+              ready: _initFuture,
+              child: child!,
+            ),
             theme: VayuTheme.light(),
             darkTheme: VayuTheme.dark(),
             themeMode: _themeModeFor(settings),
