@@ -216,8 +216,7 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
     case BlockerKind.wifiOff:
       return (
         title: 'Turn on Wi-Fi',
-        message:
-            'A direct connection between phones uses Wi-Fi. No internet is needed.',
+        message: 'A direct connection between phones uses Wi-Fi. No internet is needed.',
         actionLabel: 'Open Wi-Fi',
       );
     case BlockerKind.locationOff:
@@ -241,21 +240,25 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
         );
       }
       final why = switch ((group, feature)) {
-        (PermissionGroup.camera, _) => 'Vayu uses the camera only to scan the code on the other phone.',
+        (PermissionGroup.camera, _) =>
+          'Vayu uses the camera only to scan the code on the other phone.',
         (PermissionGroup.notifications, _) =>
           'Shows progress while a long transfer runs with the screen off.',
         (PermissionGroup.storage, _) =>
           '$android needs it to save received files to Downloads/Vayu.',
-        (PermissionGroup.directWifi, _) => sdk >= 33
-            ? 'Lets this phone connect straight to the other phone when you are not on the same Wi-Fi.'
-            : '$android needs it to connect phones directly without a shared Wi-Fi. $noLocation',
+        (PermissionGroup.directWifi, _) =>
+          sdk >= 33
+              ? 'Lets this phone connect straight to the other phone when you are not on the same Wi-Fi.'
+              : '$android needs it to connect phones directly without a shared Wi-Fi. $noLocation',
         (PermissionGroup.nearby, VayuFeature.directWifi) =>
           '$android needs it to connect phones directly without a shared Wi-Fi. $noLocation',
-        (PermissionGroup.nearby, _) => sdk >= 31
-            ? 'Vayu uses it to find phones near you over Bluetooth. $noLocation'
-            : '$android needs it to find phones over Bluetooth. $noLocation',
+        (PermissionGroup.nearby, _) =>
+          sdk >= 31
+              ? 'Vayu uses it to find phones near you over Bluetooth. $noLocation'
+              : '$android needs it to find phones over Bluetooth. $noLocation',
       };
-      final again = blocker.state == PermissionState.rationaleRequired ||
+      final again =
+          blocker.state == PermissionState.rationaleRequired ||
           blocker.state == PermissionState.deniedRequestable;
       return (
         title: again ? '$name is still off' : 'Allow $name',

@@ -470,6 +470,24 @@ class AppContainer {
     await _transferHistory?.clear();
   }
 
+  /// What the platform reports when a transfer ends (speed diagnostics):
+  /// Wi-Fi band and speed, thermal state, and whether this phone hosts a
+  /// Wi-Fi Direct group meanwhile. Null when the platform reports nothing.
+  Future<String?> _transferEnvironment() async {
+    final link = await platformService.wifiLinkInfo();
+    final thermal = await platformService.thermalStatus();
+    final pairing = _pairingCoordinator;
+    final hosting = pairing != null && pairing.wifiDirect.isHosting;
+    if (link == null && thermal == null && !hosting) return null;
+    final mhz = pairing?.hostedGroupFrequencyMhz;
+    return [
+      link != null ? 'Wi-Fi ${link.summary()}' : 'no Wi-Fi link reported',
+      if (thermal != null) 'thermal $thermal',
+      if (hosting)
+        'hosting a Wi-Fi Direct group${mhz != null && mhz > 0 ? ' at $mhz MHz' : ''}',
+    ].join(', ');
+  }
+
   /// Timings of the most recent transfers (Diagnostics), if available.
   TransferStatsLog? get transferStatsLog {
     final engine = _transferEngine;
@@ -762,6 +780,7 @@ class AppContainer {
           secureSessionManager: _secureSessionManager!,
         );
       }
+      transferStatsLog?.environmentProbe = _transferEnvironment;
 
       // 11. Initialize Battery State Provider & Smart Transport Selector (Phase 8)
       _batteryProvider = _injectedBatteryProvider ?? SystemBatteryProvider();

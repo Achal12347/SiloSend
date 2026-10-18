@@ -219,7 +219,9 @@ void main() {
   );
 
   testWidgets('returning without fixing keeps the sheet open', (tester) async {
-    platform = _FakePlatform(_report(camera: PermissionStatus.permanentlyDenied));
+    platform = _FakePlatform(
+      _report(camera: PermissionStatus.permanentlyDenied),
+    );
     final results = await pumpScreen(tester, VayuFeature.scanCode);
     await tester.tap(find.text('Do it'));
     await tester.pumpAndSettle();
@@ -262,7 +264,9 @@ void main() {
 
     expect(find.text('Turn on Location'), findsOneWidget);
     expect(find.textContaining('Android 10'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilledButton, 'Open Location settings'));
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Open Location settings'),
+    );
     await tester.pumpAndSettle();
     expect(platform.opened, [SettingsPage.location]);
 

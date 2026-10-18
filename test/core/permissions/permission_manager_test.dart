@@ -105,14 +105,21 @@ void main() {
     test('nothing missing means ready', () {
       final m = managerFor(report(sdk: 34));
       for (final feature in VayuFeature.values) {
-        expect(m.blockersFor(feature, report(sdk: 34)), isEmpty, reason: '$feature');
+        expect(
+          m.blockersFor(feature, report(sdk: 34)),
+          isEmpty,
+          reason: '$feature',
+        );
       }
     });
 
     test('a platform with nothing to grant is always ready', () {
       final m = managerFor(PermissionReport.notApplicable());
       for (final feature in VayuFeature.values) {
-        expect(m.blockersFor(feature, PermissionReport.notApplicable()), isEmpty);
+        expect(
+          m.blockersFor(feature, PermissionReport.notApplicable()),
+          isEmpty,
+        );
       }
     });
 
@@ -145,14 +152,18 @@ void main() {
         nearby: PermissionStatus.notRequested,
         directWifi: PermissionStatus.notRequired,
       );
-      final blocker = managerFor(r).blockersFor(VayuFeature.directWifi, r).single;
+      final blocker = managerFor(r)
+          .blockersFor(VayuFeature.directWifi, r)
+          .single;
       expect(blocker.group, PermissionGroup.nearby);
       expect(blocker.state, PermissionState.notRequested);
     });
 
     test('Android 13+ uses Nearby Wi-Fi devices for a direct connection', () {
       final r = report(sdk: 34, directWifi: PermissionStatus.denied);
-      final blocker = managerFor(r).blockersFor(VayuFeature.directWifi, r).single;
+      final blocker = managerFor(r)
+          .blockersFor(VayuFeature.directWifi, r)
+          .single;
       expect(blocker.group, PermissionGroup.directWifi);
     });
 
@@ -176,22 +187,28 @@ void main() {
       );
     });
 
-    test('no Bluetooth hardware is reported as unsupported, not as a prompt', () {
-      final r = report(
-        sdk: 34,
-        nearby: PermissionStatus.notRequested,
-        bluetooth: SwitchState.unsupported,
-      );
-      expect(
-        managerFor(r).blockersFor(VayuFeature.findPhones, r).single.kind,
-        BlockerKind.unsupported,
-      );
-    });
+    test(
+      'no Bluetooth hardware is reported as unsupported, not as a prompt',
+      () {
+        final r = report(
+          sdk: 34,
+          nearby: PermissionStatus.notRequested,
+          bluetooth: SwitchState.unsupported,
+        );
+        expect(
+          managerFor(r).blockersFor(VayuFeature.findPhones, r).single.kind,
+          BlockerKind.unsupported,
+        );
+      },
+    );
 
-    test('an unknown state does not block (the action reports its own error)', () {
-      final r = report(sdk: 34, camera: PermissionStatus.unknown);
-      expect(managerFor(r).blockersFor(VayuFeature.scanCode, r), isEmpty);
-    });
+    test(
+      'an unknown state does not block (the action reports its own error)',
+      () {
+        final r = report(sdk: 34, camera: PermissionStatus.unknown);
+        expect(managerFor(r).blockersFor(VayuFeature.scanCode, r), isEmpty);
+      },
+    );
   });
 
   group('permission states', () {
@@ -204,13 +221,22 @@ void main() {
         rationale: {PermissionGroup.camera},
       );
       final m = managerFor(r);
-      expect(m.stateOf(PermissionGroup.camera, r), PermissionState.rationaleRequired);
+      expect(
+        m.stateOf(PermissionGroup.camera, r),
+        PermissionState.rationaleRequired,
+      );
       expect(
         m.stateOf(PermissionGroup.notifications, r),
         PermissionState.deniedRequestable,
       );
-      expect(m.stateOf(PermissionGroup.nearby, r), PermissionState.permanentlyDenied);
-      expect(m.stateOf(PermissionGroup.storage, r), PermissionState.notRequired);
+      expect(
+        m.stateOf(PermissionGroup.nearby, r),
+        PermissionState.permanentlyDenied,
+      );
+      expect(
+        m.stateOf(PermissionGroup.storage, r),
+        PermissionState.notRequired,
+      );
     });
 
     test('blocked permissions cannot be asked for again', () {
@@ -252,32 +278,38 @@ void main() {
   });
 
   group('fixing switches', () {
-    test('Android 12+ without Nearby devices opens Bluetooth settings', () async {
-      final platform = _FakePlatform(
-        report(
-          sdk: 31,
-          nearby: PermissionStatus.denied,
-          bluetooth: SwitchState.off,
-        ),
-      );
-      final m = PermissionManager(platform);
-      expect(await m.turnOnBluetooth(), isFalse);
-      expect(platform.enableBluetoothCalls, 0);
-      expect(platform.opened, [SettingsPage.bluetooth]);
-    });
+    test(
+      'Android 12+ without Nearby devices opens Bluetooth settings',
+      () async {
+        final platform = _FakePlatform(
+          report(
+            sdk: 31,
+            nearby: PermissionStatus.denied,
+            bluetooth: SwitchState.off,
+          ),
+        );
+        final m = PermissionManager(platform);
+        expect(await m.turnOnBluetooth(), isFalse);
+        expect(platform.enableBluetoothCalls, 0);
+        expect(platform.opened, [SettingsPage.bluetooth]);
+      },
+    );
 
-    test('Android 10 shows the Bluetooth dialog without any permission', () async {
-      final platform = _FakePlatform(
-        report(
-          sdk: 29,
-          nearby: PermissionStatus.notRequested,
-          bluetooth: SwitchState.off,
-        ),
-      );
-      expect(await PermissionManager(platform).turnOnBluetooth(), isTrue);
-      expect(platform.enableBluetoothCalls, 1);
-      expect(platform.opened, isEmpty);
-    });
+    test(
+      'Android 10 shows the Bluetooth dialog without any permission',
+      () async {
+        final platform = _FakePlatform(
+          report(
+            sdk: 29,
+            nearby: PermissionStatus.notRequested,
+            bluetooth: SwitchState.off,
+          ),
+        );
+        expect(await PermissionManager(platform).turnOnBluetooth(), isTrue);
+        expect(platform.enableBluetoothCalls, 1);
+        expect(platform.opened, isEmpty);
+      },
+    );
 
     test('each blocker opens its exact settings page', () {
       expect(

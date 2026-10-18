@@ -150,6 +150,10 @@ class PairingCoordinator {
     );
   }
 
+  /// Channel of the Wi-Fi Direct group this phone last created (speed
+  /// diagnostics: a group on another channel than the router can slow Wi-Fi).
+  int? hostedGroupFrequencyMhz;
+
   /// For the Receive screen: a code on this phone's Wi-Fi Direct group (the
   /// fast path, Android 10+) with the shared Wi-Fi as fallback; without a
   /// group, a code on the shared Wi-Fi or, when this phone has no shared
@@ -169,6 +173,7 @@ class PairingCoordinator {
       _groupRelease = null;
       final created = await wifiDirect.createGroup();
       final group = created.group;
+      hostedGroupFrequencyMhz = group?.frequencyMhz;
       if (group != null) {
         AppLogger.info(
           'PairingCoordinator',

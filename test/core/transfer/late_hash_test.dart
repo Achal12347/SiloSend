@@ -177,6 +177,52 @@ void main() {
     }
   });
 
+  test('a real transfer records every timing on both phones', () async {
+    final pair = _Pair();
+    await pair.start();
+    try {
+      // Above 4 MiB, so the receiver hashes while writing.
+      final src = _randomFile(pair.dir, 6 * 1024 * 1024 + 5);
+      final outPath = '${pair.dir.path}/timed.bin';
+      final sub = pair.engineB.incomingTransferRequests.listen(
+        (request) => request.accept(outPath),
+      );
+      await pair.connect();
+      final sender = await pair.send(
+        src.file,
+        'cc' * 16,
+        chunkSize: 1024 * 1024,
+        sha256: src.sha,
+      );
+      await sender.done.timeout(const Duration(seconds: 20));
+      for (var i = 0; i < 100 && pair.engineB.statsLog.recent.isEmpty; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      final sent = pair.engineA.statsLog.recent.single;
+      expect(sent.outbound, isTrue);
+      expect(sent.succeeded, isTrue);
+      expect(sent.crcTime, greaterThan(Duration.zero));
+      expect(sent.cryptoTime, greaterThan(Duration.zero));
+
+      final received = pair.engineB.statsLog.recent.single;
+      expect(received.outbound, isFalse);
+      expect(received.succeeded, isTrue);
+      expect(received.bytes, src.file.lengthSync());
+      expect(received.crcTime, greaterThan(Duration.zero));
+      expect(received.cryptoTime, greaterThan(Duration.zero));
+      expect(received.diskWriteTime, greaterThan(Duration.zero));
+      // Disk and hash waiting are the two parts of the write time.
+      expect(
+        received.diskWriteTime + received.hashWaitTime,
+        lessThanOrEqualTo(received.ioTime),
+      );
+      await sub.cancel();
+    } finally {
+      await pair.dispose();
+    }
+  });
+
   test('a late hash that does not match fails and leaves no file', () async {
     final pair = _Pair();
     await pair.start();
