@@ -7,6 +7,7 @@ import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/errors/app_error.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
+import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 import 'package:vayu/ui/format.dart';
 
 /// One short, plain sentence for an error shown to the user.
@@ -36,10 +37,14 @@ String friendlyError(Object error, {String? peerName}) {
     return 'All data was sent, but $other never confirmed the file.';
   }
   if (error is TransferConnectionException) {
-    return 'The connection to $other was lost.';
+    return 'The connection to $other was lost. Send again to continue where it stopped.';
   }
   if (error is TransferTimeoutException) {
     return '$other stopped responding.';
+  }
+  if (error is TransferBatchDeclinedException &&
+      error.reason == TransferCancelReason.notReceiving) {
+    return "$other isn't receiving right now. Ask them to tap Receive.";
   }
   if (error is TransferBatchDeclinedException) {
     return error.outOfSpace

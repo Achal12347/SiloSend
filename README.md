@@ -1,51 +1,54 @@
 # Vayu
 
-**Vayu by Achyrio** is a fast, secure, and completely offline device-to-device communication and peer-to-peer data sharing app.
+**Vayu by Achyrio** is a fast, secure, and completely offline device-to-device sharing app.
 
 *Note: Previously developed under the name SiloSend.*
 
-Share files, contacts, and messages directly with nearby devices—no internet connection, Wi-Fi router, cloud servers, or mobile data required.
+Share files and contact cards directly with nearby phones. No internet connection, cloud server or mobile data is involved.
 
 ---
 
-## Core Features
+## Available now (Android)
 
-### 📡 100% Offline Communication
-- **True Direct Sharing:** Connects devices directly without needing an internet connection, external routers, or cell service.
-- **Zero Cloud Reliance:** No accounts to create, no servers in the middle, and no data leaves your local device environment.
+### 📡 Offline, direct sharing
+- **No internet needed:** on Android 10 and later the receiving phone opens a Wi-Fi Direct link (5 GHz where the phone supports it) and the sender joins it from the Receive code or a tap; otherwise phones use the Wi-Fi they share, or a hotspot one phone creates.
+- **No accounts, no cloud:** nothing leaves the two phones.
 
-### ⚡ High-Speed File Transfer
-- **Unlimited File Sharing:** Send files of any size or type—photos, videos, documents, archives, APKs, and audio.
-- **Fast & Reliable:** High-throughput direct transfers with automatic chunking, progress tracking, and transfer recovery.
-- **Integrity Verified:** Every transfer is cryptographically verified upon receipt to ensure data integrity without corruption.
+### ⚡ File transfer
+- **Any file type and size:** photos, videos, documents, archives, APKs and audio, one file or a whole batch with a single accept.
+- **Whole folders:** send a folder and it arrives with the same subfolders.
+- **No waiting to start:** even very large files are offered right away; the file's fingerprint is worked out while it is being sent.
+- **Reliable:** chunked transfer with progress, retries, and resume: if the connection drops, sending again continues where it stopped.
+- **Verified:** every file is checked with SHA-256 on arrival before it counts as received.
 
-### 💬 Private Offline Messaging
-- **Direct Device Chat:** Send instant text messages to nearby users even in remote areas, flights, or emergencies where cell service is unavailable.
-- **Conversation State:** Keep message history safe on your own device with verified delivery indicators.
+### 📥 Receive on your terms
+- **Receive screen:** files are accepted only while Receive is open, so nobody nearby can send you popups.
+- **Tap or scan:** hold the phones together (NFC) or scan the Receive code; the transfer then starts without another prompt.
 
-### 📇 Instant Contact Sharing
-- **Secure Contact Cards:** Exchange contact details directly and securely between devices.
-- **User-Controlled Import:** Review and import received contacts on your own terms.
+### 📇 Contact cards
+- **Your card:** name, title, company, phone, email and website, shared by tap, QR code or to a nearby phone.
+- **Received cards:** cards people give you are kept in the app; you choose when to save one to your contacts.
 
-### 🌐 Smart Multi-Transport Technology
-- **Adaptive Connectivity:** Automatically selects the best available local wireless transport—using **Bluetooth Low Energy (BLE)** for instant pairing and small payloads, and **Wi-Fi Direct / Local Hotspot** for lightning-fast high-volume transfers.
-- **Local Network (LAN) Support:** Seamlessly communicates over existing local Wi-Fi networks when both devices are already connected to the same LAN.
+### 🛡️ Security and privacy
+- **End-to-end encryption:** authenticated key exchange and AES-256-GCM for every file and card.
+- **No tracking:** no analytics, no advertising IDs, no activity tracking.
+- **Clean up:** partial files are removed automatically.
 
-### 👥 Host-to-Multiple Client Sharing
-- **Group Sharing:** Host a sharing session and send files simultaneously to multiple nearby friends or colleagues without repeating the transfer for each person.
-
-### 🔄 Privacy-Preserving Mesh Relaying
-- **Extended Range:** Route messages and transfers through intermediate Vayu devices when out of direct range.
-- **Protected Forwarding:** Intermediate relay devices forward only encrypted data packets and can never inspect or view your private contents.
-
-### 🛡️ End-to-End Security & Privacy
-- **End-to-End Encryption:** All files, messages, and contact cards are encrypted from sender to receiver.
-- **Zero Telemetry & Tracking:** No analytics, no advertising IDs, and no activity tracking.
-- **Privacy by Design:** Temporary transfer caches are cleaned up automatically upon session completion.
+### ⚙️ Clear permissions
+- **Permissions & settings:** one screen shows what Vayu needs on your Android version and opens the exact setting to fix it.
 
 ---
 
-## Supported Platforms
+## Planned
 
-- **Android:** Android 8.0 (API Level 26) and above
-- **Windows:** Windows 10 / 11 (Desktop)
+- **Offline chat** between nearby phones.
+- **Group sharing:** one phone sending to several at once.
+- **Mesh relaying:** reaching phones out of direct range through other Vayu phones, which forward only encrypted data.
+- **Windows** app.
+
+---
+
+## Supported platforms
+
+- **Android:** Android 8.0 (API level 26) and above
+- **Windows:** planned

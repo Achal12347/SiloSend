@@ -24,9 +24,6 @@ class TransferKeepAliveController {
     this.updateInterval = const Duration(seconds: 1),
   });
 
-  /// Number of active holders, exposed for diagnostics and tests.
-  int get holders => _holders;
-
   /// Acquires one reference and returns its single-use release callback.
   void Function() acquire({required String title, required String text}) {
     _holders++;

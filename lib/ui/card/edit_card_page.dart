@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/contacts/country_codes.dart';
 import 'package:vayu/domain/contacts/vayu_card.dart';
+import 'package:vayu/ui/card/country_picker_sheet.dart';
 import 'package:vayu/ui/card/vayu_card_view.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
@@ -31,7 +33,19 @@ class _EditCardPageState extends State<EditCardPage> {
   );
   late final _title = TextEditingController(text: _existing?.title);
   late final _company = TextEditingController(text: _existing?.company);
-  late final _phone = TextEditingController(text: _existing?.phone);
+  // The phone is stored with its country code ("+91 98765 43210"); the
+  // editor shows the code as a picker and the rest as the number.
+  late final (CountryDial?, String) _storedPhone = splitPhone(
+    _existing?.phone ?? '',
+    preferredIso: _regionIso,
+  );
+  late CountryDial _country =
+      _storedPhone.$1 ?? countryForIso(_regionIso) ?? countryForIso('IN')!;
+  late final _phone = TextEditingController(text: _storedPhone.$2);
+
+  /// This phone's region from its language settings, e.g. "IN".
+  static String? get _regionIso =>
+      WidgetsBinding.instance.platformDispatcher.locale.countryCode;
   late final _email = TextEditingController(text: _existing?.email);
   late final _website = TextEditingController(text: _existing?.website);
   late final _note = TextEditingController(text: _existing?.note);
@@ -65,12 +79,29 @@ class _EditCardPageState extends State<EditCardPage> {
     name: _name.text.trim().isEmpty ? 'Your name' : _name.text.trim(),
     title: _text(_title),
     company: _text(_company),
-    phone: _text(_phone),
+    phone: _phoneValue,
     email: _text(_email),
     website: _text(_website),
     note: _text(_note),
     accent: _accent,
   );
+
+  /// The number as stored. A number typed with its own "+code" keeps that
+  /// code (pasted numbers); otherwise the picker's code is put in front.
+  String? get _phoneValue {
+    final typed = _phone.text.trim();
+    if (typed.isEmpty) return null;
+    if (typed.startsWith('+')) {
+      final (country, rest) = splitPhone(typed, preferredIso: _country.iso);
+      return country == null ? typed : joinPhone(country, rest);
+    }
+    return joinPhone(_country, typed);
+  }
+
+  Future<void> _pickCountry() async {
+    final picked = await showCountryPicker(context, current: _country);
+    if (picked != null && mounted) setState(() => _country = picked);
+  }
 
   Future<void> _save() async {
     if (_form.currentState?.validate() != true) return;
@@ -144,13 +175,13 @@ class _EditCardPageState extends State<EditCardPage> {
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   children: [
-                    for (var i = 0; i < VayuCardColors.accents.length; i++)
+                    for (var i = 0; i < VayuCardColors.styles.length; i++)
                       Padding(
                         padding: const EdgeInsets.only(right: 12),
                         child: Semantics(
                           button: true,
                           selected: i == _accent,
-                          label: '${VayuCardColors.accents[i].$1} colour',
+                          label: '${VayuCardColors.styles[i].name} colour',
                           child: InkWell(
                             customBorder: const CircleBorder(),
                             onTap: () => setState(() => _accent = i),
@@ -159,7 +190,7 @@ class _EditCardPageState extends State<EditCardPage> {
                               height: 44,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                gradient: VayuCardColors.accents[i].$2,
+                                gradient: VayuCardColors.styles[i].gradient,
                                 border: Border.all(
                                   width: 3,
                                   color: i == _accent
@@ -184,7 +215,59 @@ class _EditCardPageState extends State<EditCardPage> {
               ),
               _field(_title, 'Job title', caps: TextCapitalization.words),
               _field(_company, 'Company', caps: TextCapitalization.words),
-              _field(_phone, 'Phone', keyboard: TextInputType.phone),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: 56,
+                      child: OutlinedButton(
+                        onPressed: _pickCountry,
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
+                        child: Semantics(
+                          label: 'Country code ${_country.plusCode}',
+                          child: Text(
+                            '${_country.flag} ${_country.plusCode}',
+                            style: theme.textTheme.titleSmall,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _phone,
+                        keyboardType: TextInputType.phone,
+                        onChanged: (value) => setState(() {
+                          final typed = value.trim();
+                          if (typed.startsWith('+')) {
+                            final country = splitPhone(
+                              typed,
+                              preferredIso: _country.iso,
+                            ).$1;
+                            if (country != null) _country = country;
+                          }
+                        }),
+                        validator: (v) {
+                          final digits = (v ?? '').replaceAll(
+                            RegExp(r'[^0-9]'),
+                            '',
+                          );
+                          if (digits.isEmpty) return null;
+                          if (digits.length < 5 || digits.length > 14) {
+                            return 'Check the number';
+                          }
+                          return null;
+                        },
+                        decoration: const InputDecoration(labelText: 'Phone'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               _field(
                 _email,
                 'Email',
@@ -192,7 +275,9 @@ class _EditCardPageState extends State<EditCardPage> {
                 validator: (v) {
                   final value = v?.trim() ?? '';
                   if (value.isEmpty) return null;
-                  return value.contains('@') ? null : 'Check the email';
+                  final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                      .hasMatch(value);
+                  return ok ? null : 'Check the email';
                 },
               ),
               _field(_website, 'Website', keyboard: TextInputType.url),

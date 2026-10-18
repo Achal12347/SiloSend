@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' as crypto;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/domain/transfer/payload_destination.dart';
@@ -158,6 +159,152 @@ void main() {
         expect(stagingFile.existsSync(), isFalse);
         expect(File(targetPath).existsSync(), isFalse);
       });
+    });
+
+    group('Streaming verification hash', () {
+      // Above FilePayloadDestination.streamingHashMinBytes.
+      final size = FilePayloadDestination.streamingHashMinBytes + 123457;
+      final data = Uint8List.fromList(
+        List<int>.generate(size, (i) => (i * 31 + 7) & 0xff),
+      );
+      final expected = crypto.sha256.convert(data).toString();
+      const chunk = 256 * 1024;
+
+      test('in-order writes are hashed while they arrive', () async {
+        final dest = FilePayloadDestination(
+          targetFilePath: '${tempDir.path}/streamed.bin',
+          totalBytes: size,
+        );
+        for (var offset = 0; offset < size; offset += chunk) {
+          final end = offset + chunk > size ? size : offset + chunk;
+          await dest.writeChunk(
+            offset,
+            Uint8List.sublistView(data, offset, end),
+          );
+        }
+        expect(await dest.computeSha256(), expected);
+        await dest.finalize();
+      });
+
+      test('out-of-order writes fall back to hashing the file', () async {
+        final dest = FilePayloadDestination(
+          targetFilePath: '${tempDir.path}/reordered.bin',
+          totalBytes: size,
+        );
+        final offsets = [
+          for (var offset = 0; offset < size; offset += chunk) offset,
+        ];
+        // Swap two chunks, as a retransmit after a timeout would.
+        final tmp = offsets[3];
+        offsets[3] = offsets[4];
+        offsets[4] = tmp;
+        for (final offset in offsets) {
+          final end = offset + chunk > size ? size : offset + chunk;
+          await dest.writeChunk(
+            offset,
+            Uint8List.sublistView(data, offset, end),
+          );
+        }
+        expect(await dest.computeSha256(), expected);
+        await dest.finalize();
+      });
+
+      test('a corrupted chunk is still detected', () async {
+        final dest = FilePayloadDestination(
+          targetFilePath: '${tempDir.path}/corrupt.bin',
+          totalBytes: size,
+        );
+        for (var offset = 0; offset < size; offset += chunk) {
+          final end = offset + chunk > size ? size : offset + chunk;
+          final piece = Uint8List.fromList(data.sublist(offset, end));
+          if (offset == chunk * 2) piece[10] ^= 0x01;
+          await dest.writeChunk(offset, piece);
+        }
+        expect(await dest.computeSha256(), isNot(expected));
+        await dest.abortAndCleanup();
+      });
+
+      test('abort mid-stream cleans up', () async {
+        final dest = FilePayloadDestination(
+          targetFilePath: '${tempDir.path}/aborted.bin',
+          totalBytes: size,
+        );
+        await dest.writeChunk(0, Uint8List.sublistView(data, 0, chunk));
+        await dest.abortAndCleanup();
+        expect(File(dest.stagingPath).existsSync(), isFalse);
+      });
+    });
+
+    group('Saving never destroys other files', () {
+      test(
+        'an existing file at the target is kept; the new one gets (1)',
+        () async {
+          final target = '${tempDir.path}/report.pdf';
+          File(target).writeAsStringSync('old');
+          final dest = FilePayloadDestination(
+            targetFilePath: target,
+            totalBytes: 3,
+          );
+          await dest.writeChunk(0, Uint8List.fromList([1, 2, 3]));
+          await dest.finalize();
+
+          expect(File(target).readAsStringSync(), 'old');
+          expect(dest.targetFilePath, '${tempDir.path}/report (1).pdf');
+          expect(File(dest.targetFilePath).readAsBytesSync(), [1, 2, 3]);
+          expect(File(dest.stagingPath).existsSync(), isFalse);
+          await dest.close();
+        },
+      );
+
+      test('a vanished staging file is an error, never a success', () async {
+        final dest = FilePayloadDestination(
+          targetFilePath: '${tempDir.path}/gone.bin',
+          totalBytes: 2,
+        );
+        await dest.writeChunk(0, Uint8List.fromList([7, 8]));
+        await dest.computeSha256(); // closes the staging file
+        File(dest.stagingPath).deleteSync();
+
+        await expectLater(
+          dest.finalize(),
+          throwsA(isA<TransferStorageException>()),
+        );
+        expect(File('${tempDir.path}/gone.bin').existsSync(), isFalse);
+      });
+
+      test('duplicate names are numbered before the extension', () {
+        expect(numberedPath('/d/a.b/photo.jpg', 0), '/d/a.b/photo.jpg');
+        expect(numberedPath('/d/a.b/photo.jpg', 2), '/d/a.b/photo (2).jpg');
+        expect(numberedPath(r'C:\d\README', 1), r'C:\d\README (1)');
+        expect(numberedPath('/d/.hidden', 1), '/d/.hidden (1)');
+      });
+    });
+
+    test('a large in-order receive is hashed while it arrives, with bounded backlog', () async {
+      // 40 MiB in 1 MiB writes: more than the hashing backlog limit, so
+      // writes must wait for the worker instead of queueing everything.
+      const chunk = 1024 * 1024;
+      const total = 40 * chunk;
+      final data = Uint8List(total);
+      for (var i = 0; i < total; i++) {
+        data[i] = (i * 31) & 0xFF;
+      }
+      final dest = FilePayloadDestination(
+        targetFilePath: '${tempDir.path}/large.bin',
+        totalBytes: total,
+      );
+      for (var offset = 0; offset < total; offset += chunk) {
+        await dest.writeChunk(
+          offset,
+          Uint8List.sublistView(data, offset, offset + chunk),
+        );
+      }
+      expect(
+        await dest.computeSha256(),
+        crypto.sha256.convert(data).toString(),
+      );
+      await dest.finalize();
+      await dest.close();
     });
   });
 }

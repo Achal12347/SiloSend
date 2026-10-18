@@ -220,6 +220,36 @@ void main() {
     final devA = Uint8List.fromList(List.generate(16, (i) => i));
     final devB = Uint8List.fromList(List.generate(16, (i) => i + 5));
 
+    test(
+      'large packets are refused until the peer has authenticated',
+      () async {
+        final mock = _MockTransportConnection();
+        final framed = FramedTransportConnection(mock);
+        final received = <VayuPacket>[];
+        final sub = framed.incomingPackets.listen(received.add);
+
+        VayuPacket big(int id) => VayuPacket(
+          packetType: PacketType.transferChunk,
+          packetId: id,
+          sourceDeviceId: devA,
+          destinationDeviceId: devB,
+          payload: Uint8List(
+            PacketStreamTransformer.unauthenticatedMaxPayloadLength + 1,
+          ),
+        );
+
+        mock.emitBytes(big(1).toBytes());
+        await pumpEventQueue();
+        expect(received, isEmpty);
+
+        framed.allowFullSizePackets();
+        mock.emitBytes(big(2).toBytes());
+        await pumpEventQueue();
+        expect(received.map((p) => p.packetId), [2]);
+        await sub.cancel();
+      },
+    );
+
     test('wraps raw TransportConnection and provides incoming packets and sendPacket', () async {
       final mock = _MockTransportConnection();
       final framed = FramedTransportConnection(mock);

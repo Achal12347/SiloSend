@@ -37,7 +37,9 @@ class QrScannerHandler(private val activity: Activity) : MethodChannel.MethodCal
             return
         }
         pending = result
-        activity.startActivityForResult(Intent(activity, QrScanActivity::class.java), REQUEST_CODE)
+        val intent = Intent(activity, QrScanActivity::class.java)
+            .putExtra(QrScanActivity.EXTRA_ACCEPT_CARDS, call.argument<Boolean>("cards") == true)
+        activity.startActivityForResult(intent, REQUEST_CODE)
     }
 
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

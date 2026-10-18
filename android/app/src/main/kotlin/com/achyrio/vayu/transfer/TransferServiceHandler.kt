@@ -6,8 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.achyrio.vayu.platform.PermissionGate
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -16,16 +16,17 @@ import io.flutter.plugin.common.MethodChannel
  * Bridge that lets the Dart transfer coordinator start, update and stop
  * [TransferForegroundService], and ask once for the Android 13+ notification permission.
  */
-class TransferServiceHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class TransferServiceHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         private const val CHANNEL = "com.achyrio.vayu/transfer_service"
-        private const val REQUEST_CODE_NOTIFICATIONS = 4102
         private const val PREFS = "vayu_transfer_prefs"
         private const val KEY_ASKED_NOTIFICATIONS = "asked_notifications"
     }
 
     private var channel: MethodChannel? = null
-    private var pendingNotificationResult: MethodChannel.Result? = null
 
     fun register(messenger: BinaryMessenger) {
         channel = MethodChannel(messenger, CHANNEL).also { it.setMethodCallHandler(this) }
@@ -34,8 +35,6 @@ class TransferServiceHandler(private val activity: Activity) : MethodChannel.Met
     fun unregister() {
         channel?.setMethodCallHandler(null)
         channel = null
-        pendingNotificationResult?.success(false)
-        pendingNotificationResult = null
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -88,20 +87,13 @@ class TransferServiceHandler(private val activity: Activity) : MethodChannel.Met
             return
         }
         val prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (prefs.getBoolean(KEY_ASKED_NOTIFICATIONS, false) || pendingNotificationResult != null) {
+        if (prefs.getBoolean(KEY_ASKED_NOTIFICATIONS, false)) {
             result.success(false)
             return
         }
         prefs.edit().putBoolean(KEY_ASKED_NOTIFICATIONS, true).apply()
-        pendingNotificationResult = result
-        ActivityCompat.requestPermissions(activity, arrayOf(permission), REQUEST_CODE_NOTIFICATIONS)
-    }
-
-    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray): Boolean {
-        if (requestCode != REQUEST_CODE_NOTIFICATIONS) return false
-        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        pendingNotificationResult?.success(granted)
-        pendingNotificationResult = null
-        return true
+        permissions.request(listOf(permission)) { status ->
+            result.success(status == PermissionGate.GRANTED)
+        }
     }
 }

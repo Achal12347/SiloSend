@@ -68,6 +68,9 @@
     <uses-feature
         android:name="android.hardware.nfc.hce"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.wifi.direct"
+        android:required="false" />
 
     <application
         android:label="Vayu"

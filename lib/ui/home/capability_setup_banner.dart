@@ -3,7 +3,8 @@ import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/system_capabilities.dart';
-import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/domain/identity/permission_report.dart';
+import 'package:vayu/ui/settings/permissions_page.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Contextual capability and permission setup card.
@@ -89,12 +90,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       explanation = 'Connect to Wi-Fi or turn on Bluetooth.';
       actions.add(
         FilledButton.tonalIcon(
-          onPressed: _isProcessing
-              ? null
-              : () => _handleAction(
-                  () =>
-                      widget.container.capabilityCoordinator.enableBluetooth(),
-                ),
+          onPressed: _isProcessing ? null : _turnOnBluetooth,
           icon: const Icon(Icons.bluetooth_rounded, size: 16),
           label: const Text('Turn on Bluetooth'),
         ),
@@ -174,12 +170,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
       explanation = "Turn it on to also find phones that aren't on your Wi-Fi.";
       actions.add(
         FilledButton.tonalIcon(
-          onPressed: _isProcessing
-              ? null
-              : () => _handleAction(
-                  () =>
-                      widget.container.capabilityCoordinator.enableBluetooth(),
-                ),
+          onPressed: _isProcessing ? null : _turnOnBluetooth,
           icon: const Icon(Icons.bluetooth_rounded, size: 16),
           label: const Text('Turn on Bluetooth'),
         ),
@@ -308,9 +299,9 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                             size: 18,
                             color: iconColor,
                           ),
-                          tooltip: 'Why Vayu asks',
+                          tooltip: 'Permissions & settings',
                           onPressed: () =>
-                              PermissionsRationaleDialog.show(context),
+                              PermissionsPage.open(context, widget.container),
                         ),
                       ],
                     ),
@@ -356,15 +347,24 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
     }
   }
 
-  Future<void> _handleAction(Future<dynamic> Function() action) async {
+  /// The system "Turn on Bluetooth?" dialog; when the phone cannot show it,
+  /// offers the Bluetooth settings page instead.
+  Future<void> _turnOnBluetooth() async {
     setState(() => _isProcessing = true);
     try {
-      await action();
-      await widget.container.capabilityCoordinator.refresh();
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
+      final on = await widget.container.capabilityCoordinator.enableBluetooth();
+      if (!on && mounted) {
+        showVayuNotice(
+          context,
+          'Bluetooth is still off.',
+          actionLabel: 'Settings',
+          onAction: () => widget.container.platformService.openSettingsPage(
+            SettingsPage.bluetooth,
+          ),
+        );
       }
+    } finally {
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 }

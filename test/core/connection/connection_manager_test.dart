@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -80,6 +81,53 @@ void main() {
         expect(managerB.hasSessionWithDevice(identityA.idHex), isTrue);
       },
     );
+
+    test(
+      'refuses new peers while too many are still unauthenticated',
+      () async {
+        // Silent sockets, as from someone on the same Wi-Fi.
+        final idle = <Socket>[
+          for (var i = 0; i < ConnectionManager.maxUnauthenticatedIncoming; i++)
+            await Socket.connect('127.0.0.1', serverB.boundPort),
+        ];
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+
+        final extra = await Socket.connect('127.0.0.1', serverB.boundPort);
+        // The server closes it straight away.
+        await extra.drain<void>().timeout(const Duration(seconds: 2));
+        extra.destroy();
+
+        for (final s in idle) {
+          s.destroy();
+        }
+        // Once they are gone a real peer connects again.
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        final session = await managerA.connectToLanPeer(
+          remoteAddress: '127.0.0.1',
+          remotePort: serverB.boundPort,
+        );
+        expect(session.isActive, isTrue);
+      },
+    );
+
+    test('a name changed after start reaches the other phone', () async {
+      // Onboarding names the phone after the connection manager exists.
+      var name = 'Vayu-QuietOtter-1A2B';
+      final renamed = ConnectionManager(
+        localIdentity: identityA,
+        displayName: () => name,
+        handshakeTimeout: const Duration(seconds: 5),
+      );
+      name = "Achal's Pixel";
+      final sessionBFuture = managerB.onSessionEstablished.first;
+      await renamed.connectToLanPeer(
+        remoteAddress: '127.0.0.1',
+        remotePort: serverB.boundPort,
+      );
+      final sessionB = await sessionBFuture;
+      expect(sessionB.info.remoteDisplayName, "Achal's Pixel");
+      await renamed.dispose();
+    });
 
     test(
       'exchanges application data packets and tracks byte metrics',

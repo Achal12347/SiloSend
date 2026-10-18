@@ -10,6 +10,7 @@ enum PacketType {
   transferCancel(0x14),
   transferBatchOffer(0x15),
   transferBatchResponse(0x16),
+  transferDigest(0x17),
   chatMessage(0x20),
   chatDeliveryAck(0x21),
   ping(0x30),

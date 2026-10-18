@@ -35,6 +35,13 @@ class TransferMetadata {
 
   static const int defaultChunkSize = 64 * 1024; // 64 KB default chunk
 
+  /// Placeholder hash in an offer whose real SHA-256 follows in a digest
+  /// packet (`late-hash-v1`). Sent only to receivers that advertise it.
+  static final String deferredSha256 = '0' * 64;
+
+  /// True when the SHA-256 arrives after the offer.
+  bool get hashDeferred => sha256Checksum == deferredSha256;
+
   /// Calculates the total number of chunks required for [totalBytes] with [chunkSize].
   static int calculateChunkCount(int totalBytes, int chunkSize) {
     if (totalBytes <= 0) {

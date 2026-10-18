@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/widgets.dart' show Scrollable;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
@@ -43,7 +44,17 @@ void main() {
       // Verify app name in AppBar
       expect(find.text(AppConstants.appName), findsWidgets);
 
+      // Home leads with the two main actions.
+      expect(find.text('Send'), findsOneWidget);
+      expect(find.text('Receive'), findsOneWidget);
+
       // Nearby section with an honest idle state and a Search action
+      // (below the Send / Receive tiles).
+      await tester.scrollUntilVisible(
+        find.text('Nearby devices'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Nearby devices'), findsOneWidget);
       expect(find.text('Search'), findsOneWidget);
 
@@ -69,9 +80,8 @@ void main() {
       // Peer row with real reachability, a send action, and connect in its menu
       expect(find.text('Remote-Pixel'), findsOneWidget);
       expect(find.text('New device'), findsOneWidget);
-      // Home: Send and Receive, plus each peer row's own Send.
-      expect(find.text('Receive'), findsOneWidget);
-      expect(find.text('Send'), findsNWidgets(2));
+      // The peer row has its own Send.
+      expect(find.text('Send'), findsWidgets);
 
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 600));

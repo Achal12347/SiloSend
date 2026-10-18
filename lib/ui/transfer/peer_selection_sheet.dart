@@ -9,6 +9,9 @@ import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/trust_level.dart';
+import 'package:vayu/core/pairing/nfc_pairing_service.dart';
+import 'package:vayu/ui/widgets/nfc_off_row.dart';
+import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
@@ -57,15 +60,18 @@ class PeerSelectionSheet extends StatefulWidget {
 }
 
 class _PeerSelectionSheetState extends State<PeerSelectionSheet>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   bool _isSending = false;
+  Timer? _pulseStop;
   String? _sendingToPeerId;
 
   // Tap or scan a phone that is on its Receive screen.
   StreamSubscription<PairingPayload>? _nfcSub;
+  StreamSubscription<NfcTapProblem>? _tapProblemSub;
   bool _nfcReady = false;
+  bool _nfcOff = false;
   bool _joining = false;
 
   bool get _nativeNfc =>
@@ -84,8 +90,17 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     final isTesting =
         Platform.environment.containsKey('FLUTTER_TEST') ||
         WidgetsBinding.instance.runtimeType.toString().contains('Test');
-    if (!isTesting) {
+    // A short pulse only, and none with Android's "Remove animations".
+    final reduceMotion = WidgetsBinding
+        .instance
+        .platformDispatcher
+        .accessibilityFeatures
+        .disableAnimations;
+    if (!isTesting && !reduceMotion) {
       _pulseController.repeat(reverse: true);
+      _pulseStop = Timer(const Duration(seconds: 8), () {
+        if (mounted) _pulseController.animateTo(1.0);
+      });
     } else {
       _pulseController.value = 1.0;
     }
@@ -94,7 +109,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Ensure discovery is actively running when picker sheet is open
+    // Search for phones for as long as the sheet is open.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       try {
@@ -102,27 +117,54 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
         if (raw.isNearbyPermissionNotRequested) {
           await widget.container.capabilityCoordinator.requestNearbyAccess();
         }
-        if (widget.container.discoveryStatus == DiscoveryStatus.idle) {
-          await widget.container.startDiscoveryAndAdvertising();
-        }
       } catch (_) {}
+      if (!mounted) return;
+      widget.container.holdDiscovery(this);
       _startTapReading();
     });
   }
 
   Future<void> _startTapReading() async {
     if (!_nativeNfc || !mounted) return;
+    WidgetsBinding.instance.addObserver(this);
     final nfc = widget.container.nfcPairingService;
-    _nfcSub = nfc.onPayloadReceived.listen(
+    _nfcSub ??= nfc.onPayloadReceived.listen(
       (payload) => _sendToReceiver(
         () => widget.container.pairingCoordinator.joinToSend(payload),
       ),
     );
-    final result = await nfc.startReading();
-    if (mounted) setState(() => _nfcReady = result.isSuccess);
+    _tapProblemSub ??= nfc.onTapProblem.listen(_onTapProblem);
+    await _readTaps();
+  }
+
+  Future<void> _readTaps() async {
+    final result = await widget.container.nfcPairingService.startReading();
+    if (!mounted) return;
+    setState(() {
+      _nfcReady = result.isSuccess;
+      _nfcOff = result.status == NfcOperationStatus.hardwareDisabled;
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the NFC settings page.
+    if (state == AppLifecycleState.resumed && !_nfcReady) _readTaps();
+  }
+
+  void _onTapProblem(NfcTapProblem problem) {
+    if (!mounted || _joining) return;
+    showVayuNotice(
+      context,
+      problem == NfcTapProblem.notSharing
+          ? 'That phone is not on Receive. Ask them to open Receive, then tap again.'
+          : 'Hold the phones together a moment longer.',
+    );
   }
 
   Future<void> _scanReceiver() async {
+    if (!await ensureCameraAccess(context, widget.container)) return;
+    if (!mounted) return;
     try {
       final text = await const QrScanner().scan();
       if (text == null) return;
@@ -164,8 +206,12 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
 
   @override
   void dispose() {
+    widget.container.releaseDiscovery(this);
+    _pulseStop?.cancel();
     _pulseController.dispose();
     _nfcSub?.cancel();
+    _tapProblemSub?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     if (_nativeNfc) {
       widget.container.nfcPairingService.stopListening().ignore();
     }
@@ -211,11 +257,15 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     return Icons.insert_drive_file_rounded;
   }
 
+  /// The picked folder's name when a whole folder is being sent.
+  String? get _folderName => widget.documents.first.folder?.split('/').first;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final doc = widget.document;
-    final isBatch = widget.documents.length > 1;
+    final folderName = _folderName;
+    final isBatch = widget.documents.length > 1 || folderName != null;
     final totalBatchBytes = widget.documents.fold<int>(
       0,
       (sum, d) => sum + (d.sizeBytes > 0 ? d.sizeBytes : 0),
@@ -280,7 +330,9 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        isBatch
+                        folderName != null
+                            ? '$folderName (${widget.documents.length} ${widget.documents.length == 1 ? 'file' : 'files'})'
+                            : isBatch
                             ? '${widget.documents.length} files selected'
                             : doc.name,
                         maxLines: 1,
@@ -402,7 +454,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
 
   /// The quickest route: tap or scan a phone that is on its Receive screen.
   Widget _buildTapOrScan(ThemeData theme) {
-    return Container(
+    final box = Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHigh,
@@ -426,8 +478,8 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
               _joining
                   ? 'Connecting…'
                   : _nfcReady
-                  ? 'Tap a phone that is on Receive, or scan its code'
-                  : 'Scan the code on a phone that is on Receive',
+                  ? 'Tap or scan a phone on Receive'
+                  : 'Scan a phone on Receive',
               style: theme.textTheme.bodyMedium,
             ),
           ),
@@ -437,6 +489,16 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           ),
         ],
       ),
+    );
+    if (!_nfcOff) return box;
+    return Column(
+      children: [
+        box,
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 0, 0),
+          child: NfcOffRow(container: widget.container),
+        ),
+      ],
     );
   }
 
@@ -623,7 +685,10 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
       // carrying the proof that lets it accept without a prompt.
       final viaReceiveCode = widget.container.fileSharingCoordinator
           .hasReceiveTicketFor(peer.deviceId);
-      if (widget.documents.length > 1 || viaReceiveCode) {
+      // Folders always go as a batch: the batch offer carries their paths.
+      if (widget.documents.length > 1 ||
+          viaReceiveCode ||
+          _folderName != null) {
         // The transfer screen follows this peer's files one by one.
         if (mounted) {
           navigator.pop(); // Close bottom sheet

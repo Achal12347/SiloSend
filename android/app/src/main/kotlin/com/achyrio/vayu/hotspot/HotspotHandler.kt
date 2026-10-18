@@ -16,8 +16,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.achyrio.vayu.platform.PermissionGate
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -34,11 +36,13 @@ import java.net.NetworkInterface
  * process is bound to that network, because a network without internet would
  * otherwise never become the default and sockets would go out over cellular.
  */
-class HotspotHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class HotspotHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         private const val TAG = "Vayu.Hotspot"
         private const val CHANNEL = "com.achyrio.vayu/hotspot"
-        private const val REQUEST_CODE = 4104
         private const val JOIN_TIMEOUT_MS = 30_000
     }
 
@@ -49,8 +53,6 @@ class HotspotHandler(private val activity: Activity) : MethodChannel.MethodCallH
 
     private var channel: MethodChannel? = null
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
-    private var pendingAfterPermission: (() -> Unit)? = null
-    private var pendingPermissionResult: MethodChannel.Result? = null
     private var joinCallback: ConnectivityManager.NetworkCallback? = null
     private var legacyNetworkId: Int? = null
 
@@ -91,28 +93,14 @@ class HotspotHandler(private val activity: Activity) : MethodChannel.MethodCallH
 
     // ------------------------------------------------------------ permissions
 
-    private fun requiredPermissions(): List<String> =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            listOf(Manifest.permission.NEARBY_WIFI_DEVICES)
-        } else {
-            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-
     private fun withHotspotPermission(result: MethodChannel.Result, action: () -> Unit) {
-        val missing = requiredPermissions().filter {
-            ContextCompat.checkSelfPermission(activity, it) != PackageManager.PERMISSION_GRANTED
+        permissions.request(PermissionGate.directWifiPermissions()) { status ->
+            if (status == PermissionGate.GRANTED) {
+                checkLocationThen(result, action)
+            } else {
+                result.error("PERMISSION_DENIED", "Nearby Wi-Fi permission: $status", null)
+            }
         }
-        if (missing.isEmpty()) {
-            checkLocationThen(result, action)
-            return
-        }
-        if (pendingPermissionResult != null) {
-            result.error("ALREADY_REQUESTING", "Permission request in progress", null)
-            return
-        }
-        pendingPermissionResult = result
-        pendingAfterPermission = action
-        ActivityCompat.requestPermissions(activity, missing.toTypedArray(), REQUEST_CODE)
     }
 
     // Before Android 13 the hotspot API requires location services to be on.
@@ -131,20 +119,6 @@ class HotspotHandler(private val activity: Activity) : MethodChannel.MethodCallH
             }
         }
         action()
-    }
-
-    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray): Boolean {
-        if (requestCode != REQUEST_CODE) return false
-        val result = pendingPermissionResult ?: return true
-        val action = pendingAfterPermission
-        pendingPermissionResult = null
-        pendingAfterPermission = null
-        if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-            if (action != null) checkLocationThen(result, action)
-        } else {
-            result.error("PERMISSION_DENIED", "Nearby Wi-Fi permission denied", null)
-        }
-        return true
     }
 
     // -------------------------------------------------------------- hosting
@@ -238,6 +212,7 @@ class HotspotHandler(private val activity: Activity) : MethodChannel.MethodCallH
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun joinWithSpecifier(ssid: String, passphrase: String, result: MethodChannel.Result) {
         val specifier = WifiNetworkSpecifier.Builder()
             .setSsid(ssid)

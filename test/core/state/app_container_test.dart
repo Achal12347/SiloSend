@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/identity/device_identity_manager.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
 import 'package:vayu/core/lifecycle/app_lifecycle_manager.dart';
@@ -149,6 +150,57 @@ void main() {
 
         expect(container.capabilityCoordinator.state.canUseBle, isTrue);
         expect(container.systemCapabilities.canUseBle, isTrue);
+
+        container.dispose();
+      },
+    );
+
+    test(
+      'searches only while something needs it, and not in the background',
+      () async {
+        final lifecycleManager = AppLifecycleManager();
+        final container = AppContainer(
+          identityStorage: storage,
+          identityManager: DeviceIdentityManager(storage),
+          platformService: _MockAppContainerPlatform(),
+          lifecycleManager: lifecycleManager,
+        );
+        await container.initialize();
+        Future<void> until(bool Function() ok) async {
+          for (var i = 0; i < 300 && !ok(); i++) {
+            await Future<void>.delayed(const Duration(milliseconds: 10));
+          }
+          expect(ok(), isTrue);
+        }
+
+        bool searching() => container.discoveryStatus == DiscoveryStatus.active;
+        bool idle() => container.discoveryStatus == DiscoveryStatus.idle;
+
+        // Home's window: searches, then stops by itself.
+        container.discoverFor(const Duration(milliseconds: 300));
+        await until(searching);
+        await until(idle);
+
+        // A Receive or Send screen keeps it on, even in the background.
+        final screen = Object();
+        container.holdDiscovery(screen);
+        await until(searching);
+        lifecycleManager.transitionTo(AppLifecycleState.paused);
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(searching(), isTrue);
+        container.releaseDiscovery(screen);
+        await until(idle);
+
+        // Coming back opens a window; Stop ends it.
+        lifecycleManager.transitionTo(AppLifecycleState.resumed);
+        await until(searching);
+        container.discoverFor(const Duration(seconds: 30));
+        lifecycleManager.transitionTo(AppLifecycleState.paused);
+        await until(idle);
+        lifecycleManager.transitionTo(AppLifecycleState.resumed);
+        await until(searching);
+        container.endDiscoveryWindow();
+        await until(idle);
 
         container.dispose();
       },

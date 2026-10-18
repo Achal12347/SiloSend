@@ -12,6 +12,7 @@ import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/platform/qr_scanner.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
 
@@ -190,6 +191,9 @@ class _PairingPageState extends State<PairingPage> {
   // ------------------------------------------------------------- join side
 
   Future<void> _scan() async {
+    if (widget.scanOverride == null && !await ensureCameraAccess(context, _c)) {
+      return;
+    }
     try {
       final text = await (widget.scanOverride ?? const QrScanner().scan)();
       if (text == null) return;

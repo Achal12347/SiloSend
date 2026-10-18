@@ -67,6 +67,7 @@ class FilePayloadSource implements PayloadSource {
   int get length => _length;
 
   Future<void>? _readQueue;
+  bool _closed = false;
 
   @override
   Future<Uint8List> readChunk(int offset, int length) async {
@@ -80,6 +81,8 @@ class FilePayloadSource implements PayloadSource {
     }
 
     try {
+      // A read still queued at close must not reopen the file (handle leak).
+      if (_closed) throw StateError('Source is closed');
       if (offset < 0 || offset > _length) {
         throw RangeError.range(offset, 0, _length, 'offset');
       }
@@ -110,6 +113,13 @@ class FilePayloadSource implements PayloadSource {
 
   @override
   Future<void> close() async {
+    _closed = true;
+    final pending = _readQueue;
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {}
+    }
     if (_raf != null) {
       try {
         await _raf!.close();

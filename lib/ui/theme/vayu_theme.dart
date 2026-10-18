@@ -323,13 +323,15 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
     heroGlow: Color(0xFF6E9C8B),
     onHero: Color(0xFFF4F1EA),
     onHeroMuted: Color(0xFFB9B5AC),
-    accent: Color(0xFF4F7F6E),
+    // Darkened from 4F7F6E / 9A7136 to reach WCAG 4.5:1 for text on every
+    // light surface (paper, white and grouped surfaces).
+    accent: Color(0xFF446E5F),
     accentContainer: Color(0xFFDCE8E1),
     accentOnInverse: Color(0xFFA9D2C2),
     clay: Color(0xFFAD7652),
     success: Color(0xFF3F7F62),
     successContainer: Color(0xFFDDEBE2),
-    warning: Color(0xFF9A7136),
+    warning: Color(0xFF815F2D),
     warningContainer: Color(0xFFF3E7D2),
     danger: Color(0xFFA54B43),
     dangerContainer: Color(0xFFF5DEDA),
@@ -424,58 +426,101 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
   }
 }
 
-/// Muted card backgrounds for the Vayu business card, all readable with
-/// [VayuCardColors.onCard] text. Same in light and dark so a card looks the
-/// same on every phone.
+/// One look for the Vayu business card: background, a soft glow, and text
+/// colours chosen for that background.
+@immutable
+class CardStyle {
+  final String name;
+  final LinearGradient gradient;
+  final Color glow;
+  final Color onCard;
+  final Color onCardMuted;
+
+  const CardStyle({
+    required this.name,
+    required this.gradient,
+    required this.glow,
+    required this.onCard,
+    required this.onCardMuted,
+  });
+}
+
+/// Card styles: deep, muted tones plus one light card. The same in light and
+/// dark mode so a card looks the same on every phone. The order is stored
+/// on the card, so new styles are only ever added at the end; earlier
+/// positions keep their meaning (2 was a flat clay, now Bronze; 3 slate, now
+/// Midnight; 4 plum, now Wine).
 class VayuCardColors {
   VayuCardColors._();
 
-  static const Color onCard = Color(0xFFF4F1EA);
-  static const Color onCardMuted = Color(0xFFC9C4BA);
-
-  static const List<(String, LinearGradient)> accents = [
-    (
-      'Ink',
-      LinearGradient(
+  static const List<CardStyle> styles = [
+    CardStyle(
+      name: 'Ink',
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF2B2E33), Color(0xFF1D1F23)],
+        colors: [Color(0xFF2E3136), Color(0xFF141518)],
       ),
+      glow: Color(0xFF6E9C8B),
+      onCard: Color(0xFFF4F1EA),
+      onCardMuted: Color(0xFFB9B5AC),
     ),
-    (
-      'Sage',
-      LinearGradient(
+    CardStyle(
+      name: 'Forest',
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF4F7F6E), Color(0xFF3B6355)],
+        colors: [Color(0xFF2F5C4D), Color(0xFF172F27)],
       ),
+      glow: Color(0xFF8FC4AE),
+      onCard: Color(0xFFF1F5F1),
+      onCardMuted: Color(0xFFB5CBBF),
     ),
-    (
-      'Clay',
-      LinearGradient(
+    CardStyle(
+      name: 'Bronze',
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFFA47152), Color(0xFF835841)],
+        colors: [Color(0xFF6B5536), Color(0xFF2E2416)],
       ),
+      glow: Color(0xFFD9B77A),
+      onCard: Color(0xFFF7F0E2),
+      onCardMuted: Color(0xFFD2C2A2),
     ),
-    (
-      'Slate',
-      LinearGradient(
+    CardStyle(
+      name: 'Midnight',
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF4C5866), Color(0xFF37414D)],
+        colors: [Color(0xFF2B3B58), Color(0xFF121A2B)],
       ),
+      glow: Color(0xFF8EA6D6),
+      onCard: Color(0xFFEEF1F7),
+      onCardMuted: Color(0xFFAEB9CF),
     ),
-    (
-      'Plum',
-      LinearGradient(
+    CardStyle(
+      name: 'Wine',
+      gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [Color(0xFF6A5869), Color(0xFF524453)],
+        colors: [Color(0xFF5C2E3C), Color(0xFF2A141C)],
       ),
+      glow: Color(0xFFD891A6),
+      onCard: Color(0xFFF7ECEF),
+      onCardMuted: Color(0xFFD1AEB8),
+    ),
+    CardStyle(
+      name: 'Pearl',
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFFF4F1EA), Color(0xFFDCD5C7)],
+      ),
+      glow: Color(0xFFFFFFFF),
+      onCard: Color(0xFF1E1F22),
+      onCardMuted: Color(0xFF5E5A53),
     ),
   ];
 
-  static LinearGradient of(int index) =>
-      accents[index.clamp(0, accents.length - 1)].$2;
+  static CardStyle of(int index) => styles[index.clamp(0, styles.length - 1)];
 }

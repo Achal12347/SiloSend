@@ -8,6 +8,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/transfer/resumable_transfers.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/protocol/packet_type.dart';
@@ -127,6 +128,19 @@ class OutboundTransferTask implements TransferTask {
   final int readAhead;
   final Map<int, Future<Uint8List>> _prefetched = {};
 
+  /// Chunks that may be encrypting or being written at the same time. Each
+  /// send crosses the native bridge twice; waiting for one to finish before
+  /// starting the next left the CPU, the cipher and the socket taking turns.
+  final int sendPipeline;
+  int _sendsInProgress = 0;
+  Completer<void>? _sendSlotFreed;
+
+  /// SHA-256 still being computed when the offer went out (`late-hash-v1`);
+  /// sent in a digest packet once ready. Null: the offer carried the hash.
+  final Future<String>? lateDigest;
+  String? _digestReady;
+  bool _digestSent = false;
+
   final Stopwatch _elapsed = Stopwatch();
   Duration _readTime = Duration.zero;
   Duration _sendTime = Duration.zero;
@@ -148,12 +162,23 @@ class OutboundTransferTask implements TransferTask {
     this.maxRetries = 5,
     this.verificationTimeout = const Duration(seconds: 30),
     this.onStats,
-    this.readAhead = 2,
+    this.readAhead = 4,
+    this.sendPipeline = 3,
+    this.lateDigest,
   }) {
     _transferIdBytes = parseIdTo16Bytes(transferId);
     _localIdBytes = parseIdTo16Bytes(localDeviceId);
     _remoteIdBytes = parseIdTo16Bytes(remoteDeviceId);
     _doneCompleter.future.ignore();
+    // Listened to at once so a hash that already failed is never unhandled.
+    lateDigest?.then(
+      (sha256Hex) {
+        _digestReady = sha256Hex;
+        _maybeSendDigest();
+      },
+      onError: (Object e) =>
+          _failWithSourceError('Could not hash the file: $e'),
+    );
   }
 
   // The receiver hashes the whole file before confirming; allow ~10 MB/s on slow phones.
@@ -335,7 +360,19 @@ class OutboundTransferTask implements TransferTask {
       chunkData: chunkBytes,
     );
     _inFlightChunks[chunkIdx] = chunkPayload;
-    await _transmitChunk(chunkIdx, chunkPayload);
+    while (_sendsInProgress >= sendPipeline) {
+      await (_sendSlotFreed ??= Completer<void>()).future;
+    }
+    if (_status != TransferStatus.transferring || _isDisposed) return;
+    _sendsInProgress++;
+    // Not awaited: the pump goes on to read and encrypt the next chunk while
+    // this one is written. The session keeps packets in order.
+    _transmitChunk(chunkIdx, chunkPayload).whenComplete(() {
+      _sendsInProgress--;
+      final freed = _sendSlotFreed;
+      _sendSlotFreed = null;
+      freed?.complete();
+    }).ignore();
   }
 
   /// Sends [payload] and arms its retransmit timer.
@@ -413,6 +450,40 @@ class OutboundTransferTask implements TransferTask {
     }
   }
 
+  /// Sends the late hash once it is ready and the receiver has accepted:
+  /// before that the receiver has no task to give it to.
+  Future<void> _maybeSendDigest() async {
+    final sha256Hex = _digestReady;
+    if (sha256Hex == null || !_offerAccepted || _digestSent) return;
+    if (_status == TransferStatus.completed ||
+        _status == TransferStatus.cancelled ||
+        _status == TransferStatus.failed) {
+      return;
+    }
+    _digestSent = true;
+    final digest = TransferDigestPayload(
+      transferId: _transferIdBytes,
+      sha256Hash: parseSha256HexToBytes(sha256Hex),
+    );
+    try {
+      await secureSession.sendEncryptedPacket(
+        VayuPacket(
+          packetType: PacketType.transferDigest,
+          packetId: DateTime.now().microsecondsSinceEpoch,
+          sourceDeviceId: _localIdBytes,
+          destinationDeviceId: _remoteIdBytes,
+          payload: digest.toBytes(),
+        ),
+      );
+    } catch (e) {
+      handleSessionClosed('Connection lost while sending the file hash: $e');
+      return;
+    }
+    // The receiver cannot confirm before it has the hash, so the wait for its
+    // answer starts only now when every chunk was delivered first.
+    if (_status == TransferStatus.verifying) _startVerificationTimer();
+  }
+
   /// Every byte is delivered; wait for the receiver to confirm its SHA-256 check.
   void _awaitReceiverVerification() {
     if (_status == TransferStatus.verifying) return;
@@ -423,6 +494,10 @@ class OutboundTransferTask implements TransferTask {
     _inFlightChunks.clear();
     _status = TransferStatus.verifying;
     _emitProgress();
+    if (lateDigest == null || _digestSent) _startVerificationTimer();
+  }
+
+  void _startVerificationTimer() {
     _verificationTimer?.cancel();
     _verificationTimer = Timer(_verificationTimeout, () {
       if (_status != TransferStatus.verifying) return;
@@ -459,6 +534,7 @@ class OutboundTransferTask implements TransferTask {
         ack.ackType == TransferAckType.resumeCheckpoint) {
       _status = TransferStatus.transferring;
       _offerAccepted = true;
+      _maybeSendDigest();
 
       if (ack.highestContiguousChunkIndex != TransferAckPayload.noneAcked) {
         _highestContiguousAcked = ack.highestContiguousChunkIndex;
@@ -854,6 +930,10 @@ class OutboundTransferTask implements TransferTask {
     _prefetched.clear();
     _verificationTimer?.cancel();
     _verificationTimer = null;
+    // Release a pump waiting for a send slot; it sees the end state and stops.
+    final waiting = _sendSlotFreed;
+    _sendSlotFreed = null;
+    waiting?.complete();
   }
 
   void _closeControllers() {
@@ -961,6 +1041,18 @@ class InboundTransferTask implements TransferTask {
   Duration _writeTime = Duration.zero;
   int _acksSent = 0;
 
+  /// The sender's SHA-256: from the offer, or from a later digest packet when
+  /// the offer was sent before hashing finished (`late-hash-v1`).
+  final Completer<String> _expectedSha = Completer<String>();
+
+  /// Longest the final check waits for a late hash once every byte is here.
+  /// The sender hashes while it sends, so the hash is normally already here.
+  final Duration digestTimeout;
+
+  /// Given the received prefix when the connection drops, so the same file
+  /// offered again continues from there. Null: the partial file is deleted.
+  final void Function(PartialTransfer partial)? onInterrupted;
+
   InboundTransferTask({
     required this.transferId,
     required this.localDeviceId,
@@ -974,7 +1066,10 @@ class InboundTransferTask implements TransferTask {
     this.onStats,
     this.ackEvery = 2,
     this.ackDelay = const Duration(milliseconds: 15),
+    this.onInterrupted,
+    this.digestTimeout = const Duration(minutes: 10),
   }) {
+    if (!metadata.hashDeferred) _expectedSha.complete(metadata.sha256Checksum);
     _transferIdBytes = parseIdTo16Bytes(transferId);
     _localIdBytes = parseIdTo16Bytes(localDeviceId);
     _remoteIdBytes = parseIdTo16Bytes(remoteDeviceId);
@@ -1189,6 +1284,12 @@ class InboundTransferTask implements TransferTask {
     await _sendPacket(PacketType.transferAck, ack.toBytes());
   }
 
+  /// Takes the late SHA-256 announced by the sender. The first one counts.
+  void handleDigest(TransferDigestPayload digest) {
+    if (!metadata.hashDeferred || _expectedSha.isCompleted) return;
+    _expectedSha.complete(digest.sha256Hex);
+  }
+
   /// Verifies full-payload SHA-256 and promotes to target destination.
   Future<void> _verifyAndFinalize() async {
     if (_finalizing) return;
@@ -1220,7 +1321,20 @@ class InboundTransferTask implements TransferTask {
 
     try {
       final computedSha = await destination.computeSha256();
-      final expectedSha = metadata.sha256Checksum.toLowerCase();
+      final String expectedSha;
+      try {
+        expectedSha = (await _expectedSha.future.timeout(digestTimeout))
+            .toLowerCase();
+      } on TimeoutException {
+        AppLogger.warning(
+          'InboundTransferTask',
+          'Sender never sent the hash of $transferId',
+        );
+        await _failUnverified();
+        report(false);
+        return;
+      }
+      if (_status != TransferStatus.verifying || _isDisposed) return;
 
       if (computedSha.toLowerCase() != expectedSha) {
         AppLogger.error(
@@ -1297,6 +1411,27 @@ class InboundTransferTask implements TransferTask {
     }
   }
 
+  /// Gives up on a file whose late hash never arrived: it cannot be verified.
+  Future<void> _failUnverified() async {
+    final cancel = TransferCancelPayload(
+      transferId: _transferIdBytes,
+      reason: TransferCancelReason.timeout,
+      message: 'The file hash never arrived',
+    );
+    try {
+      await _sendPacket(PacketType.transferCancel, cancel.toBytes());
+    } catch (_) {}
+    await destination.abortAndCleanup();
+    _status = TransferStatus.failed;
+    _emitProgress();
+    _closeControllers();
+    if (!_doneCompleter.isCompleted) {
+      _doneCompleter.completeError(
+        TransferVerificationTimeoutException(transferId),
+      );
+    }
+  }
+
   /// Handles incoming Cancel packets from sender.
   Future<void> handleCancel(TransferCancelPayload cancel) async {
     if (_status == TransferStatus.completed ||
@@ -1336,7 +1471,29 @@ class InboundTransferTask implements TransferTask {
 
     // Status first, so a queued chunk handler sees the task is over.
     _status = TransferStatus.failed;
-    await destination.abortAndCleanup();
+    _ackTimer?.cancel();
+    final keep = onInterrupted;
+    final dest = destination;
+    final chunks = _highestContiguousChunkIndex + 1;
+    if (keep != null &&
+        dest is FilePayloadDestination &&
+        !_finalizing &&
+        chunks > 0 &&
+        chunks < metadata.chunkCount) {
+      final staging = await dest.detachKeepingStaging();
+      keep(
+        PartialTransfer(
+          stagingPath: staging,
+          contiguousChunks: chunks,
+          contiguousBytes: min(
+            chunks * metadata.chunkSize,
+            metadata.totalBytes,
+          ),
+        ),
+      );
+    } else {
+      await destination.abortAndCleanup();
+    }
     _emitProgress();
     _closeControllers();
 

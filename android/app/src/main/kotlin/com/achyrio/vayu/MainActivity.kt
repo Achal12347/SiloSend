@@ -10,8 +10,10 @@ import com.achyrio.vayu.file.FilePickerHandler
 import com.achyrio.vayu.file.ShareIntentHandler
 import com.achyrio.vayu.file.StorageHandler
 import com.achyrio.vayu.hotspot.HotspotHandler
+import com.achyrio.vayu.hotspot.WifiDirectHandler
 import com.achyrio.vayu.pairing.NfcHandler
 import com.achyrio.vayu.pairing.QrScannerHandler
+import com.achyrio.vayu.platform.PermissionGate
 import com.achyrio.vayu.platform.PlatformHandler
 import com.achyrio.vayu.security.AeadHandler
 import com.achyrio.vayu.security.SecureKeyStoreHandler
@@ -20,6 +22,8 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
+    // One queue for every runtime permission dialog (see PermissionGate).
+    private val permissionGate by lazy { PermissionGate(this) }
     private var platformHandler: PlatformHandler? = null
     private var bleDiscoveryHandler: BleDiscoveryHandler? = null
     private var bleConnectionHandler: BleConnectionHandler? = null
@@ -31,6 +35,7 @@ class MainActivity : FlutterActivity() {
     private var aeadHandler: AeadHandler? = null
     private var secureKeyStoreHandler: SecureKeyStoreHandler? = null
     private var hotspotHandler: HotspotHandler? = null
+    private var wifiDirectHandler: WifiDirectHandler? = null
     private var qrScannerHandler: QrScannerHandler? = null
     private var nfcHandler: NfcHandler? = null
     private var shareIntentHandler: ShareIntentHandler? = null
@@ -44,7 +49,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        platformHandler = PlatformHandler(this).apply {
+        platformHandler = PlatformHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
         bleDiscoveryHandler = BleDiscoveryHandler(applicationContext).apply {
@@ -59,10 +64,10 @@ class MainActivity : FlutterActivity() {
         filePickerHandler = FilePickerHandler(this).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
-        storageHandler = StorageHandler(this).apply {
+        storageHandler = StorageHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
-        transferServiceHandler = TransferServiceHandler(this).apply {
+        transferServiceHandler = TransferServiceHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
         fileIoHandler = FileIoHandler(applicationContext).apply {
@@ -74,7 +79,10 @@ class MainActivity : FlutterActivity() {
         secureKeyStoreHandler = SecureKeyStoreHandler(applicationContext).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
-        hotspotHandler = HotspotHandler(this).apply {
+        hotspotHandler = HotspotHandler(this, permissionGate).apply {
+            register(flutterEngine.dartExecutor.binaryMessenger)
+        }
+        wifiDirectHandler = WifiDirectHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
         qrScannerHandler = QrScannerHandler(this).apply {
@@ -84,13 +92,23 @@ class MainActivity : FlutterActivity() {
             register(flutterEngine.dartExecutor.binaryMessenger)
             handleIntent(intent)
         }
-        contactsHandler = ContactsHandler(this).apply {
+        contactsHandler = ContactsHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
         shareIntentHandler = ShareIntentHandler(this).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
             handle(intent)
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        nfcHandler?.onResume()
+    }
+
+    override fun onPause() {
+        nfcHandler?.onPause()
+        super.onPause()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -105,19 +123,7 @@ class MainActivity : FlutterActivity() {
         permissions: Array<out String>,
         grantResults: IntArray,
     ) {
-        if (platformHandler?.onRequestPermissionsResult(requestCode, permissions, grantResults) == true) {
-            return
-        }
-        if (transferServiceHandler?.onRequestPermissionsResult(requestCode, grantResults) == true) {
-            return
-        }
-        if (storageHandler?.onRequestPermissionsResult(requestCode) == true) {
-            return
-        }
-        if (hotspotHandler?.onRequestPermissionsResult(requestCode, grantResults) == true) {
-            return
-        }
-        if (contactsHandler?.onRequestPermissionsResult(requestCode, grantResults) == true) {
+        if (permissionGate.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
             return
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -162,6 +168,8 @@ class MainActivity : FlutterActivity() {
         secureKeyStoreHandler = null
         hotspotHandler?.unregister()
         hotspotHandler = null
+        wifiDirectHandler?.unregister()
+        wifiDirectHandler = null
         qrScannerHandler?.unregister()
         qrScannerHandler = null
         nfcHandler?.unregister()

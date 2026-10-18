@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Only the folders Vayu opens files from, never the whole shared storage. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="external_files" path="." />
+    <!-- Received files: public Download/Vayu and its subfolders -->
+    <external-path name="received_files" path="Download/Vayu/" />
+    <!-- Fallback save folder when public Downloads is not writable -->
     <external-files-path name="external_app_files" path="." />
     <!-- Received contact cards (app-private) opened by the contacts app for import -->
     <files-path name="received_contacts" path="contacts/" />
+    <files-path name="received_cards" path="cards/" />
 </paths>

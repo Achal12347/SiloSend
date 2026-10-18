@@ -117,14 +117,23 @@ class VayuCard {
       if (_has(title)) 'TITLE:${esc(title!.trim())}',
       if (_has(phone)) 'TEL;TYPE=CELL:${phone!.trim()}',
       if (_has(email)) 'EMAIL;TYPE=INTERNET:${email!.trim()}',
-      if (_has(website)) 'URL:${website!.trim()}',
+      if (_has(website)) 'URL:${_withScheme(website!.trim())}',
       if (_has(note)) 'NOTE:${esc(note!.trim())}',
+      // Vayu's card colour, so the receiver shows the card as the sender
+      // chose it. Contacts apps ignore X- properties.
+      'X-VAYU-STYLE:$accent',
       'END:VCARD',
     ];
     return Uint8List.fromList(utf8.encode('${lines.join('\r\n')}\r\n'));
   }
 
   static bool _has(String? v) => v != null && v.trim().isNotEmpty;
+
+  // "riya.design" -> "https://riya.design", so contacts apps can open it.
+  static String _withScheme(String url) =>
+      RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]*://').hasMatch(url)
+      ? url
+      : 'https://$url';
 
   Map<String, Object?> toJson() => {
     'name': name,

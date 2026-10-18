@@ -22,6 +22,9 @@ class TransferStats {
   final bool succeeded;
   final DateTime finishedAt;
 
+  /// Link the transfer used ("lan", "wifiDirect", "ble"), when known.
+  final String? link;
+
   TransferStats({
     required this.outbound,
     required this.bytes,
@@ -35,7 +38,24 @@ class TransferStats {
     this.acks = 0,
     required this.succeeded,
     DateTime? finishedAt,
+    this.link,
   }) : finishedAt = finishedAt ?? DateTime.now();
+
+  TransferStats withLink(String? link) => TransferStats(
+    outbound: outbound,
+    bytes: bytes,
+    chunkSize: chunkSize,
+    windowChunks: windowChunks,
+    elapsed: elapsed,
+    ioTime: ioTime,
+    sendTime: sendTime,
+    verifyTime: verifyTime,
+    retransmits: retransmits,
+    acks: acks,
+    succeeded: succeeded,
+    finishedAt: finishedAt,
+    link: link,
+  );
 
   /// Average throughput in MB/s (10^6 bytes) over the whole transfer.
   double get megabytesPerSecond {
@@ -48,6 +68,7 @@ class TransferStats {
     return '${outbound ? 'sent' : 'received'} ${(bytes / 1e6).toStringAsFixed(1)} MB '
         'in ${(elapsed.inMilliseconds / 1000).toStringAsFixed(1)} s '
         '= ${megabytesPerSecond.toStringAsFixed(1)} MB/s; '
+        '${link != null ? 'over $link; ' : ''}'
         'chunk ${chunkSize ~/ 1024} KiB'
         '${windowChunks > 0 ? ' x$windowChunks' : ''}; '
         '${outbound ? 'read' : 'write'} ${ms(ioTime)}'

@@ -47,16 +47,6 @@ class CryptoIdentityKeypair {
       .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
       .join();
 
-  /// Canonical human-readable fingerprint formatted in 4-character blocks separated by colons.
-  String get formattedFingerprint {
-    final hex = fingerprintHex;
-    final blocks = <String>[];
-    for (int i = 0; i < hex.length; i += 4) {
-      blocks.add(hex.substring(i, i + 4));
-    }
-    return blocks.join(':');
-  }
-
   /// User-facing fingerprint string: `Vayu-Ed25519-Identity-v1:<HEX>`.
   ///
   /// The hash itself keeps the original `SiloSend-` domain label above: it is a

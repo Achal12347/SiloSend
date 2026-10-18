@@ -12,7 +12,9 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.nfc.NfcAdapter
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -33,17 +35,16 @@ import java.net.NetworkInterface
  * - Distinguishes between Android 12+ (API 31+) and legacy Android versions.
  * - Does not loop or block discovery across transports.
  */
-class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class PlatformHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         const val CHANNEL = "com.achyrio.vayu/platform"
-        const val REQUEST_CODE_NEARBY_PERMISSIONS = 1001
         const val REQUEST_CODE_ENABLE_BLUETOOTH = 1002
-        private const val PREFS_NAME = "vayu_platform_prefs"
-        private const val KEY_REQUESTED_NEARBY = "has_requested_nearby_permissions"
     }
 
     private var channel: MethodChannel? = null
-    private var pendingPermissionResult: MethodChannel.Result? = null
     private var pendingEnableBtResult: MethodChannel.Result? = null
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -62,7 +63,6 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
         releaseMulticastLock()
         channel?.setMethodCallHandler(null)
         channel = null
-        pendingPermissionResult = null
         pendingEnableBtResult = null
     }
 
@@ -76,7 +76,31 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
                 }
             }
             "requestNearbyPermissions" -> {
-                requestNearbyPermissions(result)
+                permissions.request(PermissionGate.nearbyPermissions()) { result.success(it) }
+            }
+            "permissionReport" -> {
+                try {
+                    result.success(permissionReport())
+                } catch (e: Exception) {
+                    result.error("REPORT_FAILED", e.message, null)
+                }
+            }
+            "requestPermissionGroup" -> {
+                val group = call.argument<String>("group")
+                val wanted = group?.let { PermissionGate.permissionsFor(it) }
+                if (wanted == null) {
+                    result.error("INVALID_ARGS", "Unknown permission group: $group", null)
+                } else {
+                    permissions.request(wanted) { result.success(it) }
+                }
+            }
+            "openUri" -> {
+                val uri = call.argument<String>("uri")
+                result.success(uri != null && openUri(uri))
+            }
+            "openSettingsPage" -> {
+                val page = call.argument<String>("page") ?: "app"
+                result.success(openSettingsPage(page))
             }
             "enableBluetooth" -> {
                 requestEnableBluetooth(result)
@@ -138,7 +162,31 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
                 releaseMulticastLock()
                 result.success(true)
             }
+            "wifiLinkInfo" -> result.success(wifiLinkInfo())
             else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * Band and negotiated speed of the current Wi-Fi connection, for the speed
+     * diagnostics. Frequency and link speed need no location permission (only
+     * the network name would). Null when not on Wi-Fi.
+     */
+    private fun wifiLinkInfo(): Map<String, Any?>? {
+        return try {
+            val wifi = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            @Suppress("DEPRECATION")
+            val info = wifi.connectionInfo ?: return null
+            if (info.networkId == -1 && info.linkSpeed <= 0) return null
+            mapOf(
+                "frequencyMhz" to info.frequency,
+                "linkSpeedMbps" to info.linkSpeed,
+                "txLinkSpeedMbps" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.txLinkSpeedMbps else null,
+                "rxLinkSpeedMbps" to if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) info.rxLinkSpeedMbps else null,
+                "rssi" to info.rssi,
+            )
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -170,81 +218,120 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
     }
 
-    private fun requiredNearbyPermissions(): List<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            listOf(
-                Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_ADVERTISE,
-                Manifest.permission.BLUETOOTH_CONNECT
-            )
-        } else {
-            listOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
-        }
-    }
+    private fun checkNearbyPermissionStatus(): String =
+        permissions.status(PermissionGate.nearbyPermissions())
 
-    private fun checkNearbyPermissionStatus(): String {
-        val permissions = requiredNearbyPermissions()
-        val allGranted = permissions.all {
-            ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED
-        }
-        if (allGranted) return "granted"
-
-        val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val hasRequestedBefore = prefs.getBoolean(KEY_REQUESTED_NEARBY, false)
-
-        if (!hasRequestedBefore) {
-            return "not_requested"
-        }
-
-        // If previously requested and not granted: check if permanently denied
-        val anyShouldShowRationale = permissions.any {
-            ActivityCompat.shouldShowRequestPermissionRationale(activity, it)
-        }
-        return if (anyShouldShowRationale) "denied" else "permanently_denied"
-    }
-
-    private fun requestNearbyPermissions(result: MethodChannel.Result) {
-        val missing = requiredNearbyPermissions().filter {
-            ContextCompat.checkSelfPermission(activity, it) != PackageManager.PERMISSION_GRANTED
-        }
-
-        if (missing.isEmpty()) {
-            result.success("granted")
-            return
-        }
-
-        if (pendingPermissionResult != null) {
-            result.error("ALREADY_REQUESTING", "Permission request already in progress", null)
-            return
-        }
-
-        val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(KEY_REQUESTED_NEARBY, true).apply()
-
-        pendingPermissionResult = result
-        ActivityCompat.requestPermissions(
-            activity,
-            missing.toTypedArray(),
-            REQUEST_CODE_NEARBY_PERMISSIONS
+    /**
+     * Everything Vayu needs, each as a status string, for the Permissions &
+     * settings screen. Switches report on / off / unsupported / not_needed.
+     */
+    private fun permissionReport(): Map<String, Any?> {
+        val sdk = Build.VERSION.SDK_INT
+        val nfc = NfcAdapter.getDefaultAdapter(activity)
+        val power = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        // Location services must be on for Bluetooth scans before Android 12
+        // and for phone-to-phone Wi-Fi before Android 13.
+        val locationNeeded = sdk < Build.VERSION_CODES.TIRAMISU
+        return mapOf(
+            "sdkVersion" to sdk,
+            "nearby" to permissions.status(PermissionGate.nearbyPermissions()),
+            // Before Android 12 this is the same location permission as "nearby".
+            "directWifi" to if (sdk < Build.VERSION_CODES.S) {
+                PermissionGate.NOT_NEEDED
+            } else {
+                permissions.status(PermissionGate.directWifiPermissions())
+            },
+            "camera" to permissions.status(PermissionGate.cameraPermissions()),
+            "notifications" to permissions.status(PermissionGate.notificationPermissions()),
+            "storage" to permissions.status(PermissionGate.storagePermissions()),
+            "bluetooth" to when {
+                bluetoothAdapter == null -> "unsupported"
+                bluetoothAdapter?.isEnabled == true -> "on"
+                else -> "off"
+            },
+            "wifi" to if (isWifiEnabled()) "on" else "off",
+            "location" to when {
+                !locationNeeded -> "not_needed"
+                isLocationEnabled() -> "on"
+                else -> "off"
+            },
+            "nfc" to when {
+                nfc == null -> "unsupported"
+                nfc.isEnabled -> "on"
+                else -> "off"
+            },
+            "battery" to when {
+                power == null -> "unsupported"
+                power.isIgnoringBatteryOptimizations(activity.packageName) -> "on"
+                else -> "off"
+            },
         )
     }
 
-    fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ): Boolean {
-        if (requestCode != REQUEST_CODE_NEARBY_PERMISSIONS) return false
+    /**
+     * Opens a link from a received card: the dialer (no call is placed and
+     * no permission is needed), a new email, or the browser. Only these
+     * schemes are allowed, since the card came from another phone.
+     */
+    private fun openUri(raw: String): Boolean {
+        val uri = Uri.parse(raw)
+        val intent = when (uri.scheme?.lowercase()) {
+            "tel" -> Intent(Intent.ACTION_DIAL, uri)
+            "mailto" -> Intent(Intent.ACTION_SENDTO, uri)
+            "http", "https" -> Intent(Intent.ACTION_VIEW, uri)
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+            else -> return false
+        }
+        return try {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
-        val res = pendingPermissionResult ?: return false
-        pendingPermissionResult = null
-
-        val status = checkNearbyPermissionStatus()
-        res.success(status)
-        return true
+    /** Opens the exact system page for [page]; falls back to the app's page. */
+    private fun openSettingsPage(page: String): Boolean {
+        val packageUri = Uri.fromParts("package", activity.packageName, null)
+        val candidates = mutableListOf<Intent>()
+        when (page) {
+            "notifications" -> {
+                candidates += Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+            }
+            "bluetooth" -> candidates += Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+            "wifi" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    candidates += Intent(Settings.Panel.ACTION_WIFI)
+                }
+                candidates += Intent(Settings.ACTION_WIFI_SETTINGS)
+            }
+            "location" -> candidates += Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            "nfc" -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    candidates += Intent(Settings.Panel.ACTION_NFC)
+                }
+                candidates += Intent(Settings.ACTION_NFC_SETTINGS)
+                candidates += Intent(Settings.ACTION_WIRELESS_SETTINGS)
+            }
+            // The list of apps and their battery use; asking to be exempted
+            // directly needs a Play-restricted permission.
+            "battery" -> candidates += Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        }
+        candidates += Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).setData(packageUri)
+        for (intent in candidates) {
+            try {
+                // No resolveActivity check: package visibility (Android 11+)
+                // can hide Settings pages from it even though they open.
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(intent)
+                return true
+            } catch (_: Exception) {
+                // Some OEM builds remove pages; try the next one.
+            }
+        }
+        return false
     }
 
     private fun requestEnableBluetooth(result: MethodChannel.Result) {
@@ -313,7 +400,7 @@ class PlatformHandler(private val activity: Activity) : MethodChannel.MethodCall
         try {
             // Check ConnectivityManager active network has Wi-Fi or Ethernet
             val connMgr = activity.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-            if (connMgr != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (connMgr != null) {
                 val activeNet = connMgr.activeNetwork
                 val caps = connMgr.getNetworkCapabilities(activeNet)
                 if (caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||

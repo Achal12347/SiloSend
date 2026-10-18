@@ -168,12 +168,6 @@ class SecureSessionImpl implements SecureSession {
   int get epoch => _activeEpoch.epoch;
   int get currentEpoch => _activeEpoch.epoch;
 
-  /// Active key epoch material.
-  KeyEpochMaterial get activeEpoch => _activeEpoch;
-
-  /// Retained previous epoch material during grace period, if any.
-  KeyEpochMaterial? get retainedPreviousEpoch => _retainedPreviousEpoch;
-
   /// Active confirmation key for the current epoch.
   Uint8List get activeConfirmKey => _activeEpoch.confirmKey;
 
@@ -256,13 +250,16 @@ class SecureSessionImpl implements SecureSession {
     });
   }
 
-  // Inbound packets are decrypted strictly in arrival order, so a transfer offer is
+  // Inbound packets start decrypting as soon as they arrive (the platform
+  // cipher works on a background thread), but the replay check, the replay
+  // commit and delivery run strictly in arrival order, so a transfer offer is
   // always delivered before the chunks that follow it.
   Future<void> _rxChain = Future<void>.value();
 
   void _enqueueInbound(VayuPacket packet) {
+    final opening = _startOpening(packet);
     _rxChain = _rxChain
-        .then((_) => _handleIncomingRawPacket(packet))
+        .then((_) => _deliverInbound(packet, opening))
         .catchError((Object _) {});
   }
 
@@ -296,58 +293,75 @@ class SecureSessionImpl implements SecureSession {
     );
   }
 
-  Future<void> _handleIncomingRawPacket(VayuPacket packet) async {
-    // Only decrypt application/data packets; skip raw authExchange or control frames
-    if (isControlPacket(packet)) {
-      return;
+  /// Starts decrypting [packet]; null for control packets. Errors are kept in
+  /// the returned future and surface, in order, in [_deliverInbound].
+  Future<_OpenedPacket>? _startOpening(VayuPacket packet) {
+    if (isControlPacket(packet)) return null;
+    final opening = _openPacket(packet);
+    // Handled when delivered; never an unhandled error meanwhile.
+    opening.ignore();
+    return opening;
+  }
+
+  Future<_OpenedPacket> _openPacket(VayuPacket packet) async {
+    if (packet.payload.length < EncryptedEnvelope.minEnvelopeSize) {
+      throw SecurityError(
+        'Incoming packet payload too short for EncryptedEnvelope',
+      );
     }
-
+    final envelope = EncryptedEnvelope.fromBytes(packet.payload);
+    final epochMaterial = _epochFor(envelope.epoch);
+    final nonce = _constructNonce(
+      epochMaterial.rxSalt,
+      envelope.sequenceNumber,
+    );
+    // Canonical 76-byte AAD from packet header + sessionId + nonce.
+    final aad = CryptoService.constructAad(
+      magic1: VayuPacket.magic1,
+      magic2: VayuPacket.magic2,
+      protocolVersion: packet.version,
+      packetTypeCode: packet.packetType.code,
+      packetId: packet.packetId,
+      sourceDeviceId: packet.sourceDeviceId,
+      destinationDeviceId: packet.destinationDeviceId,
+      payloadLength: packet.payload.length,
+      sessionId: _sessionIdBytes,
+      aeadNonce: nonce,
+    );
+    final Uint8List plaintext;
     try {
-      if (packet.payload.length < EncryptedEnvelope.minEnvelopeSize) {
-        throw SecurityError(
-          'Incoming packet payload too short for EncryptedEnvelope',
-        );
-      }
-
-      // Reconstruct AEAD Nonce from envelope sequence number and matching epoch salt
-      final byteData = ByteData.sublistView(packet.payload);
-      final envelopeEpoch = byteData.getUint8(0);
-      final sequenceNumber = byteData.getUint64(1, Endian.big);
-
-      final Uint8List rxSalt;
-      if (envelopeEpoch == _activeEpoch.epoch) {
-        rxSalt = _activeEpoch.rxSalt;
-      } else if (_retainedPreviousEpoch != null &&
-          envelopeEpoch == _retainedPreviousEpoch!.epoch) {
-        rxSalt = _retainedPreviousEpoch!.rxSalt;
-      } else {
-        // Fallback salt to construct AAD; decryptPayload will throw appropriate SecurityError
-        rxSalt = _activeEpoch.rxSalt;
-      }
-
-      final rxNonce = _constructNonce(rxSalt, sequenceNumber);
-
-      // Construct canonical 76-byte AAD from packet header + sessionId + nonce
-      final aad = CryptoService.constructAad(
-        magic1: VayuPacket.magic1,
-        magic2: VayuPacket.magic2,
-        protocolVersion: packet.version,
-        packetTypeCode: packet.packetType.code,
-        packetId: packet.packetId,
-        sourceDeviceId: packet.sourceDeviceId,
-        destinationDeviceId: packet.destinationDeviceId,
-        payloadLength: packet.payload.length,
-        sessionId: _sessionIdBytes,
-        aeadNonce: rxNonce,
+      plaintext = await cryptoService.decryptAead(
+        ciphertext: envelope.ciphertext,
+        authTag: envelope.authTag,
+        secretKeyBytes: epochMaterial.rxKey,
+        nonce: nonce,
+        aad: aad,
       );
+    } catch (e) {
+      throw SecurityError('AEAD message authentication failed: $e');
+    }
+    return _OpenedPacket(epochMaterial, envelope.sequenceNumber, plaintext);
+  }
 
-      final decryptedBytes = await decryptPayload(
-        packet.payload,
-        associatedData: aad,
-      );
+  Future<void> _deliverInbound(
+    VayuPacket packet,
+    Future<_OpenedPacket>? opening,
+  ) async {
+    if (opening == null) return;
+    try {
+      _OpenedPacket opened;
+      try {
+        opened = await opening;
+      } on _EpochNotYetActive {
+        // Sent just after a rekey that this side applies while handling the
+        // packets before it; by now the new epoch is active.
+        opened = await _openPacket(packet);
+      }
+      // Replay state changes only after authentication, in arrival order.
+      _checkReplay(opened.epoch, opened.sequenceNumber);
+      opened.epoch.replayFilter.commitSequence(opened.sequenceNumber);
 
-      final decryptedPacket = packet.copyWith(payload: decryptedBytes);
-
+      final decryptedPacket = packet.copyWith(payload: opened.plaintext);
       if (!_decryptedPacketsController.isClosed) {
         if (_decryptedPacketsController.hasListener) {
           _decryptedPacketsController.add(decryptedPacket);
@@ -371,6 +385,36 @@ class SecureSessionImpl implements SecureSession {
           stack,
         );
       }
+    }
+  }
+
+  /// Key material for an envelope epoch: the active one, or the previous one
+  /// during its grace period.
+  KeyEpochMaterial _epochFor(int epoch) {
+    if (epoch == _activeEpoch.epoch) return _activeEpoch;
+    final previous = _retainedPreviousEpoch;
+    if (previous != null && epoch == previous.epoch) return previous;
+    if (epoch < _activeEpoch.epoch) {
+      throw SecurityError(
+        'Stale key epoch: envelope epoch $epoch is older than retained window (active: ${_activeEpoch.epoch})',
+      );
+    }
+    throw _EpochNotYetActive(
+      'Future unnegotiated key epoch: received $epoch, active: ${_activeEpoch.epoch}',
+    );
+  }
+
+  void _checkReplay(KeyEpochMaterial epochMaterial, int sequenceNumber) {
+    final decision = epochMaterial.replayFilter.checkSequence(sequenceNumber);
+    if (decision == ReplayDecision.rejectDuplicate) {
+      throw SecurityError(
+        'Replay Protection: Duplicate sequence number $sequenceNumber in epoch ${epochMaterial.epoch} rejected',
+      );
+    }
+    if (decision == ReplayDecision.rejectStale) {
+      throw SecurityError(
+        'Replay Protection: Stale sequence number $sequenceNumber in epoch ${epochMaterial.epoch} fell off sliding window',
+      );
     }
   }
 
@@ -405,24 +449,27 @@ class SecureSessionImpl implements SecureSession {
       );
     }
 
-    final seq = _txSequence;
-    final nonce = _constructNonce(_activeEpoch.txSalt, seq);
+    // Reserve the sequence number before the first await. Incrementing it
+    // after encryption let two concurrent sends (an ACK and a retransmit, for
+    // example) use the same number, which reused the AES-GCM nonce and made
+    // the receiver drop the second packet as a replay.
+    final epochMaterial = _activeEpoch;
+    final seq = _txSequence++;
+    final nonce = _constructNonce(epochMaterial.txSalt, seq);
 
     final result = await cryptoService.encryptAead(
       plaintext: plaintext,
-      secretKeyBytes: _activeEpoch.txKey,
+      secretKeyBytes: epochMaterial.txKey,
       nonce: nonce,
       aad: associatedData,
     );
 
     final envelope = EncryptedEnvelope(
-      epoch: _activeEpoch.epoch,
+      epoch: epochMaterial.epoch,
       sequenceNumber: seq,
       ciphertext: result.ciphertext,
       authTag: result.authTag,
     );
-
-    _txSequence++;
     return envelope.toBytes();
   }
 
@@ -444,38 +491,10 @@ class SecureSessionImpl implements SecureSession {
     }
 
     final envelope = EncryptedEnvelope.fromBytes(ciphertext);
-
-    // Resolve epoch material
-    final KeyEpochMaterial epochMaterial;
-    if (envelope.epoch == _activeEpoch.epoch) {
-      epochMaterial = _activeEpoch;
-    } else if (_retainedPreviousEpoch != null &&
-        envelope.epoch == _retainedPreviousEpoch!.epoch) {
-      epochMaterial = _retainedPreviousEpoch!;
-    } else if (envelope.epoch < _activeEpoch.epoch) {
-      throw SecurityError(
-        'Stale key epoch: envelope epoch ${envelope.epoch} is older than retained window (active: ${_activeEpoch.epoch})',
-      );
-    } else {
-      throw SecurityError(
-        'Future unnegotiated key epoch: received ${envelope.epoch}, active: ${_activeEpoch.epoch}',
-      );
-    }
+    final epochMaterial = _epochFor(envelope.epoch);
 
     // Replay Protection Pre-Check on the corresponding epoch filter
-    final decision = epochMaterial.replayFilter.checkSequence(
-      envelope.sequenceNumber,
-    );
-    if (decision == ReplayDecision.rejectDuplicate) {
-      throw SecurityError(
-        'Replay Protection: Duplicate sequence number ${envelope.sequenceNumber} in epoch ${envelope.epoch} rejected',
-      );
-    }
-    if (decision == ReplayDecision.rejectStale) {
-      throw SecurityError(
-        'Replay Protection: Stale sequence number ${envelope.sequenceNumber} in epoch ${envelope.epoch} fell off sliding window',
-      );
-    }
+    _checkReplay(epochMaterial, envelope.sequenceNumber);
 
     final nonce = _constructNonce(
       epochMaterial.rxSalt,
@@ -526,14 +545,34 @@ class SecureSessionImpl implements SecureSession {
       aeadNonce: nonce,
     );
 
-    final encryptedBytes = await encryptPayload(
-      packet.payload,
-      associatedData: aad,
-    );
+    // encryptPayload reserves the sequence number synchronously, so packets
+    // are numbered in call order; encrypting the next packet may overlap with
+    // writing this one, but writes leave in that same order.
+    final sealing = encryptPayload(packet.payload, associatedData: aad);
+    final previousWrite = _txWriteChain;
+    final written = Completer<void>();
+    _txWriteChain = written.future;
 
-    final wirePacket = packet.copyWith(payload: encryptedBytes);
-    await connectionSession.sendPacket(wirePacket);
+    final Uint8List encryptedBytes;
+    try {
+      encryptedBytes = await sealing;
+    } catch (_) {
+      previousWrite.whenComplete(written.complete);
+      rethrow;
+    }
+    try {
+      await previousWrite;
+      await connectionSession.sendPacket(
+        packet.copyWith(payload: encryptedBytes),
+      );
+    } finally {
+      written.complete();
+    }
   }
+
+  // Completes when the most recently queued packet has been written (or has
+  // failed). Never completes with an error.
+  Future<void> _txWriteChain = Future<void>.value();
 
   @override
   Future<void> terminate() async {
@@ -583,4 +622,18 @@ class SecureSessionImpl implements SecureSession {
     }
     return bytes;
   }
+}
+
+/// A decrypted packet waiting for its in-order replay check and delivery.
+class _OpenedPacket {
+  final KeyEpochMaterial epoch;
+  final int sequenceNumber;
+  final Uint8List plaintext;
+
+  _OpenedPacket(this.epoch, this.sequenceNumber, this.plaintext);
+}
+
+/// An envelope from a key epoch this side has not activated yet.
+class _EpochNotYetActive extends SecurityError {
+  _EpochNotYetActive(super.message);
 }

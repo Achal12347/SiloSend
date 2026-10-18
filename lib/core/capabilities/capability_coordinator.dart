@@ -63,22 +63,6 @@ class EvaluatedCapabilityState {
     return CapabilityOperationalStatus.actionRequired;
   }
 
-  /// What is happening?
-  String get statusTitle {
-    switch (operationalStatus) {
-      case CapabilityOperationalStatus.checking:
-        return 'Checking nearby capabilities...';
-      case CapabilityOperationalStatus.readyBoth:
-        return 'Ready via Wi-Fi and Bluetooth';
-      case CapabilityOperationalStatus.readyLanOnly:
-        return 'Ready over Local Wi-Fi';
-      case CapabilityOperationalStatus.readyBleOnly:
-        return 'Ready via Bluetooth Low Energy';
-      case CapabilityOperationalStatus.actionRequired:
-        return 'Setup Required for Nearby Sharing';
-    }
-  }
-
   /// What is available?
   String get availableSummary {
     final parts = <String>[];
@@ -123,22 +107,6 @@ class EvaluatedCapabilityState {
     }
 
     return CapabilityActionType.none;
-  }
-
-  /// Human-friendly description of what can be done next.
-  String? get actionDescription {
-    switch (recommendedAction) {
-      case CapabilityActionType.requestNearbyPermission:
-        return 'Allow Nearby Devices access so Vayu can discover peers via Bluetooth.';
-      case CapabilityActionType.enableBluetooth:
-        return 'Bluetooth is turned off. Turn it on to find nearby devices without Wi-Fi.';
-      case CapabilityActionType.openAppSettings:
-        return 'Nearby access is blocked. Android requires enabling it in App Settings.';
-      case CapabilityActionType.openWifiSettings:
-        return 'Connect to the same Wi-Fi network as nearby devices for high-speed sharing.';
-      case CapabilityActionType.none:
-        return null;
-    }
   }
 
   /// Label for the recommended action button.

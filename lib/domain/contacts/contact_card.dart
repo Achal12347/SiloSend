@@ -17,6 +17,9 @@ class ContactCard {
   final String? title;
   final String? website;
   final String? note;
+
+  /// Card colour chosen by a Vayu sender (`X-VAYU-STYLE`), if any.
+  final int? style;
   final Uint8List vcard;
 
   const ContactCard({
@@ -28,6 +31,7 @@ class ContactCard {
     this.title,
     this.website,
     this.note,
+    this.style,
   });
 
   /// Parses and validates [bytes]; returns null when it is not a vCard.
@@ -54,6 +58,7 @@ class ContactCard {
     String? title;
     String? url;
     String? note;
+    int? style;
     final phones = <String>[];
     final emails = <String>[];
     for (final line in lines.sublist(begin + 1, end)) {
@@ -86,6 +91,9 @@ class ContactCard {
           url ??= value;
         case 'NOTE':
           note ??= value;
+        case 'X-VAYU-STYLE':
+          final parsed = int.tryParse(value);
+          if (parsed != null && parsed >= 0 && parsed < 64) style ??= parsed;
       }
     }
     final name = (fn ?? n ?? '').trim();
@@ -98,6 +106,7 @@ class ContactCard {
       title: title,
       website: url,
       note: note,
+      style: style,
       vcard: bytes,
     );
   }

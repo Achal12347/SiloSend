@@ -9,10 +9,19 @@ class FramedTransportConnection {
   final TransportConnection rawConnection;
   late final Stream<VayuPacket> _packetStream;
 
+  // Unauthenticated peers (anyone on the same Wi-Fi can connect) may not
+  // make this phone buffer large packets; raised once the session is secured.
+  int _maxPayload = PacketStreamTransformer.unauthenticatedMaxPayloadLength;
+
   FramedTransportConnection(this.rawConnection) {
     _packetStream = rawConnection.incomingBytes
-        .transform(PacketStreamTransformer())
+        .transform(PacketStreamTransformer(maxPayload: () => _maxPayload))
         .asBroadcastStream();
+  }
+
+  /// Allows full-size packets; called when the peer has authenticated.
+  void allowFullSizePackets() {
+    _maxPayload = PacketStreamTransformer.maxPayloadLength;
   }
 
   String get connectionId => rawConnection.connectionId;

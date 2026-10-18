@@ -32,7 +32,6 @@ enum AppOperationalPhase {
   disconnected,
   error;
 
-  bool get isTransferring => this == AppOperationalPhase.transferring;
   bool get isConnected =>
       this == AppOperationalPhase.connected ||
       this == AppOperationalPhase.authenticating ||
@@ -52,8 +51,7 @@ enum AppExplicitError {
   authenticationFailed,
   transferFailed,
   integrityFailed,
-  cancelled,
-  insufficientStorage;
+  cancelled;
 
   bool get hasError => this != AppExplicitError.none;
 }

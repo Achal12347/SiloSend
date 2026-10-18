@@ -7,6 +7,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/security/aead_cipher.dart';
 import 'package:vayu/core/security/crypto_service.dart';
 import 'package:vayu/core/security/peer_trust_store.dart';
 import 'package:vayu/core/security/secure_key_store.dart';
@@ -26,7 +27,10 @@ import 'package:vayu/domain/transfer/payload_source.dart';
 /// size, window, ACK rate) against each other on one machine.
 ///
 /// Run: VAYU_BENCH=1 flutter test test/benchmark/transfer_throughput_test.dart
-/// Size in MB via VAYU_BENCH_MB (default 32).
+/// Size in MB via VAYU_BENCH_MB (default 32). VAYU_BENCH_CIPHER=fast swaps the
+/// pure-Dart AES (CPU-bound on desktop, not used on Android) for a trivial
+/// test-only cipher with an async hop, so the numbers show pipeline overhead
+/// (copies, CRC, framing, awaits) the way the hardware cipher would expose it.
 void main() {
   final enabled = Platform.environment['VAYU_BENCH'] != null;
   final sizeMb =
@@ -50,7 +54,11 @@ Future<String> _runOnce(int totalBytes, int chunkSize) async {
   final managerA = ConnectionManager(localIdentity: a);
   final managerB = ConnectionManager(localIdentity: b)
     ..registerLanServer(server);
-  final crypto = CryptoService();
+  final crypto = CryptoService(
+    aead: Platform.environment['VAYU_BENCH_CIPHER'] == 'fast'
+        ? _BenchCipher()
+        : null,
+  );
   final secureA = SecureSessionManager(
     cryptoService: crypto,
     trustStore: PeerTrustStore(),
@@ -136,5 +144,37 @@ Future<String> _runOnce(int totalBytes, int chunkSize) async {
     await managerB.dispose();
     await server.stop();
     dir.deleteSync(recursive: true);
+  }
+}
+
+/// Test-only stand-in for the platform cipher: copies the data (as the
+/// channel does), crosses one event-loop turn, and uses a fixed tag. Never
+/// secure; used only when VAYU_BENCH_CIPHER=fast.
+class _BenchCipher implements AeadCipher {
+  static final Uint8List _tag = Uint8List(16);
+
+  @override
+  Future<({Uint8List ciphertext, Uint8List authTag})> encrypt({
+    required Uint8List plaintext,
+    required Uint8List key,
+    required Uint8List nonce,
+    required Uint8List aad,
+  }) async {
+    final copy = Uint8List.fromList(plaintext);
+    await Future<void>(() {});
+    return (ciphertext: copy, authTag: Uint8List.fromList(_tag));
+  }
+
+  @override
+  Future<Uint8List> decrypt({
+    required Uint8List ciphertext,
+    required Uint8List authTag,
+    required Uint8List key,
+    required Uint8List nonce,
+    required Uint8List aad,
+  }) async {
+    final copy = Uint8List.fromList(ciphertext);
+    await Future<void>(() {});
+    return copy;
   }
 }

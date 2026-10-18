@@ -10,13 +10,18 @@ import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 /// [stopServing]; "listening" runs NFC reader mode and reports the payload a
 /// tapped Vayu phone serves.
 class AndroidNfcPlatformAdapter
-    implements NfcPlatformAdapter, CardSharingNfcAdapter {
+    implements NfcPlatformAdapter, CardSharingNfcAdapter, TapProblemReporting {
   static const MethodChannel _methods = MethodChannel('com.achyrio.vayu/nfc');
   static const EventChannel _events = EventChannel(
     'com.achyrio.vayu/nfc_events',
   );
 
   StreamSubscription<dynamic>? _readSub;
+  final StreamController<NfcTapProblem> _problems =
+      StreamController<NfcTapProblem>.broadcast();
+
+  @override
+  Stream<NfcTapProblem> get tapProblems => _problems.stream;
 
   @override
   Future<bool> isNfcAvailable() async {
@@ -42,7 +47,13 @@ class AndroidNfcPlatformAdapter
   }) async {
     await _readSub?.cancel();
     _readSub = _events.receiveBroadcastStream().listen((event) {
-      if (event is Uint8List) onTagDiscovered(event);
+      if (event is Uint8List) {
+        onTagDiscovered(event);
+      } else if (event == 'not_sharing') {
+        _problems.add(NfcTapProblem.notSharing);
+      } else if (event is String) {
+        _problems.add(NfcTapProblem.readFailed);
+      }
     }, onError: (_) {});
     await _methods.invokeMethod<bool>('startReading');
   }

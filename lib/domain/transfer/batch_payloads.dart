@@ -17,30 +17,74 @@ class BatchManifestEntry {
   final int sizeBytes;
   final String mimeType;
 
+  /// Folder path the file belongs in when a whole folder is sent
+  /// (`Photos/2024`), already made safe by [sanitizeFolder]. Part of what the
+  /// receiver consents to. Older builds ignore it and save the file flat.
+  final String? folder;
+
+  static const int maxFolderDepth = 32;
+
   BatchManifestEntry({
     required String fileName,
     required this.sizeBytes,
     required this.mimeType,
-  }) : fileName = TransferMetadataPayload.sanitizeFileName(fileName) {
+    String? folder,
+  }) : fileName = TransferMetadataPayload.sanitizeFileName(fileName),
+       folder = sanitizeFolder(folder) {
     if (sizeBytes < 0) {
       throw ArgumentError.value(sizeBytes, 'sizeBytes', 'Cannot be negative');
     }
+  }
+
+  /// A relative folder path that can only ever point inside the receiver's
+  /// save folder: no absolute paths, no `..` or `.` parts, no characters
+  /// Android storage rejects, at most [maxFolderDepth] levels. Null if nothing
+  /// usable is left.
+  static String? sanitizeFolder(String? path) {
+    if (path == null) return null;
+    final parts = <String>[];
+    for (final raw in path.replaceAll(r'\', '/').split('/')) {
+      var part = raw
+          .replaceAll(RegExp(r'[\x00-\x1F\x7F]'), '')
+          .replaceAll(RegExp(r'[":*?<>|]'), '_')
+          .trim();
+      // Trailing dots and spaces are not allowed in folder names on Android.
+      part = part.replaceAll(RegExp(r'[. ]+$'), '');
+      if (part.isEmpty) continue;
+      final encoded = utf8.encode(part);
+      if (encoded.length > TransferMetadataPayload.maxNameLength) {
+        part = utf8.decode(
+          encoded.sublist(0, TransferMetadataPayload.maxNameLength),
+          allowMalformed: true,
+        );
+      }
+      parts.add(part);
+      if (parts.length == maxFolderDepth) break;
+    }
+    return parts.isEmpty ? null : parts.join('/');
   }
 
   Map<String, dynamic> toJson() => {
     'n': fileName,
     's': sizeBytes,
     'm': mimeType,
+    if (folder != null) 'p': folder,
   };
 
   factory BatchManifestEntry.fromJson(Map<String, dynamic> json) {
     final name = json['n'];
     final size = json['s'];
     final mime = json['m'];
+    final folder = json['p'];
     if (name is! String || name.isEmpty || size is! int || mime is! String) {
       throw const FormatException('Invalid batch manifest entry');
     }
-    return BatchManifestEntry(fileName: name, sizeBytes: size, mimeType: mime);
+    return BatchManifestEntry(
+      fileName: name,
+      sizeBytes: size,
+      mimeType: mime,
+      folder: folder is String ? folder : null,
+    );
   }
 
   /// True when an incoming file offer matches this entry exactly.

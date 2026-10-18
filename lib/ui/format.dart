@@ -65,6 +65,8 @@ String describeFailureKind(String? kind) {
       return 'Not confirmed by the other device';
     case 'declined':
       return 'Declined';
+    case 'notReceiving':
+      return 'Not receiving at the time';
     case 'cancelled':
       return 'Cancelled';
     default:

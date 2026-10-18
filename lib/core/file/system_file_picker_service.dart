@@ -77,6 +77,42 @@ class SystemFilePickerService implements FilePickerService {
   }
 
   @override
+  Future<PickedFolder?> pickFolder() async {
+    if (!Platform.isAndroid) return null;
+    try {
+      final result = await channel.invokeMapMethod<String, dynamic>(
+        'pickFolder',
+      );
+      if (result == null) return null;
+      final name = result['name'] as String? ?? 'Folder';
+      final files = (result['files'] as List?) ?? const [];
+      return PickedFolder(
+        name: name,
+        truncated: result['truncated'] == true,
+        documents: [
+          for (final m in files.whereType<Map<dynamic, dynamic>>())
+            SelectedDocument(
+              identifier: m['uri'] as String? ?? '',
+              name: m['name'] as String? ?? 'file',
+              sizeBytes: (m['size'] as num?)?.toInt() ?? -1,
+              mimeType: m['mimeType'] as String?,
+              folder: _joinFolder(name, m['folder'] as String? ?? ''),
+            ),
+        ],
+      );
+    } on PlatformException catch (e) {
+      AppLogger.error(
+        'SystemFilePickerService',
+        'Failed to pick folder: ${e.message}',
+      );
+      return null;
+    }
+  }
+
+  static String _joinFolder(String root, String inside) =>
+      inside.isEmpty ? root : '$root/$inside';
+
+  @override
   Future<List<SelectedDocument>> pickMultipleDocuments() async {
     if (testMultiPickerHandler != null) {
       return testMultiPickerHandler!();

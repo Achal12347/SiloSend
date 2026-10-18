@@ -81,10 +81,30 @@ class MemoryPayloadDestination implements PayloadDestination {
   Future<void> close() async {}
 }
 
+/// [path] for [n] = 0, otherwise `name (n).ext` in the same folder. Shared by
+/// destination reservation and by [FilePayloadDestination.finalize] so both
+/// number duplicates the same way.
+String numberedPath(String path, int n) {
+  if (n == 0) return path;
+  final slash = path.lastIndexOf(RegExp(r'[/\\]'));
+  final name = path.substring(slash + 1);
+  final dot = name.lastIndexOf('.');
+  final base = dot > 0 ? name.substring(0, dot) : name;
+  final ext = dot > 0 ? name.substring(dot) : '';
+  return '${path.substring(0, slash + 1)}$base ($n)$ext';
+}
+
 /// Filesystem-backed destination sink writing to an atomic staging file
 /// (`<path>.vayu.tmp`) before moving to the target path upon integrity verification.
 class FilePayloadDestination implements PayloadDestination {
-  final String targetFilePath;
+  /// Suffix of the staging file a transfer writes before verification.
+  static const String stagingSuffix = '.vayu.tmp';
+
+  /// Where the received file lives (or will live). Starts as the reserved
+  /// path; [finalize] moves to the next free name if that one was taken
+  /// meanwhile, so screens and history must read it after completion.
+  String get targetFilePath => _targetFilePath;
+  String _targetFilePath;
 
   @override
   final int totalBytes;
@@ -94,14 +114,69 @@ class FilePayloadDestination implements PayloadDestination {
   bool _isFinalized = false;
   bool _isAborted = false;
 
+  /// Files at least this large are hashed while they arrive.
+  static const int streamingHashMinBytes = 4 * 1024 * 1024;
+
+  // Hash of the bytes written so far, as long as writes arrive in order.
+  // Any gap or rewrite drops it and verification re-reads the file.
+  BackgroundSha256? _streamingHash;
+  int _hashedUpTo = 0;
+  bool _streamingHashBroken = false;
+
+  /// Completes when the hashing backlog allows the next write.
+  Future<void> _feedStreamingHash(int offset, Uint8List data) async {
+    if (_streamingHashBroken || totalBytes < streamingHashMinBytes) return;
+    if (offset != _hashedUpTo) {
+      _streamingHashBroken = true;
+      _streamingHash?.dispose();
+      _streamingHash = null;
+      return;
+    }
+    _hashedUpTo += data.length;
+    await (_streamingHash ??= BackgroundSha256()).add(data);
+  }
+
+  void _dropStreamingHash() {
+    _streamingHashBroken = true;
+    _streamingHash?.dispose();
+    _streamingHash = null;
+  }
+
+  /// Bytes already in the staging file from an interrupted transfer of the
+  /// same file; writing continues after them instead of starting over.
+  final int resumeFromBytes;
+
   FilePayloadDestination({
-    required this.targetFilePath,
+    required String targetFilePath,
     required this.totalBytes,
-  }) {
+    this.resumeFromBytes = 0,
+  }) : _targetFilePath = targetFilePath {
     if (totalBytes < 0) {
       throw ArgumentError.value(totalBytes, 'totalBytes', 'Cannot be negative');
     }
-    _tmpFile = File('$targetFilePath.vayu.tmp');
+    _tmpFile = File('$targetFilePath$stagingSuffix');
+    // The kept prefix is not hashed here; verification re-reads the file.
+    if (resumeFromBytes > 0) _streamingHashBroken = true;
+  }
+
+  /// Closes the staging file and leaves it on disk for a later resume.
+  /// The destination accepts no more writes afterwards.
+  Future<String> detachKeepingStaging() async {
+    _isAborted = true;
+    _dropStreamingHash();
+    if (_writeQueue != null) {
+      try {
+        await _writeQueue;
+      } catch (_) {}
+    }
+    if (_raf != null) {
+      try {
+        await _raf!.flush();
+        await _raf!.close();
+      } catch (_) {}
+      _raf = null;
+    }
+    return _tmpFile.path;
   }
 
   /// Path of the temporary staging file.
@@ -119,7 +194,14 @@ class FilePayloadDestination implements PayloadDestination {
         if (!_tmpFile.parent.existsSync()) {
           _tmpFile.parent.createSync(recursive: true);
         }
-        _raf = await _tmpFile.open(mode: FileMode.write);
+        if (resumeFromBytes > 0 && _tmpFile.existsSync()) {
+          // Keep the received prefix; drop anything after it (chunks that
+          // arrived out of order are sent again).
+          _raf = await _tmpFile.open(mode: FileMode.append);
+          await _raf!.truncate(resumeFromBytes);
+        } else {
+          _raf = await _tmpFile.open(mode: FileMode.write);
+        }
       } catch (e) {
         throw TransferStorageException(
           '',
@@ -152,6 +234,9 @@ class FilePayloadDestination implements PayloadDestination {
       }
       await _raf!.setPosition(offset);
       await _raf!.writeFrom(data);
+      // Writes wait while hashing is behind, so a slow phone slows the
+      // sender (through later ACKs) instead of queueing copies in memory.
+      await _feedStreamingHash(offset, data);
     } on TransferStorageException {
       rethrow;
     } catch (e) {
@@ -192,6 +277,19 @@ class FilePayloadDestination implements PayloadDestination {
         'Staging file does not exist to compute SHA-256',
       );
     }
+    final streaming = _streamingHash;
+    _streamingHash = null;
+    if (streaming != null &&
+        !_streamingHashBroken &&
+        _hashedUpTo == totalBytes) {
+      try {
+        return await streaming.digest();
+      } catch (_) {
+        // The worker failed; hash the file instead.
+      }
+    } else {
+      streaming?.dispose();
+    }
     try {
       return await sha256OfFile(_tmpFile.path, length: totalBytes);
     } catch (e) {
@@ -208,27 +306,52 @@ class FilePayloadDestination implements PayloadDestination {
       _raf = null;
     }
 
-    try {
-      final destFile = File(targetFilePath);
-      if (destFile.existsSync()) {
-        destFile.deleteSync();
-      }
-      if (_tmpFile.existsSync()) {
-        await _tmpFile.rename(targetFilePath);
-      }
-      _isFinalized = true;
-    } catch (e) {
+    if (!_tmpFile.existsSync()) {
+      // The verified bytes are gone; never report a file that is not there.
       throw TransferStorageException(
         '',
-        'Failed to promote staging file to $targetFilePath: $e',
-        outOfSpace: isOutOfSpaceError(e),
+        'Staging file ${_tmpFile.path} disappeared before it could be saved',
       );
+    }
+    // Never delete or replace an existing file: claim the target name by
+    // creating it exclusively (atomic), then move the staging file onto that
+    // claim. A name taken since reservation moves us to the next free one.
+    for (var n = 0; ; n++) {
+      final candidate = numberedPath(_targetFilePath, n);
+      final claim = File(candidate);
+      try {
+        await claim.create(exclusive: true);
+      } on FileSystemException catch (e) {
+        if (claim.existsSync()) continue;
+        throw TransferStorageException(
+          '',
+          'Could not create $candidate: $e',
+          outOfSpace: isOutOfSpaceError(e),
+        );
+      }
+      try {
+        await _tmpFile.rename(candidate);
+      } catch (e) {
+        // Our own empty claim only; the staging file is left for cleanup.
+        try {
+          await claim.delete();
+        } catch (_) {}
+        throw TransferStorageException(
+          '',
+          'Failed to promote staging file to $candidate: $e',
+          outOfSpace: isOutOfSpaceError(e),
+        );
+      }
+      _targetFilePath = candidate;
+      _isFinalized = true;
+      return;
     }
   }
 
   @override
   Future<void> abortAndCleanup() async {
     _isAborted = true;
+    _dropStreamingHash();
     if (_writeQueue != null) {
       try {
         await _writeQueue;
@@ -249,6 +372,7 @@ class FilePayloadDestination implements PayloadDestination {
 
   @override
   Future<void> close() async {
+    _dropStreamingHash();
     if (_raf != null) {
       try {
         await _raf!.close();

@@ -6,14 +6,16 @@ import 'package:flutter/material.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 import 'package:vayu/core/state/app_container.dart';
-import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/contacts/vayu_card.dart';
+import 'package:vayu/domain/identity/permission_report.dart';
 import 'package:vayu/ui/card/edit_card_page.dart';
+import 'package:vayu/ui/card/received_cards_page.dart';
 import 'package:vayu/ui/card/vayu_card_view.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
+import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
@@ -38,7 +40,7 @@ class MyCardPage extends StatefulWidget {
   State<MyCardPage> createState() => _MyCardPageState();
 }
 
-class _MyCardPageState extends State<MyCardPage> {
+class _MyCardPageState extends State<MyCardPage> with WidgetsBindingObserver {
   StreamSubscription<VayuCard?>? _cardSub;
   _TapState _tap = _TapState.checking;
   bool _serving = false;
@@ -48,6 +50,7 @@ class _MyCardPageState extends State<MyCardPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _cardSub = widget.container.myCardStream.listen((_) {
       if (!mounted) return;
       setState(() {});
@@ -57,7 +60,16 @@ class _MyCardPageState extends State<MyCardPage> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from the NFC settings page: share by tap now.
+    if (state == AppLifecycleState.resumed && _tap != _TapState.ready) {
+      _serve();
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _cardSub?.cancel();
     if (_serving) _nfc.stopSharing();
     super.dispose();
@@ -79,6 +91,11 @@ class _MyCardPageState extends State<MyCardPage> {
         _ => _TapState.noNfc,
       };
     });
+  }
+
+  String _receivedLabel() {
+    final count = widget.container.receivedCards?.all.length ?? 0;
+    return count == 0 ? 'Received cards' : 'Received cards ($count)';
   }
 
   Future<void> _showQr(VayuCard card) {
@@ -203,7 +220,7 @@ class _MyCardPageState extends State<MyCardPage> {
               onAdd: () => EditCardPage.open(context, widget.container),
             ),
             const SizedBox(height: 20),
-            _TapStatus(state: _tap),
+            _TapStatus(state: _tap, container: widget.container),
             const SizedBox(height: 24),
             OutlinedButton.icon(
               onPressed: () => _showQr(card),
@@ -215,6 +232,13 @@ class _MyCardPageState extends State<MyCardPage> {
               onPressed: () => _sendNearby(card),
               icon: const Icon(Icons.send_rounded),
               label: const Text('Send to a nearby phone'),
+            ),
+            const SizedBox(height: 10),
+            TextButton.icon(
+              onPressed: () =>
+                  ReceivedCardsPage.open(context, widget.container),
+              icon: const Icon(Icons.contacts_outlined),
+              label: Text(_receivedLabel()),
             ),
           ],
         ),
@@ -277,8 +301,9 @@ class _NextStep extends StatelessWidget {
 
 class _TapStatus extends StatelessWidget {
   final _TapState state;
+  final AppContainer container;
 
-  const _TapStatus({required this.state});
+  const _TapStatus({required this.state, required this.container});
 
   @override
   Widget build(BuildContext context) {
@@ -287,17 +312,17 @@ class _TapStatus extends StatelessWidget {
       _TapState.ready => (
         Icons.nfc_rounded,
         'Ready to tap',
-        'Hold your phone near another phone. Vayu opens there if installed.',
+        'Hold the backs of the phones together, near the cameras.',
       ),
       _TapState.nfcOff => (
         Icons.nfc_rounded,
         'NFC is off',
-        'Turn on NFC in your phone\'s settings to share by tap.',
+        'Turn it on to share by tap, or show the QR code.',
       ),
       _TapState.noNfc => (
         Icons.qr_code_2_rounded,
         'No tap on this phone',
-        'Use the QR code or send it to a nearby phone.',
+        'Show the QR code or send your card to a nearby phone.',
       ),
       _TapState.checking => (Icons.nfc_rounded, 'Getting ready…', ''),
     };
@@ -328,38 +353,14 @@ class _TapStatus extends StatelessWidget {
               ],
             ),
           ),
+          if (state == _TapState.nfcOff)
+            TextButton(
+              onPressed: () =>
+                  container.platformService.openSettingsPage(SettingsPage.nfc),
+              child: const Text('Turn on'),
+            ),
         ],
       ),
     );
   }
-}
-
-/// Bottom sheet for a card received by tap: preview, then save via the
-/// phone's contacts app (the user confirms there).
-Future<void> showReceivedCardSheet(
-  BuildContext context, {
-  required AppContainer container,
-  required ContactCard card,
-  required Future<void> Function() onSave,
-}) {
-  return showVayuSheet<void>(
-    context: context,
-    builder: (sheetContext) => VayuSheet(
-      title: 'Card received',
-      content: VayuCardView(face: CardFace.fromContact(card)),
-      actions: [
-        FilledButton(
-          onPressed: () async {
-            Navigator.of(sheetContext).pop();
-            await onSave();
-          },
-          child: const Text('Save to contacts'),
-        ),
-        TextButton(
-          onPressed: () => Navigator.of(sheetContext).pop(),
-          child: const Text('Close'),
-        ),
-      ],
-    ),
-  );
 }

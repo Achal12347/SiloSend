@@ -7,8 +7,8 @@ import android.media.MediaScannerConnection
 import android.os.Build
 import android.os.Environment
 import android.os.StatFs
-import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.achyrio.vayu.platform.PermissionGate
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -23,11 +23,13 @@ import java.io.File
  * looked like a failed transfer. The permission is requested the first time a
  * file is accepted, and the hidden folder is used only if the user declines.
  */
-class StorageHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class StorageHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         const val CHANNEL = "com.achyrio.vayu/storage"
         private const val FOLDER_NAME = "Vayu"
-        private const val REQUEST_CODE_STORAGE = 4103
     }
 
     private var channel: MethodChannel? = null
@@ -50,11 +52,13 @@ class StorageHandler(private val activity: Activity) : MethodChannel.MethodCallH
                 if (needsLegacyWritePermission()) {
                     pendingDirectoryResults.add(result)
                     if (pendingDirectoryResults.size == 1) {
-                        ActivityCompat.requestPermissions(
-                            activity,
-                            arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                            REQUEST_CODE_STORAGE,
-                        )
+                        // Granted or not, every caller gets a folder: denial
+                        // falls back to the app's own folder.
+                        permissions.request(PermissionGate.storagePermissions()) {
+                            val waiting = pendingDirectoryResults.toList()
+                            pendingDirectoryResults.clear()
+                            waiting.forEach { resolveDirectory(it) }
+                        }
                     }
                     return
                 }
@@ -101,15 +105,6 @@ class StorageHandler(private val activity: Activity) : MethodChannel.MethodCallH
         Build.VERSION.SDK_INT <= Build.VERSION_CODES.Q &&
             ContextCompat.checkSelfPermission(activity, Manifest.permission.WRITE_EXTERNAL_STORAGE) !=
             PackageManager.PERMISSION_GRANTED
-
-    fun onRequestPermissionsResult(requestCode: Int): Boolean {
-        if (requestCode != REQUEST_CODE_STORAGE) return false
-        val waiting = pendingDirectoryResults.toList()
-        pendingDirectoryResults.clear()
-        // Granted or not, answer every caller: denial falls back to the app folder.
-        waiting.forEach { resolveDirectory(it) }
-        return true
-    }
 
     private fun resolveDirectory(result: MethodChannel.Result) {
         try {

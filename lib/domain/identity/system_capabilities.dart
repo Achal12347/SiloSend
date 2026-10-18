@@ -9,10 +9,7 @@ enum PermissionStatus {
   notRequired,
   unknown;
 
-  bool get isGranted => this == PermissionStatus.granted;
-  bool get isNotRequested => this == PermissionStatus.notRequested;
   bool get isPermanentlyDenied => this == PermissionStatus.permanentlyDenied;
-  bool get isDenied => this == PermissionStatus.denied;
 }
 
 /// Hardware radio state (e.g. Bluetooth).
@@ -138,14 +135,8 @@ class SystemCapabilities {
   /// Whether Local Area Network (LAN) discovery/connection is genuinely ready.
   bool get canUseLan => lanState == NetworkState.lanAvailable;
 
-  /// Whether at least one physical transport (LAN or BLE) can currently operate.
-  bool get hasAnyTransportAvailable => canUseBle || canUseLan;
-
   /// Whether Bluetooth radio hardware exists but is currently powered off.
   bool get isBluetoothOff => bluetoothState == RadioState.disabled;
-
-  /// Whether Bluetooth hardware does not exist on this device.
-  bool get isBluetoothUnsupported => bluetoothState == RadioState.unsupported;
 
   /// Whether Nearby / Bluetooth permissions need to be requested or allowed.
   bool get isNearbyPermissionMissing =>

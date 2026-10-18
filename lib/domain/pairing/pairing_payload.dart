@@ -36,6 +36,15 @@ class PairingPayload {
   final String? wifiSsid;
   final String? wifiPassphrase;
 
+  /// True when [wifiSsid] is a Wi-Fi Direct group rather than a hotspot. Such
+  /// a group also takes plain Wi-Fi clients, so builds that ignore this flag
+  /// still join it the hotspot way.
+  final bool wifiDirect;
+
+  /// The showing phone's address on the shared router, tried when joining
+  /// its Wi-Fi Direct group fails ([lanAddress] is then the group address).
+  final String? fallbackLanAddress;
+
   final int timestamp;
 
   PairingPayload({
@@ -52,6 +61,8 @@ class PairingPayload {
     this.nfcCommitmentHex,
     this.wifiSsid,
     this.wifiPassphrase,
+    this.wifiDirect = false,
+    this.fallbackLanAddress,
     int? timestamp,
   }) : displayName = sanitizeDisplayName(displayName),
        timestamp = timestamp ?? DateTime.now().millisecondsSinceEpoch {
@@ -244,6 +255,8 @@ class PairingPayload {
     if (nfcCommitmentHex != null) 'nfcCommitment': nfcCommitmentHex,
     if (wifiSsid != null) 'wifiSsid': wifiSsid,
     if (wifiPassphrase != null) 'wifiPassphrase': wifiPassphrase,
+    if (wifiDirect) 'wifiDirect': true,
+    if (fallbackLanAddress != null) 'altLan': fallbackLanAddress,
     'timestamp': timestamp,
   };
 
@@ -293,6 +306,8 @@ class PairingPayload {
         nfcCommitmentHex: nfcCommitment,
         wifiSsid: json['wifiSsid'] as String?,
         wifiPassphrase: json['wifiPassphrase'] as String?,
+        wifiDirect: json['wifiDirect'] == true,
+        fallbackLanAddress: json['altLan'] as String?,
         timestamp:
             json['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch,
       );
@@ -331,6 +346,12 @@ class PairingPayload {
     }
     if (wifiPassphrase != null) {
       queryParams['psk'] = wifiPassphrase!;
+    }
+    if (wifiDirect) {
+      queryParams['p2p'] = '1';
+    }
+    if (fallbackLanAddress != null) {
+      queryParams['alt'] = fallbackLanAddress!;
     }
 
     return Uri(scheme: uriScheme, host: uriHost, queryParameters: queryParams);
@@ -405,6 +426,8 @@ class PairingPayload {
         nfcCommitmentHex: nfcCommitment,
         wifiSsid: params['ssid'],
         wifiPassphrase: params['psk'],
+        wifiDirect: params['p2p'] == '1',
+        fallbackLanAddress: params['alt'],
         timestamp: timestamp,
       );
     } on ArgumentError catch (e) {
@@ -531,6 +554,8 @@ class PairingPayload {
     String? nfcCommitmentHex,
     String? wifiSsid,
     String? wifiPassphrase,
+    bool? wifiDirect,
+    String? fallbackLanAddress,
     int? timestamp,
   }) {
     return PairingPayload(
@@ -547,6 +572,8 @@ class PairingPayload {
       nfcCommitmentHex: nfcCommitmentHex ?? this.nfcCommitmentHex,
       wifiSsid: wifiSsid ?? this.wifiSsid,
       wifiPassphrase: wifiPassphrase ?? this.wifiPassphrase,
+      wifiDirect: wifiDirect ?? this.wifiDirect,
+      fallbackLanAddress: fallbackLanAddress ?? this.fallbackLanAddress,
       timestamp: timestamp ?? this.timestamp,
     );
   }
