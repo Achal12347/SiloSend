@@ -18,6 +18,7 @@ class AppConstants {
   static const Set<String> protocolFeatures = {
     featureBatchOffer,
     featureLateHash,
+    featureLinkUpgrade,
   };
 
   /// One batch offer and one consent for several files (packet 0x15/0x16).
@@ -26,6 +27,11 @@ class AppConstants {
   /// Offer first, SHA-256 later (packet 0x17): the receiver is asked at once
   /// instead of after the sender has read the whole file to hash it.
   static const String featureLateHash = 'late-hash-v1';
+
+  /// Moving a session found over Bluetooth onto Wi-Fi Direct (packets
+  /// 0x40/0x41): the group's name and passphrase travel inside the encrypted
+  /// Bluetooth session, then both phones connect over Wi-Fi.
+  static const String featureLinkUpgrade = 'p2p-upgrade-v1';
 
   /// Android minimum supported SDK version (Android 8.0 Oreo).
   static const int androidMinSdkVersion = 26;

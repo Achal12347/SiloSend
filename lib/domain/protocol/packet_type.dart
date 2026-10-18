@@ -13,6 +13,8 @@ enum PacketType {
   transferDigest(0x17),
   chatMessage(0x20),
   chatDeliveryAck(0x21),
+  linkUpgradeRequest(0x40),
+  linkUpgradeResponse(0x41),
   ping(0x30),
   pong(0x31),
   sessionTeardown(0xFF);
