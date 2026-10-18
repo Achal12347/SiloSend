@@ -213,6 +213,12 @@ class FilePayloadDestination implements PayloadDestination {
 
   Future<void>? _writeQueue;
 
+  /// Time spent writing to storage (speed diagnostics).
+  Duration diskWriteTime = Duration.zero;
+
+  /// Time writes waited for the streaming hash (speed diagnostics).
+  Duration hashWaitTime = Duration.zero;
+
   @override
   Future<void> writeChunk(int offset, Uint8List data) async {
     final prev = _writeQueue;
@@ -232,11 +238,15 @@ class FilePayloadDestination implements PayloadDestination {
           'Write range ($offset + ${data.length}) exceeds totalBytes ($totalBytes)',
         );
       }
+      final clock = Stopwatch()..start();
       await _raf!.setPosition(offset);
       await _raf!.writeFrom(data);
+      diskWriteTime += clock.elapsed;
+      clock.reset();
       // Writes wait while hashing is behind, so a slow phone slows the
       // sender (through later ACKs) instead of queueing copies in memory.
       await _feedStreamingHash(offset, data);
+      hashWaitTime += clock.elapsed;
     } on TransferStorageException {
       rethrow;
     } catch (e) {

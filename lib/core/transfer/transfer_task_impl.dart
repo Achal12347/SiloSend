@@ -8,11 +8,13 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
+import 'package:vayu/core/security/crypto_service.dart' show AeadClock;
 import 'package:vayu/core/transfer/resumable_transfers.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/protocol/packet_type.dart';
 import 'package:vayu/domain/protocol/vayu_packet.dart';
+import 'package:vayu/domain/transfer/batch_payloads.dart';
 import 'package:vayu/domain/transfer/payload_destination.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
@@ -144,6 +146,8 @@ class OutboundTransferTask implements TransferTask {
   final Stopwatch _elapsed = Stopwatch();
   Duration _readTime = Duration.zero;
   Duration _sendTime = Duration.zero;
+  Duration _crcTime = Duration.zero;
+  int _aeadMicrosAtStart = 0;
   int _retransmits = 0;
   int _acksReceived = 0;
   bool _statsReported = false;
@@ -206,6 +210,7 @@ class OutboundTransferTask implements TransferTask {
     _status = TransferStatus.transferring;
     _transferStartTime = DateTime.now();
     _elapsed.start();
+    _aeadMicrosAtStart = AeadClock.micros;
     _lastSampleTime = DateTime.now();
 
     _emitProgress();
@@ -353,12 +358,14 @@ class OutboundTransferTask implements TransferTask {
     }
     if (_status != TransferStatus.transferring || _isDisposed) return;
 
+    final crcClock = Stopwatch()..start();
     final chunkPayload = TransferChunkPayload.create(
       transferId: _transferIdBytes,
       chunkIndex: chunkIdx,
       chunkOffset: offset,
       chunkData: chunkBytes,
     );
+    _crcTime += crcClock.elapsed;
     _inFlightChunks[chunkIdx] = chunkPayload;
     while (_sendsInProgress >= sendPipeline) {
       await (_sendSlotFreed ??= Completer<void>()).future;
@@ -795,6 +802,11 @@ class OutboundTransferTask implements TransferTask {
         elapsed: _elapsed.elapsed,
         ioTime: _readTime,
         sendTime: _sendTime,
+        crcTime: _crcTime,
+        cryptoTime: Duration(
+          microseconds: AeadClock.micros - _aeadMicrosAtStart,
+        ),
+        batchId: BatchFileMarker.tryDecode(metadata.extraMetadata)?.batchIdHex,
         retransmits: _retransmits,
         acks: _acksReceived,
         succeeded: succeeded,
@@ -1039,6 +1051,8 @@ class InboundTransferTask implements TransferTask {
   final void Function(TransferStats stats)? onStats;
   final Stopwatch _elapsed = Stopwatch()..start();
   Duration _writeTime = Duration.zero;
+  Duration _crcTime = Duration.zero;
+  final int _aeadMicrosAtStart = AeadClock.micros;
   int _acksSent = 0;
 
   /// The sender's SHA-256: from the offer, or from a later digest packet when
@@ -1116,7 +1130,10 @@ class InboundTransferTask implements TransferTask {
     }
 
     // 1. Verify CRC32
-    if (!chunk.verifyCrc()) {
+    final crcClock = Stopwatch()..start();
+    final crcOk = chunk.verifyCrc();
+    _crcTime += crcClock.elapsed;
+    if (!crcOk) {
       AppLogger.warning(
         'InboundTransferTask',
         'Chunk ${chunk.chunkIndex} CRC32 mismatch! Sending NACK...',
@@ -1313,6 +1330,20 @@ class InboundTransferTask implements TransferTask {
           elapsed: _elapsed.elapsed,
           ioTime: _writeTime,
           verifyTime: verifyClock.elapsed,
+          crcTime: _crcTime,
+          cryptoTime: Duration(
+            microseconds: AeadClock.micros - _aeadMicrosAtStart,
+          ),
+          diskWriteTime: switch (destination) {
+            final FilePayloadDestination file => file.diskWriteTime,
+            _ => Duration.zero,
+          },
+          hashWaitTime: switch (destination) {
+            final FilePayloadDestination file => file.hashWaitTime,
+            _ => Duration.zero,
+          },
+          batchId: BatchFileMarker.tryDecode(metadata.extraMetadata)
+              ?.batchIdHex,
           acks: _acksSent,
           succeeded: succeeded,
         ),

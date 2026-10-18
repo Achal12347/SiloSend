@@ -7,6 +7,7 @@ import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/battery/battery_snapshot.dart';
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/diagnostics/phone_speed_test.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
@@ -33,6 +34,9 @@ class DiagnosticsPage extends StatefulWidget {
 class _DiagnosticsPageState extends State<DiagnosticsPage> {
   BatterySnapshot _batterySnapshot = BatterySnapshot.unknown();
   WifiLinkInfo? _wifiLink;
+  String? _thermal;
+  List<SpeedTestResult>? _speedTest;
+  bool _speedTestRunning = false;
 
   @override
   void initState() {
@@ -41,10 +45,45 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     _refreshWifiLink();
   }
 
-  // The router link usually sets the ceiling for transfers over shared Wi-Fi.
+  // The router link usually sets the ceiling for transfers over shared Wi-Fi;
+  // a hot phone slows its CPU down.
   Future<void> _refreshWifiLink() async {
-    final link = await widget.container.platformService.wifiLinkInfo();
-    if (mounted) setState(() => _wifiLink = link);
+    final platform = widget.container.platformService;
+    final link = await platform.wifiLinkInfo();
+    final thermal = await platform.thermalStatus();
+    if (mounted) {
+      setState(() {
+        _wifiLink = link;
+        _thermal = thermal;
+      });
+    }
+  }
+
+  Future<void> _runSpeedTest() async {
+    setState(() => _speedTestRunning = true);
+    try {
+      final c = widget.container;
+      final directory = await c.storageService.getDownloadsDirectory();
+      final free = await c.storageService.getFreeBytes(directory);
+      final results = await PhoneSpeedTest(
+        directory: directory,
+        aead: c.cryptoService.aead,
+        nativeHashFile: Platform.isAndroid
+            ? PhoneSpeedTest.androidHashFile()
+            : null,
+      ).run(freeBytes: free);
+      if (mounted) setState(() => _speedTest = results);
+    } catch (e) {
+      if (mounted) {
+        showVayuNotice(
+          context,
+          'The speed test stopped: $e',
+          tone: VayuNoticeTone.problem,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _speedTestRunning = false);
+    }
   }
 
   Future<void> _refreshBattery() async {
@@ -316,11 +355,53 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                       'Wi-Fi now',
                       _wifiLink?.summary() ?? 'Not connected to Wi-Fi',
                     ),
+                    if (_thermal != null)
+                      _buildRow(
+                        'Phone temperature',
+                        _thermal!,
+                        isOk: _thermal == 'none' || _thermal == 'light',
+                      ),
                     if (container.transferStatsLog?.recent.isEmpty ?? true)
                       _buildRow('Measurements', 'No finished transfers yet')
-                    else
+                    else ...[
+                      for (final batch in container.transferStatsLog!.batches())
+                        _buildBatchEntry(theme, batch),
                       for (final stats in container.transferStatsLog!.recent)
                         _buildSpeedEntry(theme, stats),
+                    ],
+                  ]),
+                  const SizedBox(height: 16),
+
+                  _buildSectionHeader(theme, 'Phone speed test'),
+                  _buildCard(theme, [
+                    Text(
+                      'Times each step of receiving a file on this phone: '
+                      'saving, checking and decrypting. Writes a 256 MB test '
+                      'file to the receive folder and deletes it.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    for (final result
+                        in _speedTest ?? const <SpeedTestResult>[])
+                      _buildRow(
+                        result.name,
+                        result.megabytesPerSecond == null
+                            ? 'Not measured'
+                            : '${result.megabytesPerSecond!.toStringAsFixed(1)} MB/s',
+                        isOk: result.megabytesPerSecond == null ? false : null,
+                      ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.tonal(
+                        onPressed: _speedTestRunning ? null : _runSpeedTest,
+                        child: Text(
+                          _speedTestRunning
+                              ? 'Testing…'
+                              : _speedTest == null
+                              ? 'Run speed test'
+                              : 'Run again',
+                        ),
+                      ),
+                    ),
                   ]),
                   const SizedBox(height: 24),
                 ],
@@ -329,6 +410,23 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
           );
         },
       ),
+    );
+  }
+
+  Widget _buildBatchEntry(ThemeData theme, BatchStats batch) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildRow(
+          '${batch.outbound ? 'Sent' : 'Received'} ${batch.files} files',
+          '${batch.megabytesPerSecond.toStringAsFixed(1)} MB/s overall',
+          isOk: batch.allSucceeded ? null : false,
+        ),
+        SelectableText(
+          batch.summary(),
+          style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+        ),
+      ],
     );
   }
 
@@ -457,6 +555,22 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     );
     buffer.writeln('- Operational Phase: ${orch.phase.name}');
     buffer.writeln('- Explicit Error: ${orch.explicitError.name}');
+    buffer.writeln('- Wi-Fi now: ${_wifiLink?.summary() ?? 'not connected'}');
+    buffer.writeln('- Thermal now: ${_thermal ?? 'not reported'}');
+    final speedTest = _speedTest;
+    if (speedTest != null) {
+      buffer.writeln();
+      buffer.writeln('## Phone speed test');
+      for (final result in speedTest) {
+        buffer.writeln('- ${result.summary()}');
+      }
+    }
+    final log = container.transferStatsLog;
+    if (log != null && log.recent.isNotEmpty) {
+      buffer.writeln();
+      buffer.writeln('## Transfers (newest first, no file names)');
+      buffer.writeln(log.report());
+    }
 
     Clipboard.setData(ClipboardData(text: buffer.toString()));
     showVayuNotice(context, 'Copied', tone: VayuNoticeTone.success);

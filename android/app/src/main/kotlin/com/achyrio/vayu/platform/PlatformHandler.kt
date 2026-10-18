@@ -163,6 +163,7 @@ class PlatformHandler(
                 result.success(true)
             }
             "wifiLinkInfo" -> result.success(wifiLinkInfo())
+            "thermalStatus" -> result.success(thermalStatus())
             else -> result.notImplemented()
         }
     }
@@ -187,6 +188,25 @@ class PlatformHandler(
             )
         } catch (e: Exception) {
             null
+        }
+    }
+
+    /**
+     * How hot Android considers the phone (Android 10+), for the speed
+     * diagnostics: from "moderate" on, the system slows the CPU down.
+     */
+    private fun thermalStatus(): String? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
+        val power = activity.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return null
+        return when (power.currentThermalStatus) {
+            PowerManager.THERMAL_STATUS_NONE -> "none"
+            PowerManager.THERMAL_STATUS_LIGHT -> "light"
+            PowerManager.THERMAL_STATUS_MODERATE -> "moderate"
+            PowerManager.THERMAL_STATUS_SEVERE -> "severe"
+            PowerManager.THERMAL_STATUS_CRITICAL -> "critical"
+            PowerManager.THERMAL_STATUS_EMERGENCY -> "emergency"
+            PowerManager.THERMAL_STATUS_SHUTDOWN -> "shutdown"
+            else -> null
         }
     }
 

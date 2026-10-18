@@ -66,8 +66,10 @@ class Blocker {
   final PermissionGroup? group;
   final PermissionState? state;
 
-  const Blocker.permission(PermissionGroup this.group, PermissionState this.state)
-    : kind = BlockerKind.permission;
+  const Blocker.permission(
+    PermissionGroup this.group,
+    PermissionState this.state,
+  ) : kind = BlockerKind.permission;
 
   const Blocker.switchOff(this.kind) : group = null, state = null;
 
@@ -77,8 +79,9 @@ class Blocker {
       state != PermissionState.permanentlyDenied;
 
   @override
-  String toString() =>
-      kind == BlockerKind.permission ? 'Blocker(${group!.name}: ${state!.name})' : 'Blocker(${kind.name})';
+  String toString() => kind == BlockerKind.permission
+      ? 'Blocker(${group!.name}: ${state!.name})'
+      : 'Blocker(${kind.name})';
 }
 
 /// Single source of permission and system-switch state for every screen.
@@ -202,7 +205,8 @@ class PermissionManager {
     final sdk = report.sdkVersion ?? 0;
     // Android 12+ refuses the dialog without the Nearby devices permission.
     final canAsk =
-        sdk < 31 || report.statusOf(PermissionGroup.nearby) == PermissionStatus.granted;
+        sdk < 31 ||
+        report.statusOf(PermissionGroup.nearby) == PermissionStatus.granted;
     if (canAsk && await _platform.requestEnableBluetooth()) {
       await refresh();
       await _notifyChanged();
@@ -213,16 +217,17 @@ class PermissionManager {
   }
 
   /// The system page that can fix [blocker].
-  static SettingsPage settingsPageFor(Blocker blocker) => switch (blocker.kind) {
-    BlockerKind.permission =>
-      blocker.group == PermissionGroup.notifications
-          ? SettingsPage.notifications
-          : SettingsPage.app,
-    BlockerKind.bluetoothOff => SettingsPage.bluetooth,
-    BlockerKind.locationOff => SettingsPage.location,
-    BlockerKind.wifiOff => SettingsPage.wifi,
-    BlockerKind.unsupported => SettingsPage.app,
-  };
+  static SettingsPage settingsPageFor(Blocker blocker) =>
+      switch (blocker.kind) {
+        BlockerKind.permission =>
+          blocker.group == PermissionGroup.notifications
+              ? SettingsPage.notifications
+              : SettingsPage.app,
+        BlockerKind.bluetoothOff => SettingsPage.bluetooth,
+        BlockerKind.locationOff => SettingsPage.location,
+        BlockerKind.wifiOff => SettingsPage.wifi,
+        BlockerKind.unsupported => SettingsPage.app,
+      };
 
   /// Opens the page that can fix [blocker]. False if no page opened.
   Future<bool> openSettingsFor(Blocker blocker) =>

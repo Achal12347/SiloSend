@@ -73,6 +73,10 @@ abstract class PlatformService {
   /// diagnostics). Null when not on Wi-Fi or unknown.
   Future<WifiLinkInfo?> wifiLinkInfo() async => null;
 
+  /// Android's thermal state ("none" ... "shutdown", Android 10+). Null when
+  /// the platform does not report it.
+  Future<String?> thermalStatus() async => null;
+
   /// Backward-compatible boolean permission requester.
   Future<bool> requestPermissions();
 }

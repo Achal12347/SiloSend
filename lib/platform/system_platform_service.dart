@@ -277,6 +277,18 @@ class SystemPlatformService implements PlatformService {
   }
 
   @override
+  Future<String?> thermalStatus() async {
+    if (!_isActualAndroid) return null;
+    try {
+      return await _channel
+          .invokeMethod<String>('thermalStatus')
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<bool> openFile(String filePath, {String? mimeType}) async {
     if (!_isActualAndroid) return false;
     try {

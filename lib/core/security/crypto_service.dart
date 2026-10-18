@@ -370,12 +370,17 @@ class CryptoService {
       throw ArgumentError.value(aad.length, 'aad', 'Must be exactly 76 bytes');
     }
 
-    return aead.encrypt(
-      plaintext: plaintext,
-      key: secretKeyBytes,
-      nonce: nonce,
-      aad: aad,
-    );
+    final clock = Stopwatch()..start();
+    try {
+      return await aead.encrypt(
+        plaintext: plaintext,
+        key: secretKeyBytes,
+        nonce: nonce,
+        aad: aad,
+      );
+    } finally {
+      AeadClock.micros += clock.elapsedMicroseconds;
+    }
   }
 
   /// Decrypts [ciphertext] and authenticates [authTag] using AES-256-GCM AEAD with exact 76-byte [aad].
@@ -403,13 +408,18 @@ class CryptoService {
       throw ArgumentError.value(aad.length, 'aad', 'Must be exactly 76 bytes');
     }
 
-    return aead.decrypt(
-      ciphertext: ciphertext,
-      authTag: authTag,
-      key: secretKeyBytes,
-      nonce: nonce,
-      aad: aad,
-    );
+    final clock = Stopwatch()..start();
+    try {
+      return await aead.decrypt(
+        ciphertext: ciphertext,
+        authTag: authTag,
+        key: secretKeyBytes,
+        nonce: nonce,
+        aad: aad,
+      );
+    } finally {
+      AeadClock.micros += clock.elapsedMicroseconds;
+    }
   }
 
   /// Constructs the canonical 76-byte AEAD Associated Authenticated Data (AAD).
@@ -498,4 +508,10 @@ class DerivedSessionKeys {
     CryptoService.secureWipe(confirmKey);
     CryptoService.secureWipe(sasKey);
   }
+}
+
+/// Total time this app has spent in AES-GCM calls, for speed diagnostics.
+/// Transfers read it at start and end; the difference is their crypto time.
+abstract final class AeadClock {
+  static int micros = 0;
 }
