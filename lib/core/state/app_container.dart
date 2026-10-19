@@ -13,6 +13,9 @@ import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/connection/link_upgrade_service.dart';
 import 'package:vayu/core/host/host_service.dart';
 import 'package:vayu/domain/host/host_payloads.dart';
+import 'package:vayu/domain/mesh/relay_payloads.dart';
+import 'package:vayu/domain/security/trust_level.dart';
+import 'package:vayu/core/mesh/relay_service.dart';
 import 'package:vayu/domain/chat/chat_models.dart';
 import 'package:vayu/domain/transfer/batch_payloads.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
@@ -137,6 +140,11 @@ class AppContainer {
   LinkUpgradeService? _linkUpgradeService;
   ChatService? _chatService;
   HostService? _hostService;
+
+  RelayService? _relayService;
+
+  /// Phase 12 mesh (null before initialization or where unavailable).
+  RelayService? get relayService => _relayService;
 
   /// Keeps every session's idle countdown fed (see [_trackSessionActivity]).
   final List<StreamSubscription<Object?>> _activitySubs = [];
@@ -605,6 +613,182 @@ class AppContainer {
     _hostService?.onActivity = (s) => policy.recordActivity(s.sessionId);
   }
 
+  StreamSubscription<SecureSessionImpl>? _meshTrustSub;
+
+  void _setUpMesh() {
+    final engine = _transferEngine;
+    final selector = _transportSelector;
+    if (engine is! TransferEngineImpl ||
+        selector is! SmartTransportSelectorImpl) {
+      return;
+    }
+    final relay = RelayService(
+      localDeviceId: () => identity?.idHex ?? '',
+      directSessionFor: _directSessionFor,
+      connectDirect: (id) async {
+        final peer = _peerById(id);
+        if (peer == null) {
+          throw const MeshUnavailableException('Not nearby');
+        }
+        return selector.connectDirectOnly(
+          peer,
+          request: TransportSelectionRequest(targetPeer: peer),
+        );
+      },
+      relayCandidates: () => {
+        for (final s
+            in _secureSessionManager?.activeSessions ??
+                const <SecureSessionImpl>[])
+          if (s.isEstablished &&
+              s.connectionSession.connection.type != TransportType.relay &&
+              s.connectionSession.info.remoteFeatures.contains(
+                AppConstants.featureMesh,
+              ))
+            s.remoteDeviceId.toLowerCase(),
+        for (final p in discoveredPeers)
+          if (p.isRelaying) p.deviceId.toLowerCase(),
+      }.toList(),
+      reachable: () => {
+        for (final s
+            in _secureSessionManager?.activeSessions ??
+                const <SecureSessionImpl>[])
+          if (s.isEstablished &&
+              s.connectionSession.connection.type != TransportType.relay)
+            s.remoteDeviceId.toLowerCase(),
+        for (final p in discoveredPeers) p.deviceId.toLowerCase(),
+      }.toList(),
+      relayingAllowed: _relayingAllowed,
+      isKnown: _identityPinned,
+      nameOf: (session) => session is SecureSessionImpl
+          ? session.connectionSession.info.remoteDisplayName
+          : null,
+    );
+    relay.attach(
+      packets: engine.meshPackets,
+      sessionClosed: _connectionManager!.onSessionClosed,
+    );
+    _connectionManager!.registerIncomingStream(relay.incomingConnections);
+    _relayService = relay;
+    selector.meshFallback = (peer) => _connectThroughMesh(peer.deviceId);
+    // A relayed session must be with a phone whose key was pinned when the
+    // two met directly; anything else could be a relay impersonating it.
+    _meshTrustSub?.cancel();
+    _meshTrustSub = _secureSessionManager!.secureSessions.listen((s) {
+      if (s.connectionSession.connection.type == TransportType.relay &&
+          !_relayTrusted(s.trustLevel)) {
+        AppLogger.warning(
+          'AppContainer',
+          'Closing a relayed session whose identity is not pinned',
+        );
+        s.connectionSession.close(reason: 'relay_identity_not_pinned');
+      }
+    });
+  }
+
+  static bool _relayTrusted(TrustLevel level) =>
+      level == TrustLevel.trustedTOFU ||
+      level == TrustLevel.sasVerified ||
+      level == TrustLevel.nfcAuthenticated;
+
+  /// The identity key of [deviceId] is on record (met directly before) and
+  /// not in conflict.
+  bool _identityPinned(String deviceId) {
+    final level = _peerTrustStore?.getTrustLevel(
+      deviceId.replaceAll('-', '').toLowerCase(),
+    );
+    return level != null && level != TrustLevel.keyConflict;
+  }
+
+  SecureSessionImpl? _directSessionFor(String deviceId) {
+    final id = deviceId.replaceAll('-', '').toLowerCase();
+    for (final s
+        in _secureSessionManager?.activeSessions ??
+            const <SecureSessionImpl>[]) {
+      if (s.isEstablished &&
+          s.remoteDeviceId.replaceAll('-', '').toLowerCase() == id &&
+          s.connectionSession.connection.type != TransportType.relay) {
+        return s;
+      }
+    }
+    return null;
+  }
+
+  DiscoveredPeer? _peerById(String deviceId) {
+    final id = deviceId.toLowerCase();
+    return discoveredPeers
+            .where((p) => p.deviceId.toLowerCase() == id)
+            .firstOrNull ??
+        _fileSharingCoordinator?.getKnownPeer(deviceId);
+  }
+
+  /// Relaying for others: the user's setting, and never on Battery Saver or
+  /// below 20% while not charging.
+  Future<bool> _relayingAllowed() async {
+    if (!_userSettings.relayEnabled) return false;
+    final snapshot =
+        await _batteryProvider?.getBatterySnapshot() ??
+        BatterySnapshot.unknown();
+    if (_shouldBatterySaverBeActive(_userSettings.batterySaverMode, snapshot)) {
+      return false;
+    }
+    final level = snapshot.batteryLevel;
+    return snapshot.isCharging == true || level == null || level >= 20;
+  }
+
+  /// Turns relaying for nearby phones on or off (and says so in the beacon).
+  Future<void> setRelayEnabled(bool enabled) async {
+    _userSettings = _userSettings.copyWith(relayEnabled: enabled);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+    try {
+      if (discoveryCoordinator.status.isActive) {
+        await discoveryCoordinator.stopAdvertising();
+        await startDiscoveryAndAdvertising();
+      }
+    } catch (e) {
+      AppLogger.warning('AppContainer', 'Updating the relay beacon failed: $e');
+    }
+  }
+
+  /// An end-to-end session with [deviceId] through other phones: an open
+  /// relayed session is reused; otherwise a circuit is opened and the usual
+  /// handshake and authenticated key exchange run over it.
+  Future<SecureSession> _connectThroughMesh(String deviceId) async {
+    final relay = _relayService;
+    if (relay == null) {
+      throw const MeshUnavailableException('Mesh unavailable');
+    }
+    final live = _secureSessionManager?.getSessionForPeer(deviceId);
+    if (live != null && live.isEstablished) return live;
+    final connection = await relay.open(deviceId);
+    try {
+      final session = await _connectionManager!.initiateHandshake(
+        connection,
+        targetDeviceId: deviceId.replaceAll('-', '').toLowerCase(),
+      );
+      final secure = await _secureSessionManager!.secureOutboundConnection(
+        session,
+      );
+      if (!_relayTrusted(secure.trustLevel)) {
+        await session.close(reason: 'relay_identity_not_pinned');
+        throw const MeshUnavailableException(
+          "That phone's identity could not be confirmed through the relay",
+          refusal: RelayRefusal.notKnown,
+        );
+      }
+      AppLogger.info(
+        'AppContainer',
+        'Reached a phone ${connection.remoteAddress}',
+      );
+      return secure;
+    } catch (e) {
+      await connection.close(reason: 'mesh_connect_failed');
+      rethrow;
+    }
+  }
+
   /// Opens a session for a chat with [deviceId]: a phone in the nearby list
   /// or one met through a code, a tap or an earlier transfer.
   Future<SecureSession> _connectForChat(String deviceId) async {
@@ -615,6 +799,13 @@ class AppContainer {
             .firstOrNull ??
         _fileSharingCoordinator?.getKnownPeer(deviceId);
     if (peer == null) {
+      if (_relayService != null && _identityPinned(deviceId)) {
+        try {
+          return await _connectThroughMesh(deviceId);
+        } on MeshUnavailableException {
+          // Reported as not nearby, as before.
+        }
+      }
       throw const ChatUnavailableException(
         'That phone is not nearby right now',
       );
@@ -1141,6 +1332,9 @@ class AppContainer {
       }
       _trackSessionActivity();
 
+      // 12d. Mesh: phones reached through other phones (Phase 12)
+      _setUpMesh();
+
       // 13. Initialize Central Application Orchestrator (Track C: U1–U8)
       _orchestrator = AppOrchestrator(
         capabilityCoordinator: _capabilityCoordinator!,
@@ -1378,6 +1572,7 @@ class AppContainer {
       protocolVersion: id.protocolVersion,
       hosting: _hostService?.isHosting ?? false,
       hostingPrivate: _hostService?.access == HostAccess.private,
+      relaying: _userSettings.relayEnabled,
     );
 
     if (canLan && Platform.isAndroid) {
@@ -1441,6 +1636,10 @@ class AppContainer {
       sub.cancel();
     }
     _activitySubs.clear();
+    _meshTrustSub?.cancel();
+    _meshTrustSub = null;
+    _relayService?.dispose();
+    _relayService = null;
     _linkUpgradeService?.dispose();
     _linkUpgradeService = null;
     _chatService?.dispose();
@@ -1700,10 +1899,16 @@ class _ChatFiles implements ChatFileTransport {
         app.discoveredPeers
             .where((p) => p.deviceId.toLowerCase() == id)
             .firstOrNull ??
-        _sharing.getKnownPeer(peerDeviceId);
-    if (peer == null) {
-      throw const ChatUnavailableException('That phone is not nearby now');
-    }
+        _sharing.getKnownPeer(peerDeviceId) ??
+        // Not nearby: no direct route, so the selector tries the mesh.
+        DiscoveredPeer(
+          deviceId: peerDeviceId,
+          displayName: 'Phone',
+          transportType: TransportType.relay,
+          availableTransports: const {},
+          rssi: 0,
+          lastSeen: DateTime.now(),
+        );
     await _sharing.sendFilesToPeer(
       peer: peer,
       documents: documents,

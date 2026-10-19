@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:vayu/core/chat/chat_service.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/chat/chat_models.dart';
 import 'package:vayu/domain/chat/chat_payloads.dart';
@@ -76,6 +77,19 @@ class _ConversationPageState extends State<ConversationPage>
     _chat.setVisible(widget.peerDeviceId, false);
     _input.dispose();
     super.dispose();
+  }
+
+  /// "Through Bo" while the chat runs through another phone (mesh).
+  String? _relayedVia() {
+    final session = widget.container.secureSessionManager.getSessionForPeer(
+      widget.peerDeviceId,
+    );
+    final connection = session?.connectionSession.connection;
+    if (connection == null || connection.type != TransportType.relay) {
+      return null;
+    }
+    final via = connection.remoteAddress?.replaceFirst('via ', '');
+    return via == null ? 'Through another phone' : 'Through $via';
   }
 
   DiscoveredPeer? get _nearbyPeer {
@@ -245,7 +259,7 @@ class _ConversationPageState extends State<ConversationPage>
                         style: theme.textTheme.titleMedium,
                       ),
                       Text(
-                        nearby ? 'Nearby' : 'Not nearby',
+                        nearby ? 'Nearby' : _relayedVia() ?? 'Not nearby',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),

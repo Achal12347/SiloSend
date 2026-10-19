@@ -69,6 +69,13 @@ class TransferEngineImpl implements TransferEngine {
   Stream<({SecureSession session, VayuPacket packet})> get hostPackets =>
       _hostPackets.stream;
 
+  final StreamController<({SecureSession session, VayuPacket packet})>
+  _meshPackets = StreamController.broadcast();
+
+  /// Mesh relay packets (0x60-0x65) of any session.
+  Stream<({SecureSession session, VayuPacket packet})> get meshPackets =>
+      _meshPackets.stream;
+
   final StreamController<IncomingTransferRequest> _incomingRequestsController =
       StreamController<IncomingTransferRequest>.broadcast();
   StreamSubscription<SecureSession>? _newSessionSubscription;
@@ -135,7 +142,10 @@ class TransferEngineImpl implements TransferEngine {
   @override
   int chunkSizeFor(String targetDeviceId) {
     final transport = _transportOf(targetDeviceId);
-    return transport == null || transport == TransportType.ble
+    // A relayed link may cross Bluetooth hops: sized like Bluetooth.
+    return transport == null ||
+            transport == TransportType.ble ||
+            transport == TransportType.relay
         ? bleChunkSize
         : wifiChunkSize;
   }
@@ -143,7 +153,11 @@ class TransferEngineImpl implements TransferEngine {
   /// Sender window (chunks in flight) for [chunkSize] on this peer's link.
   int _windowFor(String targetDeviceId, int chunkSize) {
     final transport = _transportOf(targetDeviceId);
-    if (transport == null || transport == TransportType.ble) return 8;
+    if (transport == null ||
+        transport == TransportType.ble ||
+        transport == TransportType.relay) {
+      return 8;
+    }
     return (wifiInFlightBytes ~/ max(1, chunkSize)).clamp(4, 32);
   }
 
@@ -393,6 +407,17 @@ class TransferEngineImpl implements TransferEngine {
       case PacketType.chatFileAnswer:
         if (!_chatPackets.isClosed) {
           _chatPackets.add((session: session, packet: packet));
+        }
+        break;
+
+      case PacketType.relayOpen:
+      case PacketType.relayOpened:
+      case PacketType.relayData:
+      case PacketType.relayClose:
+      case PacketType.reachQuery:
+      case PacketType.reachAnswer:
+        if (!_meshPackets.isClosed) {
+          _meshPackets.add((session: session, packet: packet));
         }
         break;
 
@@ -886,6 +911,7 @@ class TransferEngineImpl implements TransferEngine {
     }
     _sessionSubscriptions.clear();
     await _linkUpgradePackets.close();
+    await _meshPackets.close();
     await _chatPackets.close();
     await _hostPackets.close();
 

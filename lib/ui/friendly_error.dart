@@ -1,3 +1,6 @@
+import 'package:vayu/core/mesh/relay_service.dart';
+import 'package:vayu/domain/mesh/relay_payloads.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -78,6 +81,17 @@ String friendlyError(Object error, {String? peerName}) {
   }
   if (error is PermissionDeniedError) {
     return 'Vayu needs permission for that. You can allow it in Settings.';
+  }
+  if (error is MeshUnavailableException) {
+    return switch (error.refusal) {
+      RelayRefusal.notKnown =>
+        "$other can't be reached through other phones until you meet once directly.",
+      RelayRefusal.off =>
+        "$other isn't nearby, and no phone in between relays right now.",
+      RelayRefusal.busy => "The phone in between is busy. Try again soon.",
+      RelayRefusal.tooFar => '$other is too many phones away.',
+      _ => "$other isn't nearby, and no nearby phone can reach it.",
+    };
   }
   if (error is PairingException) {
     return error.message;
