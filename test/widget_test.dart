@@ -56,7 +56,8 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Nearby devices'), findsOneWidget);
-      expect(find.text('Search'), findsOneWidget);
+      // Search moved from the section header into the paused state.
+      expect(find.text('Start searching'), findsOneWidget);
 
       // No live sessions: the connections card stays hidden instead of
       // showing protocol vocabulary.
@@ -80,8 +81,8 @@ void main() {
       // Peer row with real reachability, a send action, and connect in its menu
       expect(find.text('Remote-Pixel'), findsOneWidget);
       expect(find.text('New device'), findsOneWidget);
-      // The peer row has its own Send.
-      expect(find.text('Send'), findsWidgets);
+      // The peer row opens a chat with that phone.
+      expect(find.byTooltip('Chat with Remote-Pixel'), findsOneWidget);
 
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 600));

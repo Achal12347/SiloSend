@@ -7,7 +7,15 @@ import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/connection/ble_connection_server.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/connection_session.dart';
+import 'package:vayu/core/chat/chat_service.dart';
+import 'package:vayu/core/chat/chat_store.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/connection/link_upgrade_service.dart';
+import 'package:vayu/core/host/host_service.dart';
+import 'package:vayu/domain/host/host_payloads.dart';
+import 'package:vayu/domain/chat/chat_models.dart';
+import 'package:vayu/domain/transfer/batch_payloads.dart';
+import 'package:vayu/core/transfer/transfer_batch.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
@@ -35,6 +43,7 @@ import 'package:vayu/core/pairing/wifi_direct_service.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
 import 'package:vayu/platform/android_nfc_adapter.dart';
 import 'package:vayu/platform/contact_picker.dart';
+import 'package:vayu/platform/android_local_data_sealer.dart';
 import 'package:vayu/platform/android_secure_key_store.dart';
 import 'package:vayu/core/security/peer_trust_store.dart';
 import 'package:vayu/core/security/secure_key_store.dart';
@@ -97,6 +106,7 @@ class AppContainer {
   final FileSharingCoordinator? _injectedFileSharingCoordinator;
   final CapabilityCoordinator? _injectedCapabilityCoordinator;
   final WifiDirectService? _injectedWifiDirectService;
+  final ChatStorage? _injectedChatStorage;
 
   DiscoveryCoordinator? _discoveryCoordinator;
   CapabilityCoordinator? _capabilityCoordinator;
@@ -125,6 +135,11 @@ class AppContainer {
   LocalHotspotService? _hotspotService;
   WifiDirectService? _wifiDirectService;
   LinkUpgradeService? _linkUpgradeService;
+  ChatService? _chatService;
+  HostService? _hostService;
+
+  /// Keeps every session's idle countdown fed (see [_trackSessionActivity]).
+  final List<StreamSubscription<Object?>> _activitySubs = [];
 
   /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
   bool _wifiDirectSupported = false;
@@ -162,6 +177,7 @@ class AppContainer {
     FileSharingCoordinator? fileSharingCoordinator,
     CapabilityCoordinator? capabilityCoordinator,
     WifiDirectService? wifiDirectService,
+    ChatStorage? chatStorage,
   }) : settingsStorage = settingsStorage ?? InMemorySettingsStorage(),
        _injectedDiscoveryCoordinator = discoveryCoordinator,
        _injectedConnectionManager = connectionManager,
@@ -180,7 +196,8 @@ class AppContainer {
        _injectedSessionLifecyclePolicy = sessionLifecyclePolicy,
        _injectedFileSharingCoordinator = fileSharingCoordinator,
        _injectedCapabilityCoordinator = capabilityCoordinator,
-       _injectedWifiDirectService = wifiDirectService;
+       _injectedWifiDirectService = wifiDirectService,
+       _injectedChatStorage = chatStorage;
 
   /// Factory producing a standard production container.
   factory AppContainer.standard({
@@ -206,6 +223,7 @@ class AppContainer {
     FileSharingCoordinator? fileSharingCoordinator,
     CapabilityCoordinator? capabilityCoordinator,
     WifiDirectService? wifiDirectService,
+    ChatStorage? chatStorage,
   }) {
     final effectiveStorage = storage ?? _createDefaultFileStorage();
     final effectiveSettings =
@@ -237,6 +255,7 @@ class AppContainer {
       fileSharingCoordinator: fileSharingCoordinator,
       capabilityCoordinator: capabilityCoordinator,
       wifiDirectService: wifiDirectService,
+      chatStorage: chatStorage,
     );
   }
 
@@ -484,13 +503,141 @@ class AppContainer {
   /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
   bool get wifiDirectSupported => _wifiDirectSupported;
 
+  /// One-to-one messages over the same encrypted sessions as files.
+  ChatService get chatService {
+    final service = _chatService;
+    if (service == null) {
+      throw StateError('ChatService accessed before AppContainer.initialize()');
+    }
+    return service;
+  }
+
+  /// Host & Client: share files with several nearby phones, or browse and
+  /// download from a phone that hosts.
+  HostService get hostService {
+    final service = _hostService;
+    if (service == null) {
+      throw StateError('HostService accessed before AppContainer.initialize()');
+    }
+    return service;
+  }
+
+  /// Host side: a client's files as one batch whose offer proves the
+  /// client's ticket, so it accepts them without a prompt.
+  Future<void> _sendToHostClient({
+    required String clientDeviceId,
+    required String clientName,
+    required List<SelectedDocument> documents,
+    required String ticketHex,
+  }) async {
+    final id = clientDeviceId.toLowerCase();
+    final peer =
+        discoveredPeers
+            .where((p) => p.deviceId.toLowerCase() == id)
+            .firstOrNull ??
+        fileSharingCoordinator.getKnownPeer(clientDeviceId) ??
+        // The client connected to this phone: its session is the route.
+        DiscoveredPeer(
+          deviceId: clientDeviceId,
+          displayName: clientName,
+          transportType: TransportType.lan,
+          availableTransports: const {TransportType.lan},
+          rssi: 0,
+          lastSeen: DateTime.now(),
+        );
+    // The ticket goes with this send only: two requests from one client
+    // being served at once must not swap tickets.
+    await fileSharingCoordinator.sendFilesToPeer(
+      peer: peer,
+      documents: documents,
+      receiveTicket: ticketHex,
+    );
+  }
+
+  /// Hosting changes what this phone advertises, and keeps it findable for
+  /// as long as it hosts.
+  Future<void> _onHostingChanged(bool hosting) async {
+    try {
+      if (hosting) {
+        holdDiscovery(_hostService!);
+      } else {
+        releaseDiscovery(_hostService!);
+      }
+      if (discoveryCoordinator.status.isActive) {
+        await discoveryCoordinator.stopAdvertising();
+        await startDiscoveryAndAdvertising();
+      }
+    } catch (e) {
+      AppLogger.warning(
+        'AppContainer',
+        'Updating the hosting beacon failed: $e',
+      );
+    }
+  }
+
+  /// Every secured session closes after [SessionLifecyclePolicy.idleTimeout]
+  /// without activity. Before, only a transfer started that countdown: a
+  /// session opened for a chat, for browsing a host or for a Bluetooth
+  /// hand-over stayed open (and pinged every 15 s) until the other phone
+  /// went away. Chat and Host & Client packets count as activity.
+  void _trackSessionActivity() {
+    final policy = _sessionLifecyclePolicy;
+    final engine = _transferEngine;
+    if (policy == null) return;
+    for (final sub in _activitySubs) {
+      sub.cancel();
+    }
+    _activitySubs
+      ..clear()
+      ..add(
+        _secureSessionManager!.secureSessions.listen(
+          (s) => policy.recordActivity(s.sessionId),
+        ),
+      );
+    if (engine is TransferEngineImpl) {
+      for (final packets in [engine.chatPackets, engine.hostPackets]) {
+        _activitySubs.add(
+          packets.listen((e) => policy.recordActivity(e.session.sessionId)),
+        );
+      }
+    }
+    _chatService?.onActivity = (s) => policy.recordActivity(s.sessionId);
+    _hostService?.onActivity = (s) => policy.recordActivity(s.sessionId);
+  }
+
+  /// Opens a session for a chat with [deviceId]: a phone in the nearby list
+  /// or one met through a code, a tap or an earlier transfer.
+  Future<SecureSession> _connectForChat(String deviceId) async {
+    final id = deviceId.toLowerCase();
+    final peer =
+        discoveredPeers
+            .where((p) => p.deviceId.toLowerCase() == id)
+            .firstOrNull ??
+        _fileSharingCoordinator?.getKnownPeer(deviceId);
+    if (peer == null) {
+      throw const ChatUnavailableException(
+        'That phone is not nearby right now',
+      );
+    }
+    return transportSelector.connectWithSmartSelection(
+      peer,
+      request: TransportSelectionRequest(targetPeer: peer),
+    );
+  }
+
   /// Whether this phone may host a Wi-Fi Direct group for a phone that
   /// found it over Bluetooth: only on the Receive screen (the same rule as
   /// accepting files) and with Wi-Fi Direct allowed. Never asks for a
   /// permission here: the request comes from another phone.
-  Future<LinkUpgradeDeclineReason?> _linkUpgradeBlocker() async {
+  Future<LinkUpgradeDeclineReason?> _linkUpgradeBlocker(
+    String peerDeviceId,
+  ) async {
     final sharing = _fileSharingCoordinator;
-    if (sharing == null || !sharing.isReceiveScreenOpen) {
+    // Receive screen open, or this phone asked that phone for files (a chat
+    // file it accepted, a Host & Client download).
+    if (sharing == null ||
+        (!sharing.isReceiveScreenOpen &&
+            !sharing.isExpectingFilesFrom(peerDeviceId))) {
       return LinkUpgradeDeclineReason.notReceiving;
     }
     final blockers = await permissionManager.check(VayuFeature.directWifi);
@@ -828,6 +975,13 @@ class AppContainer {
         hotspot: _hotspotService!,
         lanPort: () => _lanServer?.boundPort,
         hostingBlocker: _linkUpgradeBlocker,
+        // A group made for a sender while Receive is closed is removed once
+        // no session has used it for a minute (Receive removes its own).
+        onHosted: () {
+          if (!(_fileSharingCoordinator?.isReceiveScreenOpen ?? false)) {
+            _pairingCoordinator?.releaseHotspotWhenIdle();
+          }
+        },
         sessionChanges: _connectionManager!.activeSessionsStream,
       );
       final engine = _transferEngine;
@@ -924,6 +1078,68 @@ class AppContainer {
             _connectionManager?.activeSessions.length ?? 0,
         sessionChanges: _connectionManager?.activeSessionsStream,
       );
+
+      // 12b. Chat over the existing secure sessions
+      _chatService = ChatService(
+        localDeviceId: () => identity?.idHex ?? loadedIdentity.idHex,
+        sessionFor: (id) => _secureSessionManager?.getSessionForPeer(id),
+        connect: _connectForChat,
+        nameOf: (session) => session is SecureSessionImpl
+            ? session.connectionSession.info.remoteDisplayName
+            : null,
+        supportsChat: (session) =>
+            session is SecureSessionImpl &&
+            session.connectionSession.info.remoteFeatures.contains(
+              AppConstants.featureChat,
+            ),
+        supportsChatFiles: (session) =>
+            session is SecureSessionImpl &&
+            session.connectionSession.info.remoteFeatures.contains(
+              AppConstants.featureChatFiles,
+            ),
+        files: _ChatFiles(this),
+        storage:
+            _injectedChatStorage ??
+            (Platform.isAndroid && !_isTestEnvironment
+                ? FileChatStorage(
+                    File('${AppPaths.androidFilesDir}/chats.sealed'),
+                    sealer: const AndroidLocalDataSealer(),
+                    legacyPlainFile: File(
+                      '${AppPaths.androidFilesDir}/chats.json',
+                    ),
+                  )
+                : InMemoryChatStorage()),
+      );
+      await _chatService!.load();
+      final chatEngine = _transferEngine;
+      if (chatEngine is TransferEngineImpl) {
+        _chatService!.attach(
+          packets: chatEngine.chatPackets,
+          newSessions: _secureSessionManager!.secureSessions,
+        );
+      }
+
+      // 12c. Host & Client over the same sessions and transfers
+      _hostService = HostService(
+        localDeviceId: () => identity?.idHex ?? loadedIdentity.idHex,
+        sessionFor: (id) => _secureSessionManager?.getSessionForPeer(id),
+        connect: _connectForChat,
+        nameOf: (session) => session is SecureSessionImpl
+            ? session.connectionSession.info.remoteDisplayName
+            : null,
+        supportsHost: (session) =>
+            session is SecureSessionImpl &&
+            session.connectionSession.info.remoteFeatures.contains(
+              AppConstants.featureHost,
+            ),
+        sendToClient: _sendToHostClient,
+        expectFromHost: _fileSharingCoordinator!.expectFromHost,
+      )..onHostingChanged = (hosting) => _onHostingChanged(hosting);
+      final hostEngine = _transferEngine;
+      if (hostEngine is TransferEngineImpl) {
+        _hostService!.attach(hostEngine.hostPackets);
+      }
+      _trackSessionActivity();
 
       // 13. Initialize Central Application Orchestrator (Track C: U1–U8)
       _orchestrator = AppOrchestrator(
@@ -1160,6 +1376,8 @@ class AppContainer {
       port: serverPort,
       supportedTransports: supported,
       protocolVersion: id.protocolVersion,
+      hosting: _hostService?.isHosting ?? false,
+      hostingPrivate: _hostService?.access == HostAccess.private,
     );
 
     if (canLan && Platform.isAndroid) {
@@ -1219,8 +1437,16 @@ class AppContainer {
     if (_wifiDirectService?.isHosting ?? false) {
       _wifiDirectService?.removeGroup();
     }
+    for (final sub in _activitySubs) {
+      sub.cancel();
+    }
+    _activitySubs.clear();
     _linkUpgradeService?.dispose();
     _linkUpgradeService = null;
+    _chatService?.dispose();
+    _chatService = null;
+    _hostService?.dispose();
+    _hostService = null;
     _transferEngine?.dispose();
     _secureSessionManager?.dispose();
     _discoveryCoordinator?.dispose();
@@ -1452,4 +1678,70 @@ class AppContainer {
       return InMemorySettingsStorage();
     }
   }
+}
+
+/// Chat files over the ordinary transfer engine (see [ChatFileTransport]).
+class _ChatFiles implements ChatFileTransport {
+  final AppContainer app;
+
+  _ChatFiles(this.app);
+
+  FileSharingCoordinator get _sharing => app.fileSharingCoordinator;
+
+  @override
+  Future<void> send({
+    required String peerDeviceId,
+    required List<SelectedDocument> documents,
+    required String ticketHex,
+    required void Function(String batchId) onBatch,
+  }) async {
+    final id = peerDeviceId.toLowerCase();
+    final peer =
+        app.discoveredPeers
+            .where((p) => p.deviceId.toLowerCase() == id)
+            .firstOrNull ??
+        _sharing.getKnownPeer(peerDeviceId);
+    if (peer == null) {
+      throw const ChatUnavailableException('That phone is not nearby now');
+    }
+    await _sharing.sendFilesToPeer(
+      peer: peer,
+      documents: documents,
+      receiveTicket: ticketHex,
+      onBatch: (batch) => onBatch(batch.batchId),
+    );
+  }
+
+  @override
+  void expect({
+    required String peerDeviceId,
+    required String ticketHex,
+    required List<ChatFile> files,
+    required String messageId,
+  }) => _sharing.expectFromHost(peerDeviceId, ticketHex, [
+    for (final f in files)
+      BatchManifestEntry(
+        fileName: f.name,
+        sizeBytes: f.sizeBytes,
+        mimeType: f.mimeType ?? 'application/octet-stream',
+      ),
+  ], tag: messageId);
+
+  @override
+  Stream<({String messageId, String batchId})> get arrived => _sharing
+      .taggedBatches
+      .map((e) => (messageId: e.tag, batchId: e.batch.batchId));
+
+  @override
+  ({bool ok, List<String?> paths})? outcome(String batchId) {
+    final batch = _sharing.getBatch(batchId);
+    if (batch == null || !batch.isFinished) return null;
+    return (
+      ok: batch.state == TransferBatchState.completed,
+      paths: batch.outbound ? const [] : _sharing.savedPathsOf(batch),
+    );
+  }
+
+  @override
+  Stream<void> get changes => _sharing.activeTransfersStream;
 }

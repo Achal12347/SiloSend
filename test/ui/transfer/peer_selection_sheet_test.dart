@@ -64,6 +64,8 @@ void main() {
 
       // Initially no peers -> shows empty searching state
       expect(find.text('Looking for nearby Vayu devices...'), findsOneWidget);
+      // Scan QR is always offered, list or no list.
+      expect(find.text('Scan QR'), findsOneWidget);
 
       // Ingest remote peer
       container.discoveryCoordinator.ingestPeerForTesting(
@@ -81,8 +83,9 @@ void main() {
 
       // Peer appears with name and transport badges
       expect(find.text('Receiver-Phone'), findsOneWidget);
-      expect(find.text('Wi-Fi'), findsOneWidget);
-      expect(find.text('Bluetooth'), findsOneWidget);
+      // Each route appears twice: the filter chip and the peer's own badge.
+      expect(find.text('Wi-Fi'), findsNWidgets(2));
+      expect(find.text('Bluetooth'), findsNWidgets(2));
       expect(find.text('Send'), findsOneWidget);
 
       await container.stopDiscoveryAndAdvertising();

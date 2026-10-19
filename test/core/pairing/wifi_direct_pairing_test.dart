@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
+import 'package:vayu/core/contracts/discovery_contract.dart';
+import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/discovery/discovery_coordinator.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
@@ -111,12 +114,46 @@ Future<AppContainer> _container(String name) async {
   return c;
 }
 
+/// A real selector whose secure handshake takes [handshake]: a caller that
+/// gives the connection less time than that gets a timeout, as on a slow
+/// phone right after the app starts.
+class _SlowHandshakeSelector implements TransportSelector {
+  final TransportSelector inner;
+  final Duration handshake;
+  final timeoutsGiven = <Duration?>[];
+
+  _SlowHandshakeSelector(this.inner, this.handshake);
+
+  @override
+  Future<TransportSelectionResult> selectTransport(
+    TransportSelectionRequest request,
+  ) => inner.selectTransport(request);
+
+  @override
+  Future<SecureSession> connectWithSmartSelection(
+    DiscoveredPeer peer, {
+    TransportSelectionRequest? request,
+    Duration? timeout,
+  }) async {
+    timeoutsGiven.add(timeout);
+    if (timeout != null && timeout < handshake) {
+      throw TimeoutException('handshake cut off', timeout);
+    }
+    return inner.connectWithSmartSelection(
+      peer,
+      request: request,
+      timeout: timeout,
+    );
+  }
+}
+
 PairingCoordinator _pairing(
   AppContainer c, {
   required _FakeWifiDirect wifiDirect,
   required _FakeHotspot hotspot,
   List<String> addresses = const ['127.0.0.1'],
   StreamController<Object?>? sessions,
+  TransportSelector? selector,
 }) {
   return PairingCoordinator(
     identity: () => c.identity,
@@ -125,7 +162,7 @@ PairingCoordinator _pairing(
     supportsBle: () => false,
     discoveryCoordinator: c.discoveryCoordinator,
     secureSessionManager: c.secureSessionManager,
-    transportSelector: c.transportSelector,
+    transportSelector: selector ?? c.transportSelector,
     fileSharingCoordinator: c.fileSharingCoordinator,
     hotspot: hotspot,
     wifiDirect: wifiDirect,
@@ -237,6 +274,64 @@ void main() {
       expect(wifiDirect.calls, isEmpty);
     });
 
+    test(
+      'on the same router a scanned code still joins the group first',
+      () async {
+        final hostPairing = _pairing(
+          host,
+          wifiDirect: _FakeWifiDirect(),
+          hotspot: _FakeHotspot(),
+        );
+        final joinDirect = _FakeWifiDirect();
+        final joinHotspot = _FakeHotspot();
+        final joinPairing = _pairing(
+          joiner,
+          wifiDirect: joinDirect,
+          hotspot: joinHotspot,
+        );
+
+        final (payload, _) = await hostPairing.prepareShowableCode();
+        expect(payload!.wifiDirect, isTrue);
+        final peer = await joinPairing.join(payload);
+        expect(peer.displayName, 'Host');
+        // Owner's route rule (2026-10-19): Wi-Fi Direct first, even on a
+        // shared router.
+        expect(
+          joinDirect.calls.first,
+          'connect:DIRECT-vy-abc123:groupsecret12345',
+        );
+        expect(joinHotspot.calls, isEmpty);
+      },
+    );
+
+    test('a slow first handshake over the router is not cut off', () async {
+      // Regression: only reaching the router was meant to be time-limited,
+      // but the limit covered the whole handshake, so the first scan after
+      // an app start failed and the second worked.
+      final hostPairing = _pairing(
+        host,
+        wifiDirect: _FakeWifiDirect(),
+        hotspot: _FakeHotspot(),
+      );
+      // The group join fails, so the router is used.
+      final joinDirect = _FakeWifiDirect()..connectResult = null;
+      final slow = _SlowHandshakeSelector(
+        joiner.transportSelector,
+        PairingCoordinator.sharedWifiProbeTimeout + const Duration(seconds: 1),
+      );
+      final joinPairing = _pairing(
+        joiner,
+        wifiDirect: joinDirect,
+        hotspot: _FakeHotspot(),
+        selector: slow,
+      );
+
+      final (payload, _) = await hostPairing.prepareShowableCode();
+      final peer = await joinPairing.join(payload!);
+      expect(peer.displayName, 'Host');
+      expect(slow.timeoutsGiven, [null]);
+    });
+
     test('the sender joins the group and leaves it when idle', () async {
       final sessions = StreamController<Object?>.broadcast();
       final hostDirect = _FakeWifiDirect();
@@ -244,6 +339,8 @@ void main() {
         host,
         wifiDirect: hostDirect,
         hotspot: _FakeHotspot(),
+        // A router address the joiner cannot reach (TEST-NET-1).
+        addresses: ['192.0.2.1'],
         sessions: sessions,
       );
       final joinDirect = _FakeWifiDirect();
@@ -256,7 +353,8 @@ void main() {
       );
 
       final (payload, _) = await hostPairing.prepareShowableCode();
-      final peer = await joinPairing.join(payload!);
+      expect(payload!.fallbackLanAddress, '192.0.2.1');
+      final peer = await joinPairing.join(payload);
       expect(peer.displayName, 'Host');
       expect(
         joinDirect.calls.first,
@@ -271,27 +369,30 @@ void main() {
       await sessions.close();
     });
 
-    test('a failed group join falls back to the shared router', () async {
-      final hostPairing = _pairing(
-        host,
-        wifiDirect: _FakeWifiDirect(),
-        hotspot: _FakeHotspot(),
-      );
-      final joinDirect = _FakeWifiDirect()..connectResult = null;
-      final joinHotspot = _FakeHotspot();
-      final joinPairing = _pairing(
-        joiner,
-        wifiDirect: joinDirect,
-        hotspot: joinHotspot,
-      );
+    test(
+      'no router and a failed group join: the group is joined as Wi-Fi',
+      () async {
+        final hostPairing = _pairing(
+          host,
+          wifiDirect: _FakeWifiDirect(),
+          hotspot: _FakeHotspot(),
+          addresses: ['192.0.2.1'],
+        );
+        final joinDirect = _FakeWifiDirect()..connectResult = null;
+        final joinHotspot = _FakeHotspot();
+        final joinPairing = _pairing(
+          joiner,
+          wifiDirect: joinDirect,
+          hotspot: joinHotspot,
+        );
 
-      final (payload, _) = await hostPairing.prepareShowableCode();
-      // Joining the group fails, so the router address is used; the
-      // group is never joined the hotspot way while that works.
-      final peer = await joinPairing.join(payload!);
-      expect(peer.displayName, 'Host');
-      expect(joinHotspot.calls, isEmpty);
-    });
+        final (payload, _) = await hostPairing.prepareShowableCode();
+        final peer = await joinPairing.join(payload!);
+        expect(peer.displayName, 'Host');
+        // Joined as Wi-Fi (it is left again once idle).
+        expect(joinHotspot.calls.first, 'join:DIRECT-vy-abc123');
+      },
+    );
 
     test(
       'without Wi-Fi Direct or a router the group is joined like a hotspot',

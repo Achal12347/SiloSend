@@ -97,7 +97,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Receiver-Laptop'), findsOneWidget);
-      expect(find.text('LAN'), findsWidgets);
+      // The route in user terms, not the internal transport name.
+      expect(find.text('Wi-Fi'), findsWidgets);
       expect(find.text('1 Active'), findsOneWidget);
       expect(
         find.text('Transport link established (Phase 5 unauthenticated)'),

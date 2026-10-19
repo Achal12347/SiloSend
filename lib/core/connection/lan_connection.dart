@@ -153,8 +153,10 @@ class LanConnection implements TransportConnection {
         ? ((_bytesSent + _bytesReceived) ~/ durationSec)
         : (_bytesSent + _bytesReceived);
 
+    // Latency and signal are not measured on a TCP link: 0 means unknown
+    // (route scoring then stays neutral instead of trusting a made-up value).
     return LinkMetrics(
-      latencyMs: 1, // Wired/LAN latency baseline
+      latencyMs: 0,
       estimatedThroughputBytesPerSec: throughput,
       rssi: 0,
     );

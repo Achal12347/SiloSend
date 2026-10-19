@@ -30,6 +30,22 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         private const val METHOD_CHANNEL = "com.achyrio.vayu/ble_discovery"
         private const val EVENT_CHANNEL = "com.achyrio.vayu/ble_scan_events"
         private const val SILOSEND_SERVICE_UUID = "00005353-0000-1000-8000-00805f9b34fb"
+
+        // Second half of a beacon, in the scan response. It needs its own ID:
+        // Android merges the advertisement and the scan response into one
+        // record and keeps only one service-data entry per ID, so with one
+        // shared ID a half was always lost.
+        private const val BEACON_PART2_UUID = "00005354-0000-1000-8000-00805f9b34fb"
+
+        // Bytes of a beacon placed in the advertisement itself. Connectable
+        // advertising carries a 3-byte flags field: 31 - 3 - 4 leaves 24.
+        private const val PART1_BYTES = 20
+
+        // Most a scan response can carry as 16-bit service data (31 - 4).
+        private const val PART2_MAX_BYTES = 27
+
+        // Android: the same advertising callback is already running.
+        private const val ADVERTISE_ALREADY_STARTED = 3
     }
 
     private var methodChannel: MethodChannel? = null
@@ -154,7 +170,23 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         Log.i(TAG, "BLE scan stopped")
     }
 
+    // Answered from the advertise callback, so Dart learns whether
+    // advertising really started (it used to be told "started" either way).
+    private var pendingAdvertiseResult: MethodChannel.Result? = null
+
+    private fun answerAdvertise(error: String?, message: String?) {
+        val pending = pendingAdvertiseResult ?: return
+        pendingAdvertiseResult = null
+        mainHandler.post {
+            if (error == null) pending.success(null) else pending.error(error, message, null)
+        }
+    }
+
     private fun startAdvertising(beaconBytes: ByteArray, batterySaver: Boolean, result: MethodChannel.Result) {
+        if (beaconBytes.size > PART1_BYTES + PART2_MAX_BYTES) {
+            result.error("BEACON_TOO_LARGE", "Beacon is ${beaconBytes.size} bytes", null)
+            return
+        }
         val adapter = bluetoothAdapter
         if (adapter == null || !adapter.isEnabled) {
             result.error("BLUETOOTH_DISABLED", "Bluetooth adapter is not enabled", null)
@@ -181,7 +213,10 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(advertiseMode)
             .setTxPowerLevel(txPower)
-            .setConnectable(false)
+            // Connectable: phones that find this one connect to its GATT
+            // server here (Bluetooth transfers and the Wi-Fi Direct
+            // hand-over). Non-connectable advertising refused them.
+            .setConnectable(true)
             .setTimeout(0)
             .build()
 
@@ -190,7 +225,7 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         val advertiseData: AdvertiseData
         val scanResponseData: AdvertiseData?
 
-        if (beaconBytes.size <= 24) {
+        if (beaconBytes.size <= PART1_BYTES) {
             advertiseData = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
@@ -198,8 +233,8 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
                 .build()
             scanResponseData = null
         } else {
-            val part1 = beaconBytes.copyOfRange(0, 20)
-            val part2 = beaconBytes.copyOfRange(20, beaconBytes.size)
+            val part1 = beaconBytes.copyOfRange(0, PART1_BYTES)
+            val part2 = beaconBytes.copyOfRange(PART1_BYTES, beaconBytes.size)
 
             advertiseData = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
@@ -210,10 +245,13 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
             scanResponseData = AdvertiseData.Builder()
                 .setIncludeDeviceName(false)
                 .setIncludeTxPowerLevel(false)
-                .addServiceData(serviceUuid, part2)
+                .addServiceData(ParcelUuid(UUID.fromString(BEACON_PART2_UUID)), part2)
                 .build()
         }
 
+        // A call still waiting is superseded by this one.
+        answerAdvertise(null, null)
+        pendingAdvertiseResult = result
         try {
             if (scanResponseData != null) {
                 advertiser?.startAdvertising(settings, advertiseData, scanResponseData, advertiseCallback)
@@ -221,11 +259,12 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
                 advertiser?.startAdvertising(settings, advertiseData, advertiseCallback)
             }
             isAdvertising = true
-            result.success(null)
-            Log.i(TAG, "BLE advertising started successfully (bytes: ${beaconBytes.size})")
+            Log.i(TAG, "BLE advertising requested (bytes: ${beaconBytes.size})")
         } catch (e: SecurityException) {
+            pendingAdvertiseResult = null
             result.error("PERMISSION_DENIED", "Missing Bluetooth advertise permission: ${e.message}", null)
         } catch (e: Exception) {
+            pendingAdvertiseResult = null
             result.error("ADVERTISE_ERROR", "Failed to start BLE advertising: ${e.message}", null)
         }
     }
@@ -241,43 +280,31 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
     }
 
     private val scanCallback = object : ScanCallback() {
-        private val pendingBeacons = mutableMapOf<String, ByteArray>()
+        private val part1Uuid = ParcelUuid(UUID.fromString(SILOSEND_SERVICE_UUID))
+        private val part2Uuid = ParcelUuid(UUID.fromString(BEACON_PART2_UUID))
 
         override fun onScanResult(callbackType: Int, result: ScanResult?) {
             result ?: return
             val record = result.scanRecord ?: return
             val address = result.device?.address ?: return
 
-            val serviceUuid = ParcelUuid(UUID.fromString(SILOSEND_SERVICE_UUID))
-            val serviceData = record.getServiceData(serviceUuid) ?: return
-
-            var completeBeacon: ByteArray? = null
-            if (serviceData.size >= 27) {
-                // Already complete beacon
-                completeBeacon = serviceData
+            val part1 = record.getServiceData(part1Uuid) ?: return
+            // One record holds both halves once the scan response arrived;
+            // until then the result is skipped (the next one completes it).
+            val completeBeacon = if (part1.size > PART1_BYTES) {
+                part1
             } else {
-                // Reassemble primary + scan response fragments
-                val existing = pendingBeacons[address]
-                if (existing == null) {
-                    pendingBeacons[address] = serviceData
-                } else {
-                    val combined = existing + serviceData
-                    pendingBeacons.remove(address)
-                    if (combined.size >= 27) {
-                        completeBeacon = combined
-                    }
-                }
+                val part2 = record.getServiceData(part2Uuid) ?: return
+                part1 + part2
             }
 
-            if (completeBeacon != null) {
-                val eventMap = mapOf(
-                    "beaconBytes" to completeBeacon,
-                    "rssi" to result.rssi,
-                    "address" to address
-                )
-                mainHandler.post {
-                    eventSink?.success(eventMap)
-                }
+            val eventMap = mapOf(
+                "beaconBytes" to completeBeacon,
+                "rssi" to result.rssi,
+                "address" to address
+            )
+            mainHandler.post {
+                eventSink?.success(eventMap)
             }
         }
 
@@ -289,11 +316,17 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartSuccess(settingsInEffect: AdvertiseSettings?) {
             Log.i(TAG, "BLE advertising started in effect")
+            answerAdvertise(null, null)
         }
 
         override fun onStartFailure(errorCode: Int) {
+            if (errorCode == ADVERTISE_ALREADY_STARTED) {
+                answerAdvertise(null, null)
+                return
+            }
             Log.w(TAG, "BLE advertising failed with error code: $errorCode")
             isAdvertising = false
+            answerAdvertise("ADVERTISE_FAILED", "Advertising failed (code $errorCode)")
         }
     }
 }

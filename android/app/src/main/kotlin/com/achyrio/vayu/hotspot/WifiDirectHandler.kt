@@ -41,8 +41,12 @@ class WifiDirectHandler(
     companion object {
         private const val TAG = "Vayu.WifiDirect"
         private const val CHANNEL = "com.achyrio.vayu/wifi_direct"
-        private const val JOIN_TIMEOUT_MS = 20_000L
+        // Finding the group, forming it and DHCP; 5 GHz scans take longest.
+        private const val JOIN_TIMEOUT_MS = 30_000L
         private const val POLL_MS = 400L
+        private const val CONNECT_RETRIES = 3
+        private const val RETRY_MS = 1_500L
+        private const val SETTLE_MS = 500L
 
         // Android always gives a group owner this address.
         private const val DEFAULT_OWNER_ADDRESS = "192.168.49.1"
@@ -315,6 +319,11 @@ class WifiDirectHandler(
 
     // ---------------------------------------------------------------- joining
 
+    /**
+     * Joins a group and answers with the owner's address only once this phone
+     * has its own address in the group. "Group formed" comes before DHCP
+     * finishes; connecting then failed at once, and Vayu gave up on the group.
+     */
     @SuppressLint("MissingPermission")
     private fun connect(networkName: String, passphrase: String, result: MethodChannel.Result) {
         val m = manager
@@ -323,18 +332,22 @@ class WifiDirectHandler(
             result.error("UNSUPPORTED", "Wi-Fi Direct unavailable", null)
             return
         }
-        leave()
+        joinPoll?.let { main.removeCallbacks(it) }
+        joinPoll = null
         var answered = false
         val deadline = System.currentTimeMillis() + JOIN_TIMEOUT_MS
-        fun finish(ownerAddress: String?) {
+        fun finish(ownerAddress: String?, why: String) {
             if (answered) return
             answered = true
             joinPoll?.let { main.removeCallbacks(it) }
             joinPoll = null
             if (ownerAddress == null) {
+                Log.w(TAG, "Join failed: $why")
+                joined = true // whatever half-formed group exists is left
                 leave()
                 main.post { result.success(null) }
             } else {
+                Log.i(TAG, "Joined group ($why)")
                 joined = true
                 main.post { result.success(mapOf("groupOwnerAddress" to ownerAddress)) }
             }
@@ -345,11 +358,20 @@ class WifiDirectHandler(
                 if (answered) return
                 m.requestConnectionInfo(ch) { info ->
                     val owner = info?.groupOwnerAddress?.hostAddress
-                    when {
-                        info != null && info.groupFormed && !info.isGroupOwner && owner != null ->
-                            finish(owner)
-                        System.currentTimeMillis() > deadline -> finish(null)
-                        else -> main.postDelayed(this, POLL_MS)
+                    if (info != null && info.groupFormed && !info.isGroupOwner && owner != null) {
+                        m.requestGroupInfo(ch) { group ->
+                            val local = group?.let { ownerAddress(it) } ?: p2pClientAddress()
+                            when {
+                                local != null -> finish(owner, "own address $local")
+                                System.currentTimeMillis() > deadline ->
+                                    finish(null, "no address in the group")
+                                else -> main.postDelayed(this, POLL_MS)
+                            }
+                        }
+                    } else if (System.currentTimeMillis() > deadline) {
+                        finish(null, "group not formed in time")
+                    } else {
+                        main.postDelayed(this, POLL_MS)
                     }
                 }
             }
@@ -360,22 +382,55 @@ class WifiDirectHandler(
             .setPassphrase(passphrase)
             .enablePersistentMode(false)
             .build()
-        try {
-            m.connect(ch, config, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    joinPoll = poll
-                    main.postDelayed(poll, POLL_MS)
-                }
 
-                override fun onFailure(reason: Int) {
-                    Log.w(TAG, "connect failed ($reason)")
-                    finish(null)
-                }
-            })
-        } catch (e: SecurityException) {
-            answered = true
-            result.error("PERMISSION_DENIED", e.message, null)
+        fun attempt(left: Int) {
+            if (answered) return
+            try {
+                m.connect(ch, config, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() {
+                        joinPoll = poll
+                        main.postDelayed(poll, POLL_MS)
+                    }
+
+                    override fun onFailure(reason: Int) {
+                        // BUSY right after leaving a group or while a scan
+                        // runs is common and passes within a second or two.
+                        if (left > 0 && reason != WifiP2pManager.P2P_UNSUPPORTED) {
+                            Log.i(TAG, "connect refused ($reason); trying again")
+                            main.postDelayed({ attempt(left - 1) }, RETRY_MS)
+                        } else {
+                            finish(null, "connect refused ($reason)")
+                        }
+                    }
+                })
+            } catch (e: SecurityException) {
+                answered = true
+                result.error("PERMISSION_DENIED", e.message, null)
+            }
         }
+
+        // One phone is in one group at a time: a group this phone hosts, a
+        // half-joined one from an earlier try, or a peer scan block joining.
+        stopHosting()
+        try {
+            m.stopPeerDiscovery(ch, null)
+            m.cancelConnect(ch, null)
+        } catch (_: Exception) {}
+        m.removeGroup(ch, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { main.postDelayed({ attempt(CONNECT_RETRIES) }, SETTLE_MS) }
+            override fun onFailure(reason: Int) { attempt(CONNECT_RETRIES) }
+        })
+    }
+
+    /** This phone's IPv4 address on a Wi-Fi Direct interface, if it has one. */
+    private fun p2pClientAddress(): String? = try {
+        NetworkInterface.getNetworkInterfaces()?.toList()
+            ?.filter { it.isUp && it.name.startsWith("p2p") }
+            ?.flatMap { it.inetAddresses.toList() }
+            ?.firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
+            ?.hostAddress
+    } catch (_: Exception) {
+        null
     }
 
     private fun leave() {

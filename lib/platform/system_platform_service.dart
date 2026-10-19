@@ -276,6 +276,22 @@ class SystemPlatformService implements PlatformService {
     }
   }
 
+  // Screens holding the screen on; released when the last one closes.
+  int _screenOnHolds = 0;
+
+  @override
+  Future<void> keepScreenOn(bool on) async {
+    if (!_isActualAndroid) return;
+    final before = _screenOnHolds;
+    _screenOnHolds = on ? before + 1 : (before > 0 ? before - 1 : 0);
+    if ((before == 0) == (_screenOnHolds == 0)) return;
+    try {
+      await _channel.invokeMethod<bool>('keepScreenOn', {
+        'on': _screenOnHolds > 0,
+      });
+    } catch (_) {}
+  }
+
   @override
   Future<String?> thermalStatus() async {
     if (!_isActualAndroid) return null;

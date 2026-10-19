@@ -78,6 +78,107 @@ class FileSharingCoordinator {
   // Sending side: tickets scanned or tapped from receivers, by device ID.
   final Map<String, (String, DateTime)> _ticketsFromReceivers = {};
 
+  /// Client side of Host & Client: every open download request, by host.
+  /// One host can have several (the user asked twice before the first batch
+  /// arrived); each keeps its own ticket and the files it asked for.
+  final Map<String, List<_HostRequest>> _expectedFromHosts = {};
+
+  final StreamController<TransferBatch> _hostBatchesController =
+      StreamController<TransferBatch>.broadcast();
+
+  /// Batches that arrived from a host because this phone asked for them.
+  Stream<TransferBatch> get hostBatches => _hostBatchesController.stream;
+
+  /// How long a download request to a host stays answerable.
+  static const Duration hostRequestLifetime = Duration(minutes: 5);
+
+  /// Client side: this phone asked [hostDeviceId] for [files] with
+  /// [ticketHex]. A batch from that host proving the ticket is accepted
+  /// without a prompt, on any screen, only when every file in it is one of
+  /// [files] not received yet (a big request may come as several batches).
+  void expectFromHost(
+    String hostDeviceId,
+    String ticketHex,
+    List<BatchManifestEntry> files, {
+    String? tag,
+  }) {
+    if (files.isEmpty) return;
+    final key = hostDeviceId.toLowerCase();
+    final now = DateTime.now();
+    (_expectedFromHosts[key] ??= [])
+      ..removeWhere((r) => now.isAfter(r.until))
+      ..add(
+        _HostRequest(ticketHex.toLowerCase(), now.add(hostRequestLifetime), [
+          for (final f in files) _expectedKey(f),
+        ], tag),
+      );
+  }
+
+  final StreamController<({String tag, TransferBatch batch})>
+  _taggedBatchesController = StreamController.broadcast();
+
+  /// Batches that arrived for an expectation made with a tag (a file
+  /// accepted in a chat: the tag is the message ID).
+  Stream<({String tag, TransferBatch batch})> get taggedBatches =>
+      _taggedBatchesController.stream;
+
+  /// Where each received file was saved, by transfer ID.
+  final Map<String, String> _savedPaths = {};
+
+  /// Saved paths of [batch]'s received files, in batch order (null where a
+  /// file was not saved).
+  List<String?> savedPathsOf(TransferBatch batch) => [
+    for (var i = 0; i < batch.fileCount; i++)
+      batch.tasks[i] == null ? null : _savedPaths[batch.tasks[i]!.transferId],
+  ];
+
+  /// Whether this phone asked [deviceId] for files that have not all
+  /// arrived yet (a Host & Client download, an accepted chat file).
+  bool isExpectingFilesFrom(String deviceId) {
+    final requests = _expectedFromHosts[deviceId.toLowerCase()];
+    if (requests == null) return false;
+    final now = DateTime.now();
+    return requests.any((r) => now.isBefore(r.until));
+  }
+
+  static String _expectedKey(BatchManifestEntry f) =>
+      '${f.folder ?? ''}/${f.fileName}/${f.sizeBytes}';
+
+  /// The request [request] is one this phone asked its sender for, or null.
+  _HostRequest? _requestedBatch(IncomingBatchRequest request) {
+    final key = request.senderDeviceId.toLowerCase();
+    final requests = _expectedFromHosts[key];
+    final proof = request.receiveProof;
+    if (requests == null || proof == null) return null;
+    final now = DateTime.now();
+    requests.removeWhere((r) => now.isAfter(r.until));
+    try {
+      for (final r in requests) {
+        final proven = ReceiveTicket.verify(
+          ticketHex: r.ticketHex,
+          senderDeviceId: request.senderDeviceId,
+          batchId: request.batchId,
+          proofHex: proof,
+        );
+        if (!proven) continue;
+        // The ticket is right; the files must also be the ones asked for,
+        // so a host cannot push anything else under a client's ticket.
+        final remaining = List.of(r.remaining);
+        for (final f in request.files) {
+          if (!remaining.remove(_expectedKey(f))) return null;
+        }
+        r.remaining
+          ..clear()
+          ..addAll(remaining);
+        if (remaining.isEmpty) requests.remove(r);
+        return r;
+      }
+      return null;
+    } finally {
+      if (requests.isEmpty) _expectedFromHosts.remove(key);
+    }
+  }
+
   /// When false, offers are accepted (or asked about) only while the
   /// Receive screen is open; all others are declined automatically with the
   /// reason, so nobody nearby can cause popups. Files of a batch already
@@ -215,6 +316,27 @@ class FileSharingCoordinator {
           batchId: request.batchId,
           proofHex: proof,
         );
+    final requested = proven ? null : _requestedBatch(request);
+    if (requested != null) {
+      AppLogger.info(
+        'FileSharingCoordinator',
+        'Accepting ${request.files.length} file(s) this phone asked for',
+      );
+      try {
+        final batch = await acceptIncomingBatch(request);
+        final tag = requested.tag;
+        if (tag != null) {
+          if (!_taggedBatchesController.isClosed) {
+            _taggedBatchesController.add((tag: tag, batch: batch));
+          }
+        } else if (!_hostBatchesController.isClosed) {
+          _hostBatchesController.add(batch);
+        }
+      } catch (e) {
+        AppLogger.warning('FileSharingCoordinator', 'Host download failed: $e');
+      }
+      return;
+    }
     if (proven) {
       AppLogger.info(
         'FileSharingCoordinator',
@@ -608,6 +730,13 @@ class FileSharingCoordinator {
     required DiscoveredPeer peer,
     required List<SelectedDocument> documents,
     int? chunkSize,
+
+    /// Proof to put on the batch offer instead of a ticket remembered for
+    /// [peer] (a host answering one particular download request).
+    String? receiveTicket,
+
+    /// Told about each batch as soon as it exists (before it finishes).
+    void Function(TransferBatch batch)? onBatch,
   }) async {
     if (_isDisposed) {
       throw StateError('FileSharingCoordinator is disposed');
@@ -626,12 +755,20 @@ class FileSharingCoordinator {
       const perBatch = TransferBatchOfferPayload.maxFiles;
       if (documents.length <= perBatch ||
           !transferEngine.supportsBatchOffers(peer.deviceId)) {
-        return await _sendBatch(peer, documents, chunkSize);
+        return await _sendBatch(
+          peer,
+          documents,
+          chunkSize,
+          receiveTicket,
+          onBatch,
+        );
       }
       final tasks = <TransferTask>[];
       for (var i = 0; i < documents.length; i += perBatch) {
         final part = documents.sublist(i, min(i + perBatch, documents.length));
-        tasks.addAll(await _sendBatch(peer, part, chunkSize));
+        tasks.addAll(
+          await _sendBatch(peer, part, chunkSize, receiveTicket, onBatch),
+        );
       }
       return tasks;
     } finally {
@@ -643,7 +780,9 @@ class FileSharingCoordinator {
     DiscoveredPeer peer,
     List<SelectedDocument> documents,
     int? chunkSizeOverride,
-  ) async {
+    String? receiveTicket, [
+    void Function(TransferBatch batch)? onBatch,
+  ]) async {
     // Connect or reuse existing authenticated session once for the entire batch
     final session = await transportSelector.connectWithSmartSelection(
       peer,
@@ -658,7 +797,7 @@ class FileSharingCoordinator {
 
     // One consent for the whole batch when the receiver's build supports it;
     // otherwise each file is offered (and prompted) on its own as before.
-    final ticket = _ticketFor(peer.deviceId);
+    final ticket = receiveTicket ?? _ticketFor(peer.deviceId);
     final offerAsBatch =
         (documents.length > 1 || ticket != null) &&
         documents.every((d) => d.sizeBytes >= 0) &&
@@ -678,6 +817,7 @@ class FileSharingCoordinator {
           : TransferBatchState.transferring,
     );
     _batches[batch.batchId] = batch;
+    onBatch?.call(batch);
     _notifyTransfersChanged();
 
     if (offerAsBatch) {
@@ -1161,6 +1301,7 @@ class FileSharingCoordinator {
   }
 
   void _onTaskSettled(TransferTask task, Object? error, String? savedPath) {
+    if (savedPath != null) _savedPaths[task.transferId] = savedPath;
     _onBatchTaskSettled(task, error);
     _recordHistory(task, error, savedPath);
     if (error == null &&
@@ -1229,7 +1370,23 @@ class FileSharingCoordinator {
     _engineBatchesSub.cancel();
     _activeTransfersController.close();
     _autoAcceptedController.close();
+    _hostBatchesController.close();
+    _taggedBatchesController.close();
     _incomingRequestsController.close();
     _incomingBatchesController.close();
   }
+}
+
+/// One download this phone asked a host for (Host & Client, client side).
+class _HostRequest {
+  final String ticketHex;
+  final DateTime until;
+
+  /// Files asked for and not received yet (folder/name/size keys).
+  final List<String> remaining;
+
+  /// Set for a chat file (the message ID); null for Host & Client.
+  final String? tag;
+
+  _HostRequest(this.ticketHex, this.until, this.remaining, [this.tag]);
 }

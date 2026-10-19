@@ -129,7 +129,7 @@ class _Pair {
       wifiDirect: wifiA,
       hotspot: const UnsupportedHotspotService(),
       lanPort: () => null,
-      hostingBlocker: () async => LinkUpgradeDeclineReason.notReceiving,
+      hostingBlocker: (_) async => LinkUpgradeDeclineReason.notReceiving,
       sessionChanges: managerA.activeSessionsStream,
       answerTimeout: const Duration(seconds: 2),
     )..attach(engineA.linkUpgradePackets);
@@ -138,7 +138,7 @@ class _Pair {
       wifiDirect: wifiB,
       hotspot: const UnsupportedHotspotService(),
       lanPort: () => server.boundPort,
-      hostingBlocker: () async => blocker,
+      hostingBlocker: (_) async => blocker,
     );
     if (answer) upgradeB.attach(engineB.linkUpgradePackets);
   }
@@ -275,7 +275,7 @@ void main() {
           wifiDirect: const UnsupportedWifiDirectService(),
           hotspot: const UnsupportedHotspotService(),
           lanPort: () => null,
-          hostingBlocker: () async => null,
+          hostingBlocker: (_) async => null,
         ),
         wifiDirectSupported: () async => wifiDirect,
       );
@@ -307,10 +307,16 @@ void main() {
       TransportSelectionRequest(targetPeer: p, payloadSizeBytes: bytes),
     );
 
-    test('on the same Wi-Fi: the router, then Wi-Fi Direct', () async {
+    test('on the same Wi-Fi too: Wi-Fi Direct from Bluetooth first, '
+        'the router as the fallback', () async {
       final result = await choose(peer());
-      expect(result.selectedTransport, TransportType.lan);
-      expect(result.fallbackChain.first, TransportType.wifiDirect);
+      expect(result.selectedTransport, TransportType.wifiDirect);
+      expect(result.fallbackChain.first, TransportType.lan);
+    });
+
+    test('small items on the same Wi-Fi do not make a group', () async {
+      final result = await choose(peer(), bytes: 2000);
+      expect(result.selectedTransport, isNot(TransportType.wifiDirect));
     });
 
     test('found only over Bluetooth: Wi-Fi Direct for files', () async {

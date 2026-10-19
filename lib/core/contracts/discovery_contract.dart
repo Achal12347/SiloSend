@@ -73,6 +73,13 @@ class DiscoveredPeer {
   /// Optional extra metadata advertised by the peer.
   final Map<String, dynamic> metadata;
 
+  /// The phone announces it is hosting files (Host & Client), as heard in
+  /// its latest beacon.
+  bool get isHosting => metadata['hosting'] == true;
+
+  /// Its share needs a PIN (as heard in its latest beacon).
+  bool get isHostingPrivate => isHosting && metadata['private'] == true;
+
   DiscoveredPeer({
     required this.deviceId,
     required this.displayName,
@@ -144,12 +151,20 @@ class DeviceAdvertisement {
   final Set<TransportType> supportedTransports;
   final int protocolVersion;
 
+  /// This phone is hosting files (Host & Client).
+  final bool hosting;
+
+  /// Its share needs a PIN.
+  final bool hostingPrivate;
+
   const DeviceAdvertisement({
     required this.deviceId,
     required this.displayName,
     this.port = 53531,
     required this.supportedTransports,
     required this.protocolVersion,
+    this.hosting = false,
+    this.hostingPrivate = false,
   });
 }
 

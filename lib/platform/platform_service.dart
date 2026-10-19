@@ -77,6 +77,10 @@ abstract class PlatformService {
   /// the platform does not report it.
   Future<String?> thermalStatus() async => null;
 
+  /// Keeps the screen from turning off while [on] (screens that answer NFC
+  /// taps: Android stops answering once the screen is off).
+  Future<void> keepScreenOn(bool on) async {}
+
   /// Backward-compatible boolean permission requester.
   Future<bool> requestPermissions();
 }

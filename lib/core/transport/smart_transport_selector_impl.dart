@@ -59,11 +59,14 @@ class SmartTransportSelectorImpl implements TransportSelector {
     );
   }
 
-  /// Route order for anything bigger than a small message: the shared
-  /// network when the peer is on it, else Wi-Fi Direct, Bluetooth last.
+  /// Route order for anything bigger than a small message (owner decision,
+  /// 2026-10-19): Wi-Fi Direct handed over from Bluetooth first, even when
+  /// both phones share a router (the phones then talk directly, on 5 GHz
+  /// when both can, instead of every byte crossing a 2.4 GHz router twice);
+  /// the shared router when Wi-Fi Direct fails; Bluetooth last.
   static int _routeRank(TransportType transport) => switch (transport) {
-    TransportType.lan => 0,
-    TransportType.wifiDirect => 1,
+    TransportType.wifiDirect => 0,
+    TransportType.lan => 1,
     TransportType.ble => 2,
   };
 
@@ -168,6 +171,16 @@ class SmartTransportSelectorImpl implements TransportSelector {
     final effectiveRequest =
         request ?? TransportSelectionRequest(targetPeer: peer);
 
+    // An established Wi-Fi session with this phone is the best route there
+    // is, even when the phone has no address of its own here (it connected
+    // to us, as a Host & Client client does).
+    final live = secureSessionManager.getSessionForPeer(peer.deviceId);
+    if (live != null &&
+        live.state == SessionState.secured &&
+        live.connectionSession.connection.type == TransportType.lan) {
+      return live;
+    }
+
     final selectionResult = await selectTransport(effectiveRequest);
 
     // If an authenticated SecureSession already exists with this peer on the selected transport, reuse it
@@ -210,12 +223,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
       try {
         if (transport == TransportType.wifiDirect) {
           upgraded = await _joinWifiDirect(peer, timeout);
-          transportSession = await connectionManager.connectToLanPeer(
-            remoteAddress: upgraded.host,
-            remotePort: upgraded.port,
-            targetDeviceId: peer.deviceId,
-            timeout: timeout,
-          );
+          transportSession = await _connectInGroup(peer, upgraded, timeout);
         } else {
           transportSession = await _establishTransportConnection(
             peer: peer,
@@ -277,8 +285,41 @@ class SmartTransportSelectorImpl implements TransportSelector {
     );
   }
 
+  /// Connects to the peer's server inside a group just joined. The first
+  /// tries can fail while the group's routes settle, so it tries again for a
+  /// few seconds before giving up on the group.
+  Future<ConnectionSession> _connectInGroup(
+    DiscoveredPeer peer,
+    UpgradedLink link,
+    Duration? timeout,
+  ) async {
+    final until = DateTime.now().add(groupConnectWindow);
+    while (true) {
+      try {
+        return await connectionManager.connectToLanPeer(
+          remoteAddress: link.host,
+          remotePort: link.port,
+          targetDeviceId: peer.deviceId,
+          timeout: timeout ?? const Duration(seconds: 5),
+        );
+      } on Exception catch (e) {
+        if (DateTime.now().isAfter(until)) rethrow;
+        AppLogger.info(
+          'SmartTransportSelector',
+          'Group joined but ${link.host} not reachable yet ($e); retrying',
+        );
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+    }
+  }
+
+  /// How long to keep trying the peer's server after joining its group.
+  static const Duration groupConnectWindow = Duration(seconds: 8);
+
   /// Hands Wi-Fi Direct credentials over the encrypted Bluetooth session
-  /// (opened here if needed) and joins the group the peer created.
+  /// (opened here if needed) and joins the group the peer created. A
+  /// Bluetooth session opened only for this is closed with the group, so
+  /// nothing stays connected once the transfer is over.
   Future<UpgradedLink> _joinWifiDirect(
     DiscoveredPeer peer,
     Duration? timeout,
@@ -288,7 +329,9 @@ class SmartTransportSelectorImpl implements TransportSelector {
       throw UnsupportedError('Wi-Fi Direct is not available on this phone');
     }
     var control = secureSessionManager.getSessionForPeer(peer.deviceId);
+    var openedHere = false;
     if (control == null || !control.isEstablished) {
+      openedHere = true;
       final bluetooth = await _establishTransportConnection(
         peer: peer,
         transport: TransportType.ble,
@@ -309,7 +352,30 @@ class SmartTransportSelectorImpl implements TransportSelector {
       'Asking ${peer.displayName} for Wi-Fi Direct over '
           '${control.connectionSession.connection.type.name}',
     );
-    return upgrader.upgrade(control);
+    final SecureSessionImpl bluetoothControl = control;
+    final UpgradedLink link;
+    try {
+      link = await upgrader.upgrade(control);
+    } catch (_) {
+      if (openedHere) await _closeQuietly(bluetoothControl, 'upgrade_failed');
+      rethrow;
+    }
+    if (!openedHere) return link;
+    return UpgradedLink(
+      host: link.host,
+      port: link.port,
+      frequencyMhz: link.frequencyMhz,
+      leave: () async {
+        await link.leave();
+        await _closeQuietly(bluetoothControl, 'wifi_direct_finished');
+      },
+    );
+  }
+
+  static Future<void> _closeQuietly(SecureSessionImpl s, String reason) async {
+    try {
+      await s.connectionSession.close(reason: reason);
+    } catch (_) {}
   }
 
   static bool _supportsUpgrade(SecureSessionImpl session) => session

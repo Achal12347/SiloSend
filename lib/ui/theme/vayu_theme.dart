@@ -228,6 +228,30 @@ class VayuTheme {
           (s) => s.contains(WidgetState.selected) ? scheme.secondary : null,
         ),
       ),
+      // Bottom navigation: quiet surface, sage pill marks the current tab.
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: scheme.surfaceContainerLow,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: scheme.secondaryContainer,
+        height: 68,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (s) => textTheme.labelMedium?.copyWith(
+            color: s.contains(WidgetState.selected)
+                ? scheme.onSurface
+                : scheme.onSurfaceVariant,
+            fontWeight: s.contains(WidgetState.selected)
+                ? FontWeight.w600
+                : FontWeight.w500,
+          ),
+        ),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (s) => IconThemeData(
+            color: s.contains(WidgetState.selected)
+                ? scheme.onSecondaryContainer
+                : scheme.onSurfaceVariant,
+          ),
+        ),
+      ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),

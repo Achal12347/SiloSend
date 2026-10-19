@@ -183,6 +183,7 @@ class LanDiscoveryService implements DiscoveryService {
         lastSeen: DateTime.now(),
         isIdentityVerified: false, // Strictly unverified at discovery stage
         transportEndpoints: {TransportType.lan: lanEndpoint},
+        metadata: {'hosting': beacon.hosting, 'private': beacon.hostingPrivate},
       );
 
       _peerController.add(peer);
@@ -206,6 +207,8 @@ class LanDiscoveryService implements DiscoveryService {
         supportedTransports: ad.supportedTransports,
         displayName: ad.displayName,
         protocolVersion: ad.protocolVersion,
+        hosting: ad.hosting,
+        hostingPrivate: ad.hostingPrivate,
       );
 
       final bytes = beacon.toBytes();

@@ -65,25 +65,8 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _open(TransferHistoryRecord record) async {
-    final path = record.savedPath;
-    final messenger = ScaffoldMessenger.of(context);
-    if (path == null || !File(path).existsSync()) {
-      showVayuNotice(
-        null,
-        messenger: messenger,
-        'This file is no longer on your phone.',
-      );
-      return;
-    }
-    final opened = await widget.container.platformService.openFile(
-      path,
-      mimeType: record.isContact ? 'text/x-vcard' : record.mimeType,
-    );
-    if (!opened) {
-      showVayuNotice(null, messenger: messenger, 'Saved in Downloads/Vayu');
-    }
-  }
+  Future<void> _open(TransferHistoryRecord record) =>
+      openHistoryRecord(context, widget.container, record);
 
   @override
   Widget build(BuildContext context) {
@@ -117,7 +100,7 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
                 itemCount: records.length,
                 separatorBuilder: (_, _) =>
                     const Divider(indent: 72, endIndent: 16),
-                itemBuilder: (context, i) => _HistoryRow(
+                itemBuilder: (context, i) => HistoryRow(
                   record: records[i],
                   onOpen: () => _open(records[i]),
                   onRemove: () => _remove(records[i]),
@@ -128,15 +111,44 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
   }
 }
 
-class _HistoryRow extends StatelessWidget {
+/// Opens a received file from history; says so when it is gone.
+/// Shared by the history page and the recent transfers on Home.
+Future<void> openHistoryRecord(
+  BuildContext context,
+  AppContainer container,
+  TransferHistoryRecord record,
+) async {
+  final path = record.savedPath;
+  final messenger = ScaffoldMessenger.of(context);
+  if (path == null || !File(path).existsSync()) {
+    showVayuNotice(
+      null,
+      messenger: messenger,
+      'This file is no longer on your phone.',
+    );
+    return;
+  }
+  final opened = await container.platformService.openFile(
+    path,
+    mimeType: record.isContact ? 'text/x-vcard' : record.mimeType,
+  );
+  if (!opened) {
+    showVayuNotice(null, messenger: messenger, 'Saved in Downloads/Vayu');
+  }
+}
+
+/// One finished transfer: direction, name, size or failure, and when.
+/// Without [onRemove] it has no menu (Home's recent transfers).
+class HistoryRow extends StatelessWidget {
   final TransferHistoryRecord record;
   final VoidCallback onOpen;
-  final VoidCallback onRemove;
+  final VoidCallback? onRemove;
 
-  const _HistoryRow({
+  const HistoryRow({
+    super.key,
     required this.record,
     required this.onOpen,
-    required this.onRemove,
+    this.onRemove,
   });
 
   @override
@@ -191,20 +203,23 @@ class _HistoryRow extends StatelessWidget {
         ),
       ),
       isThreeLine: true,
-      trailing: PopupMenuButton<String>(
-        tooltip: 'More',
-        onSelected: (value) {
-          if (value == 'open') onOpen();
-          if (value == 'remove') onRemove();
-        },
-        itemBuilder: (_) => [
-          if (canOpen) const PopupMenuItem(value: 'open', child: Text('Open')),
-          const PopupMenuItem(
-            value: 'remove',
-            child: Text('Remove from history'),
-          ),
-        ],
-      ),
+      trailing: onRemove == null
+          ? null
+          : PopupMenuButton<String>(
+              tooltip: 'More',
+              onSelected: (value) {
+                if (value == 'open') onOpen();
+                if (value == 'remove') onRemove!();
+              },
+              itemBuilder: (_) => [
+                if (canOpen)
+                  const PopupMenuItem(value: 'open', child: Text('Open')),
+                const PopupMenuItem(
+                  value: 'remove',
+                  child: Text('Remove from history'),
+                ),
+              ],
+            ),
     );
   }
 }

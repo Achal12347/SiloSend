@@ -52,8 +52,9 @@ class LinkUpgradeException implements Exception {
 /// connection then goes through the normal authenticated handshake, so it is
 /// bound to the same device identity as the Bluetooth session.
 ///
-/// Answering phone: hosts a group when [hostingBlocker] allows it (only on
-/// the Receive screen, with Wi-Fi Direct allowed) and replies with its name,
+/// Answering phone: hosts a group when [hostingBlocker] allows it (Receive
+/// screen open, or files this phone asked that peer for; Wi-Fi Direct
+/// allowed) and replies with its name,
 /// passphrase and the Vayu port. The passphrase never leaves the session.
 class LinkUpgradeService {
   final String Function() localDeviceId;
@@ -65,8 +66,13 @@ class LinkUpgradeService {
   /// Port of this phone's Vayu server, which also listens inside the group.
   final int? Function() lanPort;
 
-  /// Why this phone should not host a group now, or null when it may.
-  final Future<LinkUpgradeDeclineReason?> Function() hostingBlocker;
+  /// Why this phone should not host a group for [peerDeviceId] now, or
+  /// null when it may.
+  final Future<LinkUpgradeDeclineReason?> Function(String peerDeviceId)
+  hostingBlocker;
+
+  /// Told after this phone created (or reused) a group for a peer.
+  final void Function()? onHosted;
 
   /// Open connections, to leave a joined group once its connection closes.
   final Stream<List<ConnectionSession>> sessionChanges;
@@ -85,6 +91,7 @@ class LinkUpgradeService {
     required this.hotspot,
     required this.lanPort,
     required this.hostingBlocker,
+    this.onHosted,
     this.sessionChanges = const Stream.empty(),
     this.answerTimeout = const Duration(seconds: 30),
   });
@@ -220,7 +227,7 @@ class LinkUpgradeService {
       AppLogger.warning('LinkUpgrade', 'Ignoring malformed request: $e');
       return;
     }
-    final response = await _decide(request);
+    final response = await _decide(request, session.remoteDeviceId);
     AppLogger.info(
       'LinkUpgrade',
       response.isAccepted
@@ -238,14 +245,17 @@ class LinkUpgradeService {
     );
   }
 
-  Future<LinkUpgradeResponse> _decide(LinkUpgradeRequest request) async {
+  Future<LinkUpgradeResponse> _decide(
+    LinkUpgradeRequest request,
+    String peerDeviceId,
+  ) async {
     LinkUpgradeResponse decline(LinkUpgradeDeclineReason reason) =>
         LinkUpgradeResponse.declined(
           requestId: request.requestId,
           declined: reason,
         );
 
-    final blocker = await hostingBlocker();
+    final blocker = await hostingBlocker(peerDeviceId);
     if (blocker != null) return decline(blocker);
     if (!await wifiDirect.isSupported()) {
       return decline(LinkUpgradeDeclineReason.unsupported);
@@ -263,6 +273,7 @@ class LinkUpgradeService {
         _ => LinkUpgradeDeclineReason.failed,
       });
     }
+    onHosted?.call();
     return LinkUpgradeResponse.accepted(
       requestId: request.requestId,
       networkName: group.credentials.ssid,

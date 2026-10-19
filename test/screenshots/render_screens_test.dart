@@ -12,7 +12,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
+import 'package:vayu/core/chat/chat_store.dart';
 import 'package:vayu/core/contacts/received_cards.dart';
+import 'package:vayu/domain/chat/chat_models.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
@@ -30,20 +32,25 @@ import 'package:vayu/domain/protocol/vayu_packet.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 import 'package:vayu/main.dart';
 import 'package:vayu/platform/platform_service.dart';
+import 'package:vayu/ui/apps/apps_games_page.dart';
 import 'package:vayu/ui/card/incoming_card_watcher.dart';
+import 'package:vayu/ui/contacts/contact_sharing_page.dart';
+import 'package:vayu/ui/home/nearby_devices_page.dart';
 import 'package:vayu/ui/card/my_card_page.dart';
 import 'package:vayu/ui/card/received_cards_page.dart';
 import 'package:vayu/ui/receive/receive_page.dart';
 import 'package:vayu/ui/settings/permissions_page.dart';
 import 'package:vayu/ui/settings/settings_page.dart';
-import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
+import 'package:vayu/ui/transfer/selected_items_page.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Renders the main screens to PNG for store listings and design review.
 ///
-/// Uses the real widgets with sample data that exists only in this test
-/// (generic names, no real people). Not part of the normal test run.
+/// Uses the real widgets with SAMPLE data that exists only in this test:
+/// the nearby phones ("Riya's Galaxy S24", "Kabir's Pixel 8"), the cards and
+/// the transfer are invented for the pictures and never appear in the app.
+/// Not part of the normal test run.
 ///
 /// Run: VAYU_SCREENSHOTS=1 flutter test test/screenshots/render_screens_test.dart
 /// Output: screenshots/ (or VAYU_SCREENSHOTS_DIR).
@@ -86,7 +93,7 @@ void main() {
     s.addPeers(c);
     await s.settle();
     unawaited(
-      PeerSelectionSheet.show(
+      SelectedItemsPage.open(
         s.navContext,
         documents: const [
           SelectedDocument(
@@ -111,6 +118,9 @@ void main() {
         container: c,
       ),
     );
+    await s.settle();
+    await s.save('03a_send_review');
+    await s.tester.tap(find.text('Next: choose device'));
     await s.settle();
     await s.save('03_send');
     await s.close(c);
@@ -230,6 +240,123 @@ void main() {
     await s.close(c);
   });
 
+  shotTest('12 nearby devices', (s) async {
+    final c = await s.app();
+    s.addPeers(c);
+    await s.settle();
+    unawaited(NearbyDevicesPage.open(s.navContext, c));
+    await s.settle();
+    await s.save('12_nearby');
+    await s.close(c);
+  });
+
+  shotTest('13 contact sharing', (s) async {
+    final c = await s.app();
+    await s.settle();
+    unawaited(ContactSharingPage.open(s.navContext, c));
+    await s.settle();
+    await s.save('13_contact_sharing');
+    await s.close(c);
+  });
+
+  shotTest('14 chats tab', (s) async {
+    final now = DateTime.now();
+    ChatMessage msg(
+      String id,
+      bool me,
+      String text,
+      int minutesAgo,
+      MessageState state,
+    ) => ChatMessage(
+      id: id * 16,
+      fromMe: me,
+      text: text,
+      sentAt: now.subtract(Duration(minutes: minutesAgo)),
+      state: state,
+    );
+    final c = await s.app(
+      chats: [
+        Conversation(
+          peerDeviceId: 'a1' * 16,
+          peerName: "Riya's Galaxy S24",
+          accepted: true,
+          messages: [
+            msg('01', false, 'Are you near the gate?', 9, MessageState.read),
+            msg(
+              '02',
+              true,
+              'Yes, sending the photos now',
+              8,
+              MessageState.read,
+            ),
+            msg('03', false, 'Got them, thanks!', 2, MessageState.delivered),
+          ],
+        ),
+        Conversation(
+          peerDeviceId: 'b2' * 16,
+          peerName: "Kabir's Pixel 8",
+          accepted: false,
+          messages: [
+            msg(
+              '04',
+              false,
+              'Hi, can you share the deck?',
+              30,
+              MessageState.delivered,
+            ),
+          ],
+        ),
+      ],
+    );
+    await s.settle();
+    await s.tester.tap(find.text('Chats').last);
+    await s.settle();
+    await s.save('14_chats');
+    await s.tester.tap(find.text("Riya's Galaxy S24"));
+    await s.settle();
+    await s.save('14b_conversation');
+    await s.close(c);
+  });
+
+  shotTest('16 host and client', (s) async {
+    final c = await s.app();
+    await s.settle();
+    await s.tester.tap(find.text('Host & Client').last);
+    await s.settle();
+    await s.save('16_host_idle');
+    // Sample share (test only); no files are read for the picture.
+    c.hostService.startHosting('Trip photos', const [
+      SelectedDocument(
+        identifier: 'content://sample/1',
+        name: 'Beach.jpg',
+        sizeBytes: 4200000,
+        mimeType: 'image/jpeg',
+      ),
+      SelectedDocument(
+        identifier: 'content://sample/2',
+        name: 'Sunset.mp4',
+        sizeBytes: 182000000,
+        mimeType: 'video/mp4',
+      ),
+    ]);
+    await s.settle();
+    await s.save('16b_hosting');
+    await s.tester.tap(find.text('Client'));
+    await s.settle();
+    await s.save('16c_client');
+    await c.hostService.stopHosting();
+    await s.close(c);
+  });
+
+  shotTest('15 apps and games', (s) async {
+    final c = await s.app();
+    await s.settle();
+    unawaited(AppsGamesPage.open(s.navContext));
+    await s.settle();
+    await s.save('15_apps_games');
+    await s.close(c);
+  });
+
   shotTest('11 onboarding', (s) async {
     final c = await s.app(onboarded: false);
     await s.settle();
@@ -253,6 +380,7 @@ class _Shot {
   Future<AppContainer> app({
     AppThemePreference theme = AppThemePreference.light,
     bool onboarded = true,
+    List<Conversation> chats = const [],
   }) async {
     // Pixel 7-like screen: 393 x 852 logical pixels at 3x.
     tester.view.physicalSize = const Size(1179, 2556);
@@ -282,6 +410,7 @@ class _Shot {
           ),
         ),
         platformService: platform,
+        chatStorage: InMemoryChatStorage(chats),
         nfcPairingService: NfcPairingService(
           platformService: platform,
           platformAdapter: _SampleNfc(),
@@ -332,6 +461,12 @@ class _Shot {
           availableTransports: transports,
           rssi: -52,
           endpointAddress: '192.168.1.20:53531',
+          transportEndpoints: {
+            if (transports.contains(TransportType.lan))
+              TransportType.lan: '192.168.1.20:53531',
+            if (transports.contains(TransportType.ble))
+              TransportType.ble: 'AA:BB:CC:DD:EE:01',
+          },
           lastSeen: DateTime.now(),
         ),
       );

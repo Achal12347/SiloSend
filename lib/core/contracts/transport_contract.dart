@@ -17,6 +17,7 @@ class LinkMetrics {
     this.isCongested = false,
   });
 
+  /// Nothing measured. A 0 latency or RSSI always means "unknown".
   static const zero = LinkMetrics(
     latencyMs: 0,
     estimatedThroughputBytesPerSec: 0,

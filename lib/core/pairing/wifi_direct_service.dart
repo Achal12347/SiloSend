@@ -159,6 +159,8 @@ class AndroidWifiDirectService implements WifiDirectService {
     required String networkName,
     required String passphrase,
   }) async {
+    // Joining ends a group this phone hosted (one group at a time).
+    _hosting = false;
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
         'connect',

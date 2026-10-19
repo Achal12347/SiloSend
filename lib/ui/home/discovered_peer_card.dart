@@ -4,30 +4,33 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/ui/widgets/trust_label.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
-/// One nearby device row.
+/// One nearby device row: who, how it was found, and a chat button.
 ///
 /// Keeps two facts separate: how the device was found (Wi-Fi / Bluetooth) and
 /// whether its cryptographic identity is trusted. Trust is phrased for people
-/// ("New device", "Verified") rather than protocol terms.
+/// ("New device", "Verified") rather than protocol terms. Files are sent from
+/// the Send flow, so the row's only action is opening the chat.
 class DiscoveredPeerCard extends StatelessWidget {
   final AppContainer container;
   final DiscoveredPeer peer;
-  final bool isConnecting;
-  final VoidCallback onConnectPressed;
-  final VoidCallback onSendFilePressed;
-
-  /// Optional "Send a contact" menu action.
-  final VoidCallback? onSendContactPressed;
+  final VoidCallback onChatPressed;
 
   const DiscoveredPeerCard({
     super.key,
     required this.container,
     required this.peer,
-    required this.isConnecting,
-    required this.onConnectPressed,
-    required this.onSendFilePressed,
-    this.onSendContactPressed,
+    required this.onChatPressed,
   });
+
+  /// How this phone was actually found ("Wi-Fi", "Bluetooth"), or null.
+  /// Only routes with a real address count; nothing is guessed.
+  static String? routesLabel(DiscoveredPeer peer) {
+    final routes = [
+      if (peer.lanEndpoint != null) 'Wi-Fi',
+      if (peer.bleEndpoint != null) 'Bluetooth',
+    ];
+    return routes.isEmpty ? null : routes.join(', ');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -81,50 +84,42 @@ class DiscoveredPeerCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    // How it was found, as icons so the line never truncates.
+                    if (routesLabel(peer) case final routes?)
+                      Semantics(
+                        label: 'Found over $routes',
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const SizedBox(width: 8),
+                            if (peer.lanEndpoint != null)
+                              Icon(
+                                Icons.wifi_rounded,
+                                size: 14,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            if (peer.bleEndpoint != null) ...[
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.bluetooth_rounded,
+                                size: 14,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 8),
-          FilledButton(
-            onPressed: onSendFilePressed,
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(0, 40),
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-            ),
-            child: const Text('Send'),
+          IconButton.filledTonal(
+            tooltip: 'Chat with ${peer.displayName}',
+            onPressed: onChatPressed,
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
           ),
-          if (isConnecting)
-            const Padding(
-              padding: EdgeInsets.all(14),
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            )
-          else
-            PopupMenuButton<String>(
-              tooltip: 'More',
-              icon: const Icon(Icons.more_vert_rounded),
-              onSelected: (value) {
-                if (value == 'connect') onConnectPressed();
-                if (value == 'contact') onSendContactPressed?.call();
-              },
-              itemBuilder: (context) => [
-                if (onSendContactPressed != null)
-                  const PopupMenuItem(
-                    value: 'contact',
-                    child: Text('Send a contact'),
-                  ),
-                PopupMenuItem(
-                  value: 'connect',
-                  enabled: !isConnected,
-                  child: Text(isConnected ? 'Connected' : 'Connect'),
-                ),
-              ],
-            ),
         ],
       ),
     );
