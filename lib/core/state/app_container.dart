@@ -19,6 +19,7 @@ import 'package:vayu/core/mesh/relay_service.dart';
 import 'package:vayu/domain/chat/chat_models.dart';
 import 'package:vayu/domain/transfer/batch_payloads.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
+import 'package:vayu/core/transfer/resumable_transfers.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/constants/app_paths.dart';
@@ -508,6 +509,13 @@ class AppContainer {
     await _transferHistory?.clear();
   }
 
+  /// Partly received files kept for resume (Your data); null where the
+  /// transfer engine keeps none.
+  ResumableTransfers? get resumableTransfers {
+    final engine = _transferEngine;
+    return engine is TransferEngineImpl ? engine.resumable : null;
+  }
+
   /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
   bool get wifiDirectSupported => _wifiDirectSupported;
 
@@ -609,6 +617,15 @@ class AppContainer {
         );
       }
     }
+    // Trusted devices list: keep the name each phone uses now.
+    _activitySubs.add(
+      _secureSessionManager!.secureSessions.listen((s) {
+        final name = s.connectionSession.info.remoteDisplayName;
+        if (name != null) {
+          _peerTrustStore?.rememberName(s.remoteDeviceId, name).ignore();
+        }
+      }),
+    );
     _chatService?.onActivity = (s) => policy.recordActivity(s.sessionId);
     _hostService?.onActivity = (s) => policy.recordActivity(s.sessionId);
   }
@@ -735,9 +752,24 @@ class AppContainer {
     return snapshot.isCharging == true || level == null || level >= 20;
   }
 
+  /// Forgets a phone (Trusted devices): its pinned key is dropped and open
+  /// sessions with it are closed, so the next contact is a first contact.
+  Future<void> forgetDevice(String deviceId) async {
+    final id = deviceId.replaceAll('-', '').toLowerCase();
+    await _peerTrustStore?.forget(id);
+    for (final s
+        in _secureSessionManager?.activeSessions.toList() ??
+            const <SecureSessionImpl>[]) {
+      if (s.remoteDeviceId.replaceAll('-', '').toLowerCase() == id) {
+        await s.connectionSession.close(reason: 'device_forgotten');
+      }
+    }
+  }
+
   /// Turns relaying for nearby phones on or off (and says so in the beacon).
   Future<void> setRelayEnabled(bool enabled) async {
     _userSettings = _userSettings.copyWith(relayEnabled: enabled);
+    if (!enabled) _relayService?.stopRelaying();
     await settingsStorage.saveSettings(_userSettings);
     if (!_userSettingsController.isClosed) {
       _userSettingsController.add(_userSettings);
@@ -963,8 +995,23 @@ class AppContainer {
 
   /// Initializes core services, loads/creates device identity, binds discovery coordinator,
   /// starts transport servers, and initializes connection manager and pairing services.
+  /// Milliseconds each startup step took on this phone (Phase 18: measure
+  /// before optimizing), shown in Diagnostics. Measurement only.
+  final Map<String, int> startupSteps = {};
+  final Stopwatch _startupClock = Stopwatch();
+  int _startupLast = 0;
+
+  int get startupTotalMs => _startupLast;
+
+  void _startupStep(String name) {
+    final now = _startupClock.elapsedMilliseconds;
+    startupSteps[name] = now - _startupLast;
+    _startupLast = now;
+  }
+
   Future<void> initialize() async {
     if (_isInitialized) return;
+    _startupClock.start();
 
     try {
       AppLogger.info('AppContainer', 'Initializing Vayu core container...');
@@ -972,10 +1019,12 @@ class AppContainer {
       // 1. Start lifecycle observation
       lifecycleManager.start();
 
+      _startupStep('lifecycle');
       // 2. Query platform capabilities truthfully
       _capabilities = await platformService.getCapabilities();
       await refreshCapabilities();
 
+      _startupStep('capabilities');
       // 2b. Initialize Capability Coordinator (Phase 14)
       _capabilityCoordinator =
           _injectedCapabilityCoordinator ??
@@ -992,6 +1041,7 @@ class AppContainer {
         _userSettingsController.add(_userSettings);
       }
 
+      _startupStep('settings');
       // 3. Load or mint persistent local device identity
       final loadedIdentity = await identityManager.getOrCreateIdentity();
       if (_userSettings.customDisplayName != null &&
@@ -1002,6 +1052,7 @@ class AppContainer {
         );
       }
 
+      _startupStep('identity');
       // 4. Initialize Discovery Coordinator
       if (_injectedDiscoveryCoordinator != null) {
         _discoveryCoordinator = _injectedDiscoveryCoordinator;
@@ -1017,6 +1068,7 @@ class AppContainer {
         );
       }
 
+      _startupStep('discovery');
       // 5. Initialize LAN TCP server
       if (_injectedLanServer != null) {
         _lanServer = _injectedLanServer;
@@ -1042,6 +1094,7 @@ class AppContainer {
         _lanServer = server;
       }
 
+      _startupStep('lanServer');
       // 6. Initialize BLE GATT Server (Android with BLE capability only)
       if (_injectedBleServer != null) {
         _bleServer = _injectedBleServer;
@@ -1057,6 +1110,7 @@ class AppContainer {
         }
       }
 
+      _startupStep('bleServer');
       // 6b. Phone-to-phone Wi-Fi (hotspot and Wi-Fi Direct)
       _hotspotService = Platform.isAndroid && !_isTestEnvironment
           ? AndroidHotspotService()
@@ -1068,6 +1122,7 @@ class AppContainer {
               : const UnsupportedWifiDirectService());
       _wifiDirectSupported = await _wifiDirectService!.isSupported();
 
+      _startupStep('wifiDirect');
       // 7. Initialize Connection Manager
       if (_injectedConnectionManager != null) {
         _connectionManager = _injectedConnectionManager;
@@ -1107,6 +1162,7 @@ class AppContainer {
         );
       }
 
+      _startupStep('connections+nfc');
       // 9. Initialize Cryptographic Security Primitives & Secure Session Manager (Phase 6)
       _cryptoService =
           _injectedCryptoService ??
@@ -1148,13 +1204,22 @@ class AppContainer {
       // Wire SecureSessionManager to automatically negotiate encryption for ConnectionManager sessions
       _secureSessionManager!.attachToConnectionManager(_connectionManager!);
 
+      _startupStep('security (keys, trust)');
       // 10. Initialize Unified Transfer Engine (Phase 7)
       if (_injectedTransferEngine != null) {
         _transferEngine = _injectedTransferEngine;
       } else {
+        final resumable = ResumableTransfers(
+          // App-private, so partial files survive an app or phone restart.
+          indexFile: Platform.isAndroid && !_isTestEnvironment
+              ? File('${AppPaths.androidFilesDir}/resumable_transfers.json')
+              : null,
+        );
+        await resumable.load();
         _transferEngine = TransferEngineImpl(
           localDeviceId: loadedIdentity.idHex,
           secureSessionManager: _secureSessionManager!,
+          resumable: resumable,
         );
       }
       transferStatsLog?.environmentProbe = _transferEnvironment;
@@ -1180,6 +1245,7 @@ class AppContainer {
         _linkUpgradeService!.attach(engine.linkUpgradePackets);
       }
 
+      _startupStep('transfers (+resume list)');
       // 11. Initialize Battery State Provider & Smart Transport Selector (Phase 8)
       _batteryProvider = _injectedBatteryProvider ?? SystemBatteryProvider();
       _transportSelector =
@@ -1193,6 +1259,7 @@ class AppContainer {
             wifiDirectSupported: () async => _wifiDirectSupported,
           );
 
+      _startupStep('battery+selector');
       // 12. Initialize File Services, Storage Services & File Sharing Coordinator (Phase 9)
       _filePickerService =
           _injectedFilePickerService ?? SystemFilePickerService();
@@ -1270,6 +1337,7 @@ class AppContainer {
         sessionChanges: _connectionManager?.activeSessionsStream,
       );
 
+      _startupStep('files+history+cards');
       // 12b. Chat over the existing secure sessions
       _chatService = ChatService(
         localDeviceId: () => identity?.idHex ?? loadedIdentity.idHex,
@@ -1310,6 +1378,7 @@ class AppContainer {
         );
       }
 
+      _startupStep('chat (+decrypt history)');
       // 12c. Host & Client over the same sessions and transfers
       _hostService = HostService(
         localDeviceId: () => identity?.idHex ?? loadedIdentity.idHex,
@@ -1332,9 +1401,11 @@ class AppContainer {
       }
       _trackSessionActivity();
 
+      _startupStep('host');
       // 12d. Mesh: phones reached through other phones (Phase 12)
       _setUpMesh();
 
+      _startupStep('mesh');
       // 13. Initialize Central Application Orchestrator (Track C: U1–U8)
       _orchestrator = AppOrchestrator(
         capabilityCoordinator: _capabilityCoordinator!,
@@ -1359,10 +1430,16 @@ class AppContainer {
       );
       _discoveryCoordinator?.setBatterySaver(isBatterySaverActive);
 
+      _startupStep('orchestrator+battery');
       // 14. Connect lifecycle transitions with discovery state
       lifecycleManager.addListener(_onLifecycleStateChanged);
 
+      _startupStep('lifecycle hooks');
       _isInitialized = true;
+      AppLogger.info(
+        'AppContainer',
+        'Startup took $startupTotalMs ms: ${startupSteps.entries.map((e) => '${e.key} ${e.value}').join(', ')}',
+      );
       AppLogger.info(
         'AppContainer',
         'Vayu core container initialized successfully for: ${identity?.displayName} (${identity?.idHex.substring(0, 8)}...)',

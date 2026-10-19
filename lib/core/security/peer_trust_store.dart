@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
@@ -14,21 +15,31 @@ class PeerTrustRecord {
   final DateTime firstSeen;
   final DateTime lastSeen;
 
+  /// The name the phone last used, for the Trusted devices list (null for
+  /// records saved before names were kept).
+  final String? displayName;
+
   const PeerTrustRecord({
     required this.deviceIdHex,
     required this.identityPubKey,
     required this.trustLevel,
     required this.firstSeen,
     required this.lastSeen,
+    this.displayName,
   });
 
-  PeerTrustRecord copyWith({TrustLevel? trustLevel, DateTime? lastSeen}) {
+  PeerTrustRecord copyWith({
+    TrustLevel? trustLevel,
+    DateTime? lastSeen,
+    String? displayName,
+  }) {
     return PeerTrustRecord(
       deviceIdHex: deviceIdHex,
       identityPubKey: identityPubKey,
       trustLevel: trustLevel ?? this.trustLevel,
       firstSeen: firstSeen,
       lastSeen: lastSeen ?? this.lastSeen,
+      displayName: displayName ?? this.displayName,
     );
   }
 }
@@ -83,8 +94,44 @@ class PeerTrustStore {
     }
   }
 
+  final StreamController<void> _changes = StreamController<void>.broadcast();
+
+  /// Fires whenever a record is added, changed or forgotten.
+  Stream<void> get changes => _changes.stream;
+
+  /// Remembers the name [deviceIdHex] uses now (for the Trusted devices
+  /// list). Only for phones already on record.
+  Future<void> rememberName(String deviceIdHex, String name) async {
+    final key = deviceIdHex.toLowerCase();
+    final existing = _records[key];
+    final trimmed = name.trim();
+    if (existing == null ||
+        trimmed.isEmpty ||
+        existing.displayName == trimmed) {
+      return;
+    }
+    _records[key] = existing.copyWith(displayName: trimmed);
+    await _persist();
+  }
+
+  /// Forgets [deviceIdHex]: its pinned key is dropped, so the next contact
+  /// is a first contact again (and it cannot be reached through other phones
+  /// until met directly). Also how a key conflict is resolved by the user.
+  Future<bool> forget(String deviceIdHex) async {
+    final removed = _records.remove(deviceIdHex.toLowerCase()) != null;
+    if (removed) {
+      AppLogger.info(
+        'PeerTrustStore',
+        'Forgot a device at the user\'s request',
+      );
+      await _persist();
+    }
+    return removed;
+  }
+
   // Saves run one after another so an older snapshot never overwrites a newer one.
   Future<void> _persist() {
+    if (!_changes.isClosed) _changes.add(null);
     final target = storage;
     if (target == null) return Future<void>.value();
     final snapshot = _records.values.toList();

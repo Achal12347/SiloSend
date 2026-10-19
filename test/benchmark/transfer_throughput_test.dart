@@ -1,7 +1,9 @@
 @Timeout(Duration(minutes: 10))
 library;
 
+import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -99,12 +101,19 @@ Future<String> _runOnce(int totalBytes, int chunkSize) async {
     await secureA.secureOutboundConnection(sessionA);
     await responder;
 
+    // Written in 1 MB pieces, so the test itself holds no big buffer and
+    // the memory figure below is the transfer's own.
     final sourceFile = File('${dir.path}/source.bin');
-    final data = Uint8List(totalBytes);
-    for (var i = 0; i < totalBytes; i += 4096) {
-      data[i] = i & 0xff;
+    final sink = sourceFile.openSync(mode: FileMode.write);
+    final piece = Uint8List(1 << 20);
+    for (var written = 0; written < totalBytes; written += piece.length) {
+      for (var i = 0; i < piece.length; i += 4096) {
+        piece[i] = (written + i) & 0xff;
+      }
+      final n = min(piece.length, totalBytes - written);
+      sink.writeFromSync(piece, 0, n);
     }
-    sourceFile.writeAsBytesSync(data);
+    sink.closeSync();
     final source = FilePayloadSource(sourceFile);
 
     final clock = Stopwatch()..start();
@@ -118,6 +127,13 @@ Future<String> _runOnce(int totalBytes, int chunkSize) async {
     final hashTime = clock.elapsed;
 
     final requestFuture = engineB.incomingTransferRequests.first;
+    // Memory rise during the transfer (sender and receiver both live in
+    // this process), sampled every 50 ms.
+    final rssBefore = ProcessInfo.currentRss;
+    var rssPeak = rssBefore;
+    final sampler = Timer.periodic(const Duration(milliseconds: 50), (_) {
+      rssPeak = max(rssPeak, ProcessInfo.currentRss);
+    });
     final sendClock = Stopwatch()..start();
     final sender = await engineA.sendPayload(
       targetDeviceId: b.idHex,
@@ -128,11 +144,14 @@ Future<String> _runOnce(int totalBytes, int chunkSize) async {
     final receiver = await request.accept('${dir.path}/out.bin');
     await Future.wait([sender.done, receiver.done]);
     sendClock.stop();
+    sampler.cancel();
+    final rise = (rssPeak - rssBefore) / (1024 * 1024);
     await source.close();
 
     final mbps = totalBytes / 1e6 / (sendClock.elapsedMicroseconds / 1e6);
     return '${mbps.toStringAsFixed(1)} MB/s end-to-end '
-        '(pre-hash ${hashTime.inMilliseconds} ms) | '
+        '(pre-hash ${hashTime.inMilliseconds} ms, memory rise '
+        '${rise.toStringAsFixed(0)} MB for both ends) | '
         '${engineA.statsLog.recent.first.summary()} | '
         '${engineB.statsLog.recent.first.summary()}';
   } finally {

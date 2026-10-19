@@ -192,6 +192,14 @@ class RelayService {
     await _changes.close();
   }
 
+  /// Ends every connection this phone relays for others now (relaying was
+  /// switched off).
+  void stopRelaying() {
+    for (final id in _relayed.keys.toList()) {
+      _dropRelay(id);
+    }
+  }
+
   // ---------------------------------------------------------------- origin
 
   /// Opens a circuit to [targetDeviceId] through nearby phones. Throws

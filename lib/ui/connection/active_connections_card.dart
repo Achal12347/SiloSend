@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
@@ -54,23 +55,11 @@ class ActiveConnectionsCard extends StatelessWidget {
                       ],
                     ),
                     if (sessions.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: VayuPalette.fromTheme(theme).successContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '${sessions.length} Active',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: VayuPalette.fromTheme(theme).success,
-                          ),
-                        ),
+                      StatusPill(
+                        label: '${sessions.length} Active',
+                        foreground: VayuPalette.fromTheme(theme).success,
+                        background: VayuPalette.fromTheme(theme)
+                            .successContainer,
                       ),
                   ],
                 ),
@@ -407,7 +396,11 @@ String routeName(TransportType transport, String? remoteAddress) =>
     switch (transport) {
       TransportType.ble => 'Bluetooth',
       TransportType.wifiDirect => 'Wi-Fi Direct',
-      TransportType.relay => 'Through another phone',
+      // "via Bo" is the first relay's name (RelayedConnection).
+      TransportType.relay =>
+        (remoteAddress?.startsWith('via ') ?? false)
+            ? 'Through ${remoteAddress!.substring(4)}'
+            : 'Through another phone',
       TransportType.lan =>
         (remoteAddress?.startsWith('192.168.49.') ?? false)
             ? 'Wi-Fi Direct'

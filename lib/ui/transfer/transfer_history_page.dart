@@ -5,18 +5,29 @@ import 'package:flutter/material.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_history.dart';
+import 'package:vayu/ui/card/received_cards_page.dart';
 import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
-/// Every finished transfer, newest first, kept across restarts.
+/// Which part of the history is shown.
+enum HistoryFilter { all, received, sent }
+
+/// Every finished transfer, newest first, kept across restarts. "Received"
+/// is everything that arrived (from Send, chats and hosts) plus a way to the
+/// received cards: one place for received items.
 ///
 /// Removing an entry only forgets it here; received files stay where they
 /// were saved.
 class TransferHistoryPage extends StatefulWidget {
   final AppContainer container;
+  final HistoryFilter initialFilter;
 
-  const TransferHistoryPage({super.key, required this.container});
+  const TransferHistoryPage({
+    super.key,
+    required this.container,
+    this.initialFilter = HistoryFilter.all,
+  });
 
   static Future<void> open(BuildContext context, AppContainer container) =>
       Navigator.of(context).push(
@@ -31,6 +42,7 @@ class TransferHistoryPage extends StatefulWidget {
 
 class _TransferHistoryPageState extends State<TransferHistoryPage> {
   StreamSubscription<List<TransferTask>>? _sub;
+  late HistoryFilter _filter = widget.initialFilter;
 
   @override
   void initState() {
@@ -71,41 +83,99 @@ class _TransferHistoryPageState extends State<TransferHistoryPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final records = widget.container.transferHistory;
+    final all = widget.container.transferHistory;
+    final records = switch (_filter) {
+      HistoryFilter.all => all,
+      HistoryFilter.received => [
+        for (final r in all)
+          if (!r.outbound && r.outcome == TransferOutcome.completed) r,
+      ],
+      HistoryFilter.sent => [
+        for (final r in all)
+          if (r.outbound) r,
+      ],
+    };
+    final cards = widget.container.receivedCards?.all.length ?? 0;
+    final empty = switch (_filter) {
+      HistoryFilter.all => 'Files you send and receive will be listed here.',
+      HistoryFilter.received => 'Nothing received yet.',
+      HistoryFilter.sent => 'Nothing sent yet.',
+    };
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('History'),
         actions: [
-          if (records.isNotEmpty)
+          if (all.isNotEmpty)
             TextButton(onPressed: _clear, child: const Text('Clear')),
         ],
       ),
       body: SafeArea(
-        child: records.isEmpty
-            ? Center(
-                child: Padding(
-                  padding: const EdgeInsets.all(32),
-                  child: Text(
-                    'Files you send and receive will be listed here.',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<HistoryFilter>(
+                  segments: const [
+                    ButtonSegment(value: HistoryFilter.all, label: Text('All')),
+                    ButtonSegment(
+                      value: HistoryFilter.received,
+                      label: Text('Received'),
                     ),
-                  ),
-                ),
-              )
-            : ListView.separated(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: records.length,
-                separatorBuilder: (_, _) =>
-                    const Divider(indent: 72, endIndent: 16),
-                itemBuilder: (context, i) => HistoryRow(
-                  record: records[i],
-                  onOpen: () => _open(records[i]),
-                  onRemove: () => _remove(records[i]),
+                    ButtonSegment(
+                      value: HistoryFilter.sent,
+                      label: Text('Sent'),
+                    ),
+                  ],
+                  selected: {_filter},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (v) => setState(() => _filter = v.first),
                 ),
               ),
+            ),
+            if (_filter == HistoryFilter.received && cards > 0)
+              ListTile(
+                leading: Icon(
+                  Icons.contact_page_outlined,
+                  color: theme.colorScheme.primary,
+                ),
+                title: Text(
+                  'Received cards ($cards)',
+                  style: theme.textTheme.titleSmall,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => ReceivedCardsPage.open(context, widget.container),
+              ),
+            Expanded(
+              child: records.isEmpty
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(32),
+                        child: Text(
+                          empty,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      itemCount: records.length,
+                      separatorBuilder: (_, _) =>
+                          const Divider(indent: 72, endIndent: 16),
+                      itemBuilder: (context, i) => HistoryRow(
+                        record: records[i],
+                        onOpen: () => _open(records[i]),
+                        onRemove: () => _remove(records[i]),
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -650,6 +650,18 @@ class ChatService {
     }
   }
 
+  /// Removes every conversation from this phone only (Your data). Files
+  /// already received stay where they were saved.
+  void deleteAll() {
+    _byPeer.clear();
+    _outgoing.clear();
+    _emit();
+  }
+
+  /// Messages kept on this phone, in all conversations.
+  int get messageCount =>
+      _byPeer.values.fold(0, (sum, c) => sum + c.messages.length);
+
   /// Removes the conversation from this phone only.
   void delete(String deviceId) {
     _byPeer.remove(_key(deviceId));

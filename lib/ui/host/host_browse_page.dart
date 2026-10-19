@@ -164,7 +164,20 @@ class _HostBrowsePageState extends State<HostBrowsePage> {
         action: FilledButton(onPressed: _load, child: const Text('Try again')),
       );
     } else if (catalog == null) {
-      body = const Center(child: CircularProgressIndicator());
+      body = Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            Text(
+              'Asking $_hostName what it shares…',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      );
     } else if (!catalog.hosting) {
       body = _Message(
         icon: Icons.cell_tower_rounded,
@@ -426,6 +439,8 @@ class _PinEntryState extends State<_PinEntry> {
           style: theme.textTheme.headlineMedium?.copyWith(letterSpacing: 8),
           decoration: InputDecoration(
             counterText: '',
+            // Read out by screen readers; the dots alone said nothing.
+            labelText: '6-digit PIN',
             hintText: '••••••',
             errorText: problem,
             errorMaxLines: 3,

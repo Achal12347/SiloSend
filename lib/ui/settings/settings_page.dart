@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/widgets/vayu_widgets.dart';
+import 'package:vayu/ui/settings/your_data_page.dart';
+import 'package:vayu/ui/security/trusted_devices_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/settings/user_settings.dart';
@@ -103,6 +106,23 @@ class _SettingsPageState extends State<SettingsPage> {
                   // 3. Storage & Downloads Directory
                   _buildSectionHeader(theme, 'Storage'),
                   _buildStorageCard(theme),
+                  const SizedBox(height: 16),
+
+                  _buildSectionHeader(theme, 'Security'),
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.verified_user_rounded,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: const Text('Trusted devices'),
+                      subtitle: const Text(
+                        'Phones you have met, verify or forget them',
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => TrustedDevicesPage.open(context, container),
+                    ),
+                  ),
                   const SizedBox(height: 16),
 
                   // 4. Permissions & Privacy
@@ -243,10 +263,16 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            // Wraps at large text sizes (it overflowed at 2x on a small
+            // phone).
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 8,
+              runSpacing: 6,
               children: [
                 Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       isThrottled
@@ -257,9 +283,11 @@ class _SettingsPageState extends State<SettingsPage> {
                           : theme.colorScheme.primary,
                     ),
                     const SizedBox(width: 8),
-                    const Text(
-                      'Battery saver',
-                      style: TextStyle(fontWeight: FontWeight.bold),
+                    const Flexible(
+                      child: Text(
+                        'Battery saver',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
                     ),
                     InfoDot(
                       title: 'Battery saver',
@@ -267,27 +295,14 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isThrottled
-                        ? VayuPalette.fromTheme(theme).warningContainer
-                        : VayuPalette.fromTheme(theme).successContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    isThrottled ? 'Active' : 'Standard',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: isThrottled
-                          ? VayuPalette.fromTheme(theme).warning
-                          : VayuPalette.fromTheme(theme).success,
-                    ),
-                  ),
+                StatusPill(
+                  label: isThrottled ? 'Active' : 'Standard',
+                  foreground: isThrottled
+                      ? VayuPalette.fromTheme(theme).warning
+                      : VayuPalette.fromTheme(theme).success,
+                  background: isThrottled
+                      ? VayuPalette.fromTheme(theme).warningContainer
+                      : VayuPalette.fromTheme(theme).successContainer,
                 ),
               ],
             ),
@@ -422,6 +437,17 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(height: 1, thickness: 0.5),
           ListTile(
             leading: Icon(
+              Icons.folder_shared_outlined,
+              color: theme.colorScheme.primary,
+            ),
+            title: const Text('Your data'),
+            subtitle: const Text('What Vayu keeps on this phone'),
+            trailing: const Icon(Icons.chevron_right_rounded),
+            onTap: () => YourDataPage.open(context, container),
+          ),
+          const Divider(height: 1, thickness: 0.5),
+          ListTile(
+            leading: Icon(
               Icons.verified_user_outlined,
               color: theme.colorScheme.primary,
             ),
@@ -483,11 +509,13 @@ class _SettingsPageState extends State<SettingsPage> {
               children: [
                 const Icon(Icons.lock_outline_rounded, size: 18),
                 const SizedBox(width: 8),
-                Text(
-                  '${AppConstants.appName} by Achyrio',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                Expanded(
+                  child: Text(
+                    '${AppConstants.appName} by Achyrio',
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
                 ),
-                const Spacer(),
                 const Text(
                   'v1.0.0',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),

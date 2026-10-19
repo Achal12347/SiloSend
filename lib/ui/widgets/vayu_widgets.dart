@@ -127,12 +127,15 @@ class StatusPill extends StatelessWidget {
             Icon(icon, size: 14, color: foreground),
             const SizedBox(width: 4),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: foreground,
+          // Wraps instead of overflowing at large text sizes.
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: foreground,
+              ),
             ),
           ),
         ],

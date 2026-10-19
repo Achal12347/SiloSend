@@ -61,6 +61,7 @@ class FileTrustRecordStorage implements TrustRecordStorage {
     'trustLevel': r.trustLevel.name,
     'firstSeen': r.firstSeen.toUtc().toIso8601String(),
     'lastSeen': r.lastSeen.toUtc().toIso8601String(),
+    if (r.displayName != null) 'name': r.displayName!,
   };
 
   static PeerTrustRecord? _decode(Object? raw) {
@@ -79,6 +80,7 @@ class FileTrustRecordStorage implements TrustRecordStorage {
         trustLevel: level,
         firstSeen: DateTime.parse(raw['firstSeen'] as String),
         lastSeen: DateTime.parse(raw['lastSeen'] as String),
+        displayName: raw['name'] is String ? raw['name'] as String : null,
       );
     } catch (_) {
       return null; // Skip one malformed entry rather than discarding the store.

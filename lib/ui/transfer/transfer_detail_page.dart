@@ -10,6 +10,7 @@ import 'package:vayu/core/transfer/transfer_task_impl.dart';
 import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/transfer/payload_destination.dart';
+import 'package:vayu/ui/widgets/motion.dart';
 import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
@@ -498,11 +499,17 @@ class _ProgressRing extends StatelessWidget {
     final Widget center;
     if (status == TransferStatus.completed) {
       ringColor = palette.success;
-      center = Icon(Icons.check_rounded, size: 72, color: palette.success);
+      center = Icon(
+        Icons.check_rounded,
+        key: const ValueKey('done'),
+        size: 72,
+        color: palette.success,
+      );
     } else if (failed || status == TransferStatus.failed) {
       ringColor = palette.danger;
       center = Icon(
         Icons.priority_high_rounded,
+        key: const ValueKey('failed'),
         size: 64,
         color: palette.danger,
       );
@@ -510,12 +517,14 @@ class _ProgressRing extends StatelessWidget {
       ringColor = theme.colorScheme.outline;
       center = Icon(
         Icons.block_rounded,
+        key: const ValueKey('cancelled'),
         size: 56,
         color: theme.colorScheme.onSurfaceVariant,
       );
     } else {
       ringColor = theme.colorScheme.secondary;
       center = Column(
+        key: const ValueKey('moving'),
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
@@ -554,7 +563,9 @@ class _ProgressRing extends StatelessWidget {
                 backgroundColor: theme.colorScheme.surfaceContainerHighest,
               ),
             ),
-            center,
+            // The tick (or cross) replaces the percentage with a short
+            // fade and grow; the percentage itself never animates.
+            VayuSwitcher(child: center),
           ],
         ),
       ),

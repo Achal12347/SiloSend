@@ -13,6 +13,7 @@ import 'package:vayu/ui/transfer/selected_items_page.dart' show fileIconFor;
 import 'package:vayu/ui/transfer/transfer_detail_page.dart'
     show latestProgressOf;
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/motion.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
@@ -63,7 +64,18 @@ class _ConversationPageState extends State<ConversationPage>
     _chat.open(widget.peerDeviceId);
     // Files offered while this chat is on screen are taken at once.
     _chat.setVisible(widget.peerDeviceId, true);
+    // Messages already here when the chat opened appear without motion;
+    // only ones that arrive (or are sent) while it is open ease in.
+    _initialIds = {
+      for (final m
+          in _chat.conversationWith(widget.peerDeviceId)?.messages ??
+              const <ChatMessage>[])
+        m.id,
+    };
   }
+
+  late final Set<String> _initialIds;
+  final Set<String> _settledIds = {};
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -294,26 +306,15 @@ class _ConversationPageState extends State<ConversationPage>
                           itemCount: messages.length,
                           itemBuilder: (context, i) {
                             final m = messages[messages.length - 1 - i];
-                            if (m.isFile) {
-                              return _FileBubble(
-                                container: widget.container,
-                                message: m,
-                                peerName: widget.peerName,
-                                onAccept: () => _accept(m),
-                                onDecline: () => _chat.declineFiles(
-                                  widget.peerDeviceId,
-                                  m.id,
-                                ),
-                                onRetrySend: () => _retry(m),
-                                onOpen: _openFile,
-                              );
+                            final bubble = _bubbleFor(m, lastMine);
+                            if (_initialIds.contains(m.id) ||
+                                _settledIds.contains(m.id)) {
+                              return bubble;
                             }
-                            return _Bubble(
-                              message: m,
-                              showState: m.fromMe && m.id == lastMine.id,
-                              onRetry: m.state == MessageState.failed
-                                  ? () => _retry(m)
-                                  : null,
+                            return EaseIn(
+                              key: ValueKey('in-${m.id}'),
+                              onDone: () => _settledIds.add(m.id),
+                              child: bubble,
                             );
                           },
                         ),
@@ -329,6 +330,25 @@ class _ConversationPageState extends State<ConversationPage>
           ),
         );
       },
+    );
+  }
+
+  Widget _bubbleFor(ChatMessage m, ChatMessage lastMine) {
+    if (m.isFile) {
+      return _FileBubble(
+        container: widget.container,
+        message: m,
+        peerName: widget.peerName,
+        onAccept: () => _accept(m),
+        onDecline: () => _chat.declineFiles(widget.peerDeviceId, m.id),
+        onRetrySend: () => _retry(m),
+        onOpen: _openFile,
+      );
+    }
+    return _Bubble(
+      message: m,
+      showState: m.fromMe && m.id == lastMine.id,
+      onRetry: m.state == MessageState.failed ? () => _retry(m) : null,
     );
   }
 }
@@ -539,21 +559,29 @@ class _FileBubble extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(height: 6),
-                if (message.fileState == ChatFileState.transferring &&
-                    message.batchId != null)
-                  _BatchProgress(
-                    container: container,
-                    batchId: message.batchId!,
-                    color: fg,
-                    track: fg.withValues(alpha: 0.2),
-                  )
-                else
-                  Text(
-                    _status(summary, notSent),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: notSent ? palette.dangerContainer : sub,
-                    ),
-                  ),
+                // Waiting, moving and done fade into each other.
+                VayuSwitcher(
+                  child:
+                      message.fileState == ChatFileState.transferring &&
+                          message.batchId != null
+                      ? _BatchProgress(
+                          key: const ValueKey('moving'),
+                          container: container,
+                          batchId: message.batchId!,
+                          color: fg,
+                          track: fg.withValues(alpha: 0.2),
+                        )
+                      : Align(
+                          key: ValueKey('${message.fileState}-$notSent'),
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            _status(summary, notSent),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: notSent ? palette.dangerContainer : sub,
+                            ),
+                          ),
+                        ),
+                ),
                 if (onHold || canRetryReceive) ...[
                   const SizedBox(height: 8),
                   Row(
@@ -630,6 +658,7 @@ class _BatchProgress extends StatelessWidget {
   final Color track;
 
   const _BatchProgress({
+    super.key,
     required this.container,
     required this.batchId,
     required this.color,

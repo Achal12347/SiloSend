@@ -87,7 +87,9 @@ class TransferEngineImpl implements TransferEngine {
     this.sessionResolver,
     ConsentRegistry? consentRegistry,
     this.featureResolver,
-  }) : consentRegistry = consentRegistry ?? ConsentRegistry() {
+    ResumableTransfers? resumable,
+  }) : consentRegistry = consentRegistry ?? ConsentRegistry(),
+       resumable = resumable ?? ResumableTransfers() {
     if (secureSessionManager != null) {
       _newSessionSubscription = secureSessionManager!.secureSessions.listen(
         registerSession,
@@ -714,7 +716,7 @@ class TransferEngineImpl implements TransferEngine {
   final Map<String, int> _resumeChunks = {};
 
   /// Interrupted receives kept for a resume (see [ResumableTransfers]).
-  final ResumableTransfers resumable = ResumableTransfers();
+  final ResumableTransfers resumable;
 
   /// Offers the sender cancelled before this side answered them.
   final Set<String> _cancelledOffers = <String>{};

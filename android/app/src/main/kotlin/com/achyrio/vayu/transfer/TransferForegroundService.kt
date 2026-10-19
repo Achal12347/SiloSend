@@ -27,6 +27,7 @@ class TransferForegroundService : Service() {
         private const val TAG = "Vayu.TransferService"
         private const val CHANNEL_ID = "vayu_transfers"
         private const val NOTIFICATION_ID = 4101
+        private const val PAUSED_NOTIFICATION_ID = 4102
         const val ACTION_START = "com.achyrio.vayu.transfer.START"
         const val ACTION_UPDATE = "com.achyrio.vayu.transfer.UPDATE"
         const val ACTION_STOP = "com.achyrio.vayu.transfer.STOP"
@@ -178,9 +179,26 @@ class TransferForegroundService : Service() {
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        // Android 15 data-sync time budget exhausted: give the resources back.
+        // Android 15 data-sync time budget exhausted: give the resources back,
+        // and say so. In the background the transfer may now be stopped by
+        // Android; the received part is kept, so opening Vayu continues it.
         Log.w(TAG, "Foreground service timeout reached; stopping")
         stopSelfCleanly()
+        try {
+            val notice = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle("Transfer paused by Android")
+                .setContentText("Open Vayu to continue. The part already sent is kept.")
+                .setContentIntent(launchIntent())
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build()
+            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(PAUSED_NOTIFICATION_ID, notice)
+        } catch (e: Exception) {
+            // Notifications not allowed: nothing more can be said.
+            Log.w(TAG, "Pause notice not shown: ${e.javaClass.simpleName}")
+        }
     }
 
     override fun onDestroy() {

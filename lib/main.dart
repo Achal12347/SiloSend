@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:vayu/ui/widgets/readable_width.dart';
 import 'package:vayu/ui/card/incoming_card_watcher.dart';
 
 import 'package:vayu/core/constants/app_constants.dart';
@@ -83,10 +84,12 @@ class _VayuAppState extends State<VayuApp> {
             scaffoldMessengerKey: rootMessengerKey,
             navigatorKey: rootNavigatorKey,
             // Cards tapped from another phone open here, on any screen.
-            builder: (context, child) => IncomingCardWatcher(
-              container: _container,
-              ready: _initFuture,
-              child: child!,
+            builder: (context, child) => ReadableWidth(
+              child: IncomingCardWatcher(
+                container: _container,
+                ready: _initFuture,
+                child: child!,
+              ),
             ),
             theme: VayuTheme.light(),
             darkTheme: VayuTheme.dark(),
