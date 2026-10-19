@@ -43,7 +43,8 @@ class VayuTheme {
           ? const Color(0xFFD5E8E0)
           : const Color(0xFF233A31),
       tertiary: palette.clay,
-      onTertiary: Colors.white,
+      // Ink on the light dark-mode clay: white was 2.4:1 there.
+      onTertiary: isDark ? const Color(0xFF0F1A16) : Colors.white,
       tertiaryContainer: isDark
           ? const Color(0xFF3A2A20)
           : const Color(0xFFF1E3D8),
@@ -51,7 +52,8 @@ class VayuTheme {
           ? const Color(0xFFF0DCCD)
           : const Color(0xFF4A2E1E),
       error: palette.danger,
-      onError: Colors.white,
+      // Dark ink on the light dark-mode danger: white was 2.25:1 there.
+      onError: isDark ? const Color(0xFF3F2220) : Colors.white,
       errorContainer: palette.dangerContainer,
       onErrorContainer: isDark
           ? const Color(0xFFF3D3CF)
@@ -352,12 +354,12 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
     accent: Color(0xFF446E5F),
     accentContainer: Color(0xFFDCE8E1),
     accentOnInverse: Color(0xFFA9D2C2),
-    clay: Color(0xFFAD7652),
-    success: Color(0xFF3F7F62),
+    clay: Color(0xFF9B6A49),
+    success: Color(0xFF387157),
     successContainer: Color(0xFFDDEBE2),
     warning: Color(0xFF815F2D),
     warningContainer: Color(0xFFF3E7D2),
-    danger: Color(0xFFA54B43),
+    danger: Color(0xFFA14941),
     dangerContainer: Color(0xFFF5DEDA),
   );
 

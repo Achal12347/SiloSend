@@ -202,6 +202,19 @@ class ReceivedCards {
     }
   }
 
+  /// Deletes every received card and its file (Your data).
+  Future<void> removeAll() async {
+    for (final card in _cards) {
+      try {
+        final file = File(card.path);
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+    }
+    _cards.clear();
+    await _persist();
+    _emit();
+  }
+
   /// Deletes the card and its file.
   Future<void> remove(String id) async {
     final index = _cards.indexWhere((c) => c.id == id);

@@ -166,7 +166,7 @@ Future<bool> showVayuConfirm(
             style: destructive
                 ? FilledButton.styleFrom(
                     backgroundColor: palette.danger,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(sheetContext).colorScheme.onError,
                   )
                 : null,
             onPressed: () => Navigator.of(sheetContext).pop(true),

@@ -556,6 +556,10 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     buffer.writeln('- Operational Phase: ${orch.phase.name}');
     buffer.writeln('- Explicit Error: ${orch.explicitError.name}');
     buffer.writeln('- Wi-Fi now: ${_wifiLink?.summary() ?? 'not connected'}');
+    buffer.writeln(
+      '- Startup: ${widget.container.startupTotalMs} ms '
+      '(${widget.container.startupSteps.entries.where((e) => e.value > 0).map((e) => '${e.key} ${e.value} ms').join(', ')})',
+    );
     buffer.writeln('- Thermal now: ${_thermal ?? 'not reported'}');
     final speedTest = _speedTest;
     if (speedTest != null) {

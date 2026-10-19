@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
@@ -138,11 +139,13 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     if (!_nativeNfc || !mounted) return;
     WidgetsBinding.instance.addObserver(this);
     final nfc = widget.container.nfcPairingService;
-    _nfcSub ??= nfc.onPayloadReceived.listen(
-      (payload) => _sendToReceiver(
+    _nfcSub ??= nfc.onPayloadReceived.listen((payload) {
+      // Felt at once: the tap was read, the phones can be moved apart.
+      HapticFeedback.mediumImpact();
+      _sendToReceiver(
         () => widget.container.pairingCoordinator.joinToSend(payload),
-      ),
-    );
+      );
+    });
     _tapProblemSub ??= nfc.onTapProblem.listen(_onTapProblem);
     await _readTaps();
   }

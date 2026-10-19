@@ -99,4 +99,40 @@ void main() {
     expect(find.text('old.txt'), findsNothing);
     expect(container.transferHistory, isEmpty);
   });
+
+  testWidgets('Received shows only what arrived; Sent only what went out', (
+    tester,
+  ) async {
+    final history = container.fileSharingCoordinator.history!;
+    await tester.runAsync(() async {
+      await history.add(record('beach.jpg'));
+      await history.add(record('report.pdf', outbound: true));
+      await history.add(record('broken.mp4', outcome: TransferOutcome.failed));
+    });
+    await pump(tester);
+    expect(find.text('broken.mp4'), findsOneWidget);
+
+    await tester.tap(find.text('Received'));
+    await tester.pumpAndSettle();
+    expect(find.text('beach.jpg'), findsOneWidget);
+    expect(find.text('report.pdf'), findsNothing);
+    expect(find.text('broken.mp4'), findsNothing);
+
+    await tester.tap(find.text('Sent'));
+    await tester.pumpAndSettle();
+    expect(find.text('report.pdf'), findsOneWidget);
+    expect(find.text('beach.jpg'), findsNothing);
+  });
+
+  testWidgets('Received with nothing yet says so', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TransferHistoryPage(
+          container: container,
+          initialFilter: HistoryFilter.received,
+        ),
+      ),
+    );
+    expect(find.text('Nothing received yet.'), findsOneWidget);
+  });
 }

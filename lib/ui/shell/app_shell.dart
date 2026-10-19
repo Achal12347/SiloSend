@@ -7,6 +7,7 @@ import 'package:vayu/ui/chats/chats_page.dart';
 import 'package:vayu/ui/home/vayu_home_page.dart';
 import 'package:vayu/ui/host/host_client_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
+import 'package:vayu/ui/widgets/readable_width.dart';
 
 /// The three main destinations with a bottom navigation bar.
 ///
@@ -51,29 +52,55 @@ class _AppShellState extends State<AppShell> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _index != 0) setState(() => _index = 0);
       },
-      child: Scaffold(
-        body: IndexedStack(
-          index: _index,
-          children: const [VayuHomePage(), ChatsPage(), HostClientPage()],
-        ),
-        bottomNavigationBar: _ChatAwareNavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: (i) => setState(() => _index = i),
-          destinations: _destinations,
-        ),
+      child: Builder(
+        builder: (context) {
+          final pages = IndexedStack(
+            index: _index,
+            children: const [VayuHomePage(), ChatsPage(), HostClientPage()],
+          );
+          void select(int i) => setState(() => _index = i);
+          // Tablets, landscape and wide windows: navigation at the side.
+          if (isWideLayout(context)) {
+            return Scaffold(
+              body: Row(
+                children: [
+                  _ChatAwareNavigation(
+                    rail: true,
+                    selectedIndex: _index,
+                    onDestinationSelected: select,
+                    destinations: _destinations,
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: pages),
+                ],
+              ),
+            );
+          }
+          return Scaffold(
+            body: pages,
+            bottomNavigationBar: _ChatAwareNavigation(
+              rail: false,
+              selectedIndex: _index,
+              onDestinationSelected: select,
+              destinations: _destinations,
+            ),
+          );
+        },
       ),
     );
   }
 }
 
-/// The bottom bar, with the number of unread messages and message requests
-/// on Chats.
-class _ChatAwareNavigationBar extends StatelessWidget {
+/// The bottom bar (or side rail on wide screens), with the number of unread
+/// messages and message requests on Chats.
+class _ChatAwareNavigation extends StatelessWidget {
+  final bool rail;
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
   final List<NavigationDestination> destinations;
 
-  const _ChatAwareNavigationBar({
+  const _ChatAwareNavigation({
+    required this.rail,
     required this.selectedIndex,
     required this.onDestinationSelected,
     required this.destinations,
@@ -88,6 +115,31 @@ class _ChatAwareNavigationBar extends StatelessWidget {
         final count = chat.unreadChats + chat.requests.length;
         // Sage, not Material's bright error red (Vayu palette).
         final palette = VayuPalette.of(context);
+        Widget badged(int i, Widget icon) => i == 1 && count > 0
+            ? Badge.count(
+                count: count,
+                backgroundColor: palette.accent,
+                child: icon,
+              )
+            : icon;
+        if (rail) {
+          return NavigationRail(
+            selectedIndex: selectedIndex,
+            onDestinationSelected: onDestinationSelected,
+            labelType: NavigationRailLabelType.all,
+            destinations: [
+              for (var i = 0; i < destinations.length; i++)
+                NavigationRailDestination(
+                  icon: badged(i, destinations[i].icon),
+                  selectedIcon: badged(
+                    i,
+                    destinations[i].selectedIcon ?? destinations[i].icon,
+                  ),
+                  label: Text(destinations[i].label),
+                ),
+            ],
+          );
+        }
         return NavigationBar(
           selectedIndex: selectedIndex,
           onDestinationSelected: onDestinationSelected,

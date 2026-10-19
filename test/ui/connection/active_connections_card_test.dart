@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/lan_connection_server.dart';
 import 'package:vayu/core/identity/identity_storage.dart';
@@ -119,5 +120,12 @@ void main() {
       expect(managerA.getSession(sessionId!), isNull);
       expect(find.textContaining('No active peer connections'), findsOneWidget);
     });
+  });
+
+  test('a relayed connection names the phone in between', () {
+    expect(routeName(TransportType.relay, 'via Bo'), 'Through Bo');
+    expect(routeName(TransportType.relay, null), 'Through another phone');
+    expect(routeName(TransportType.lan, '192.168.49.1'), 'Wi-Fi Direct');
+    expect(routeName(TransportType.lan, '192.168.1.5'), 'Wi-Fi');
   });
 }

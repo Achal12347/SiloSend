@@ -334,7 +334,16 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
                 width: 260,
                 height: 260,
                 child: _preparing
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(),
+                            SizedBox(height: 16),
+                            Text('Preparing your code…'),
+                          ],
+                        ),
+                      )
                     : payload != null
                     ? QrCodeView(
                         data: payload.toUri().toString(),

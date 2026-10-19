@@ -217,6 +217,7 @@ class _VayuHomePageState extends State<VayuHomePage>
               const SizedBox(height: 24),
               _buildRecentTransfers(context, container),
               const SizedBox(height: 24),
+              _buildRelayingIfAny(container),
               _buildConnectionsIfAny(container),
               // The name other phones see, with rename.
               LocalDeviceCard(container: container),
@@ -506,6 +507,41 @@ class _VayuHomePageState extends State<VayuHomePage>
   }
 
   // ------------------------------------------------------------- connections
+
+  /// Shown only while this phone relays for others (mesh), with a way to
+  /// stop: the user should always see that their phone is helping.
+  Widget _buildRelayingIfAny(AppContainer container) {
+    final relay = container.relayService;
+    if (relay == null) return const SizedBox.shrink();
+    return StreamBuilder<void>(
+      stream: relay.changes,
+      builder: (context, _) {
+        final n = relay.relayingCount;
+        if (n == 0) return const SizedBox.shrink();
+        final theme = Theme.of(context);
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 24),
+          child: Card(
+            child: ListTile(
+              leading: Icon(
+                Icons.device_hub_rounded,
+                color: theme.colorScheme.primary,
+              ),
+              title: Text(
+                'Helping $n ${n == 1 ? 'connection' : 'connections'} '
+                'between nearby phones',
+              ),
+              subtitle: const Text('Encrypted: this phone cannot read it'),
+              trailing: TextButton(
+                onPressed: () => container.setRelayEnabled(false),
+                child: const Text('Stop'),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   /// Live sessions matter only when they exist; an empty "no connections"
   /// card mostly exposed protocol vocabulary.

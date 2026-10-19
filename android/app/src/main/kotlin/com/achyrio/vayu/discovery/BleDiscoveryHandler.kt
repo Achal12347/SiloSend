@@ -12,12 +12,17 @@ import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.ParcelUuid
 import android.util.Log
+import androidx.core.content.ContextCompat
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -26,6 +31,9 @@ import java.util.UUID
 
 class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
     companion object {
+        private const val MAX_SCAN_STARTS = 4
+        private const val SCAN_WINDOW_MS = 30_000L
+        private const val MAX_SCAN_RETRIES = 3
         private const val TAG = "Vayu.BleDiscovery"
         private const val METHOD_CHANNEL = "com.achyrio.vayu/ble_discovery"
         private const val EVENT_CHANNEL = "com.achyrio.vayu/ble_scan_events"
@@ -61,9 +69,54 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
     private var advertiser: BluetoothLeAdvertiser? = null
 
     private var isScanning = false
+
+    // Android (7+) silently ignores an app's scans once it starts more than
+    // 5 in 30 s: no results and no error, so Vayu looked alone. Starts are
+    // kept under that, a running scan in the same mode is not restarted, and
+    // a failed scan is retried a few times.
+    private val scanStarts = ArrayDeque<Long>()
+    private var pendingScanStart: Runnable? = null
+    private var scanLowPower = false
+    private var scanRetries = 0
     private var isAdvertising = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    // What Dart asked for, so a Bluetooth off/on restores it. Turning
+    // Bluetooth off ends scans and advertising without any callback; the
+    // flags then said "running" and nothing restarted them.
+    private var scanWanted: Boolean? = null // low-power mode when wanted
+    private var advertiseWanted: Pair<ByteArray, Boolean>? = null
+
+    private val bluetoothState = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: Intent?) {
+            when (intent?.getIntExtra(BluetoothAdapter.EXTRA_STATE, -1)) {
+                BluetoothAdapter.STATE_TURNING_OFF, BluetoothAdapter.STATE_OFF -> {
+                    pendingScanStart?.let { mainHandler.removeCallbacks(it) }
+                    pendingScanStart = null
+                    isScanning = false
+                    isAdvertising = false
+                }
+                BluetoothAdapter.STATE_ON -> {
+                    scanWanted?.let { startScan(it, quietResult) }
+                    advertiseWanted?.let { (bytes, saver) ->
+                        startAdvertising(bytes, saver, quietResult)
+                    }
+                    Log.i(TAG, "Bluetooth back on: discovery restored")
+                }
+            }
+        }
+    }
+    private var receiverRegistered = false
+
+    /** For restarts nobody waits on. */
+    private val quietResult = object : MethodChannel.Result {
+        override fun success(result: Any?) {}
+        override fun error(code: String, message: String?, details: Any?) {
+            Log.w(TAG, "Restoring discovery failed: $code")
+        }
+        override fun notImplemented() {}
+    }
 
     fun register(messenger: BinaryMessenger) {
         methodChannel = MethodChannel(messenger, METHOD_CHANNEL).apply {
@@ -72,9 +125,26 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         eventChannel = EventChannel(messenger, EVENT_CHANNEL).apply {
             setStreamHandler(this@BleDiscoveryHandler)
         }
+        if (!receiverRegistered) {
+            ContextCompat.registerReceiver(
+                context,
+                bluetoothState,
+                IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED),
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            receiverRegistered = true
+        }
     }
 
     fun unregister() {
+        scanWanted = null
+        advertiseWanted = null
+        if (receiverRegistered) {
+            try {
+                context.unregisterReceiver(bluetoothState)
+            } catch (_: Exception) {}
+            receiverRegistered = false
+        }
         stopScan()
         stopAdvertising()
         methodChannel?.setMethodCallHandler(null)
@@ -88,9 +158,11 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
         when (call.method) {
             "startScan" -> {
                 val batterySaver = call.argument<Boolean>("batterySaver") ?: false
+                scanWanted = batterySaver
                 startScan(batterySaver, result)
             }
             "stopScan" -> {
+                scanWanted = null
                 stopScan()
                 result.success(null)
             }
@@ -98,12 +170,14 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
                 val beaconBytes = call.argument<ByteArray>("beaconBytes")
                 val batterySaver = call.argument<Boolean>("batterySaver") ?: false
                 if (beaconBytes != null) {
+                    advertiseWanted = beaconBytes to batterySaver
                     startAdvertising(beaconBytes, batterySaver, result)
                 } else {
                     result.error("INVALID_ARGUMENT", "beaconBytes parameter required", null)
                 }
             }
             "stopAdvertising" -> {
+                advertiseWanted = null
                 stopAdvertising()
                 result.success(null)
             }
@@ -131,6 +205,47 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
             result.error("BLE_NOT_SUPPORTED", "BLE scanner unavailable on this device", null)
             return
         }
+        if (isScanning && scanLowPower == batterySaver) {
+            result.success(null)
+            return
+        }
+        if (isScanning) stopScan()
+        scanRetries = 0
+        pendingScanStart?.let { mainHandler.removeCallbacks(it) }
+        pendingScanStart = null
+        val wait = scanThrottleDelayMs()
+        if (wait > 0) {
+            Log.i(TAG, "BLE scan starts in ${wait} ms (Android scan limit)")
+            val start = Runnable {
+                pendingScanStart = null
+                beginScan(batterySaver, null)
+            }
+            pendingScanStart = start
+            mainHandler.postDelayed(start, wait)
+            result.success(null)
+            return
+        }
+        beginScan(batterySaver, result)
+    }
+
+    /** How long until another scan start stays within Android's limit. */
+    private fun scanThrottleDelayMs(): Long {
+        val now = SystemClock.elapsedRealtime()
+        while (scanStarts.isNotEmpty() && now - scanStarts.first() > SCAN_WINDOW_MS) {
+            scanStarts.removeFirst()
+        }
+        if (scanStarts.size < MAX_SCAN_STARTS) return 0
+        return SCAN_WINDOW_MS - (now - scanStarts.first()) + 250
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun beginScan(batterySaver: Boolean, result: MethodChannel.Result?) {
+        val adapter = bluetoothAdapter
+        if (adapter == null || !adapter.isEnabled) {
+            result?.error("BLUETOOTH_DISABLED", "Bluetooth adapter is not enabled", null)
+            return
+        }
+        scanner = adapter.bluetoothLeScanner
 
         val serviceUuid = ParcelUuid(UUID.fromString(SILOSEND_SERVICE_UUID))
         val filter = ScanFilter.Builder()
@@ -149,19 +264,24 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
 
         try {
             scanner?.startScan(listOf(filter), settings, scanCallback)
+            scanStarts.addLast(SystemClock.elapsedRealtime())
             isScanning = true
-            result.success(null)
+            scanLowPower = batterySaver
+            result?.success(null)
             Log.i(TAG, "BLE scan started successfully (lowPower: $batterySaver)")
         } catch (e: SecurityException) {
-            result.error("PERMISSION_DENIED", "Missing Bluetooth scan permission: ${e.message}", null)
+            result?.error("PERMISSION_DENIED", "Missing Bluetooth scan permission: ${e.message}", null)
         } catch (e: Exception) {
-            result.error("SCAN_ERROR", "Failed to start BLE scan: ${e.message}", null)
+            result?.error("SCAN_ERROR", "Failed to start BLE scan: ${e.message}", null)
         }
     }
 
     // Any failure, a SecurityException included, is caught: stopping is best effort.
     @SuppressLint("MissingPermission")
     private fun stopScan() {
+        pendingScanStart?.let { mainHandler.removeCallbacks(it) }
+        pendingScanStart = null
+        scanRetries = MAX_SCAN_RETRIES // a stopped scan is not retried
         if (!isScanning) return
         try {
             scanner?.stopScan(scanCallback)
@@ -310,6 +430,19 @@ class BleDiscoveryHandler(private val context: Context) : MethodChannel.MethodCa
 
         override fun onScanFailed(errorCode: Int) {
             Log.w(TAG, "BLE scan failed with error code: $errorCode")
+            if (errorCode == SCAN_FAILED_ALREADY_STARTED) return
+            // It is not scanning: say so, and try again a few times (the
+            // controller is often only busy for a moment).
+            isScanning = false
+            if (scanRetries >= MAX_SCAN_RETRIES) return
+            scanRetries++
+            val lowPower = scanLowPower
+            val retry = Runnable {
+                pendingScanStart = null
+                if (scanThrottleDelayMs() == 0L) beginScan(lowPower, null)
+            }
+            pendingScanStart = retry
+            mainHandler.postDelayed(retry, 2_000L * scanRetries + scanThrottleDelayMs())
         }
     }
 
