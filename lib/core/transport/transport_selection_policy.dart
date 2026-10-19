@@ -133,6 +133,8 @@ class TransportSelectionPolicy {
     if (transport == TransportType.wifiDirect) {
       return _wifiDirectDisqualification(request, localCapabilities);
     }
+    // Never a direct candidate: the mesh is tried after every direct route.
+    if (transport == TransportType.relay) return 'relay_is_mesh_fallback';
 
     // Check local hardware capability
     if (transport == TransportType.ble && !localCapabilities.supportsBle) {

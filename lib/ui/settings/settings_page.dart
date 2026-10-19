@@ -96,6 +96,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   _buildBatterySaverCard(theme, container, settings, orchState),
                   const SizedBox(height: 16),
 
+                  _buildSectionHeader(theme, 'Nearby phones'),
+                  _buildRelayCard(theme, container, settings),
+                  const SizedBox(height: 16),
+
                   // 3. Storage & Downloads Directory
                   _buildSectionHeader(theme, 'Storage'),
                   _buildStorageCard(theme),
@@ -328,6 +332,67 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// Phase 12 mesh: relaying for others, off unless the user turns it on.
+  Widget _buildRelayCard(
+    ThemeData theme,
+    AppContainer container,
+    UserSettings settings,
+  ) {
+    final relay = container.relayService;
+    return Card(
+      child: Column(
+        children: [
+          SwitchListTile(
+            secondary: Icon(
+              Icons.device_hub_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            title: const Text('Help nearby phones connect'),
+            subtitle: const Text(
+              'Pass encrypted connections between phones that cannot reach '
+              'each other. You never see what they send.',
+            ),
+            value: settings.relayEnabled,
+            onChanged: (on) => container.setRelayEnabled(on),
+          ),
+          if (settings.relayEnabled && relay != null) ...[
+            const Divider(height: 1, thickness: 0.5),
+            StreamBuilder<void>(
+              stream: relay.changes,
+              builder: (context, _) {
+                final n = relay.relayingCount;
+                return ListTile(
+                  leading: Icon(
+                    Icons.swap_horiz_rounded,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  title: Text(
+                    n == 0
+                        ? 'Not relaying anything now'
+                        : 'Relaying $n ${n == 1 ? 'connection' : 'connections'} now',
+                  ),
+                  subtitle: const Text(
+                    'Stops on Battery Saver or below 20% battery. At most 2 '
+                    'at a time.',
+                  ),
+                  trailing: const InfoDot(
+                    title: 'Relaying',
+                    message:
+                        'Phones relayed through yours stay end-to-end '
+                        'encrypted: your phone forwards scrambled data and '
+                        'cannot read messages or files. It can see which two '
+                        'phones talk, and when. Only phones that have met '
+                        'directly before can reach each other this way.',
+                  ),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildPermissionsCard(
     BuildContext context,
     ThemeData theme,
@@ -342,10 +407,16 @@ class _SettingsPageState extends State<SettingsPage> {
               color: theme.colorScheme.primary,
             ),
             title: const Text('Receiving'),
-            subtitle: const Text('Only on the Receive screen'),
+            subtitle: const Text(
+              'On the Receive screen, or files you accept in a chat or ask a '
+              'host for',
+            ),
             trailing: const InfoDot(
               title: 'Receiving',
-              message: 'Files are accepted only while Receive is open, so nobody nearby can send you popups.',
+              message:
+                  'Files are accepted only while Receive is open, when you '
+                  'accept them in a chat, or when you download them from a '
+                  'host. Nobody nearby can send you popups.',
             ),
           ),
           const Divider(height: 1, thickness: 0.5),

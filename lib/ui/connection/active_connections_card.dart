@@ -407,6 +407,7 @@ String routeName(TransportType transport, String? remoteAddress) =>
     switch (transport) {
       TransportType.ble => 'Bluetooth',
       TransportType.wifiDirect => 'Wi-Fi Direct',
+      TransportType.relay => 'Through another phone',
       TransportType.lan =>
         (remoteAddress?.startsWith('192.168.49.') ?? false)
             ? 'Wi-Fi Direct'

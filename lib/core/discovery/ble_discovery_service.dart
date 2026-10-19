@@ -121,6 +121,7 @@ class BleDiscoveryService implements DiscoveryService {
         protocolVersion: advertisement.protocolVersion,
         hosting: advertisement.hosting,
         hostingPrivate: advertisement.hostingPrivate,
+        relaying: advertisement.relaying,
       );
 
       final beaconBytes = beacon.toBytes(
@@ -224,7 +225,11 @@ class BleDiscoveryService implements DiscoveryService {
             TransportType.ble: deviceAddress,
         },
         lastSeen: DateTime.now(),
-        metadata: {'hosting': beacon.hosting, 'private': beacon.hostingPrivate},
+        metadata: {
+          'hosting': beacon.hosting,
+          'private': beacon.hostingPrivate,
+          'relay': beacon.relaying,
+        },
         isIdentityVerified: false, // Strictly unverified at discovery
       );
 

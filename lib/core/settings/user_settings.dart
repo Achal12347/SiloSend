@@ -70,6 +70,10 @@ class UserSettings {
   /// The user closed the "Set up your profile" banner on home.
   final bool profilePromptDismissed;
 
+  /// This phone forwards (encrypted) connections between other nearby
+  /// phones (Phase 12 mesh). Off unless the user turns it on.
+  final bool relayEnabled;
+
   /// Bump to show onboarding again after a meaningful change.
   static const int currentOnboardingVersion = 1;
 
@@ -80,6 +84,7 @@ class UserSettings {
     this.profileName,
     this.onboardingVersion = 0,
     this.profilePromptDismissed = false,
+    this.relayEnabled = false,
   });
 
   bool get needsOnboarding => onboardingVersion < currentOnboardingVersion;
@@ -91,6 +96,7 @@ class UserSettings {
     String? profileName,
     int? onboardingVersion,
     bool? profilePromptDismissed,
+    bool? relayEnabled,
   }) {
     return UserSettings(
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
@@ -100,6 +106,7 @@ class UserSettings {
       onboardingVersion: onboardingVersion ?? this.onboardingVersion,
       profilePromptDismissed:
           profilePromptDismissed ?? this.profilePromptDismissed,
+      relayEnabled: relayEnabled ?? this.relayEnabled,
     );
   }
 
@@ -110,6 +117,7 @@ class UserSettings {
     if (profileName != null) 'profileName': profileName,
     'onboardingVersion': onboardingVersion,
     if (profilePromptDismissed) 'profilePromptDismissed': true,
+    if (relayEnabled) 'relayEnabled': true,
   };
 
   factory UserSettings.fromJson(Map<String, dynamic> json) {
@@ -138,6 +146,7 @@ class UserSettings {
       profileName: json['profileName'] as String?,
       onboardingVersion: json['onboardingVersion'] as int? ?? 0,
       profilePromptDismissed: json['profilePromptDismissed'] as bool? ?? false,
+      relayEnabled: json['relayEnabled'] == true,
     );
   }
 }

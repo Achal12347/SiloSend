@@ -68,6 +68,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
     TransportType.wifiDirect => 0,
     TransportType.lan => 1,
     TransportType.ble => 2,
+    TransportType.relay => 3,
   };
 
   @override
@@ -162,8 +163,46 @@ class SmartTransportSelectorImpl implements TransportSelector {
     );
   }
 
+  /// Reaches a phone through other phones when no direct route works
+  /// (Phase 12 mesh); null where there is no mesh.
+  Future<SecureSession> Function(DiscoveredPeer peer)? meshFallback;
+
+  /// Every direct route first; the mesh only when all of them failed (or
+  /// there is none). The direct failure is reported when the mesh has no
+  /// route either, unless there was no direct route to try at all.
   @override
   Future<SecureSession> connectWithSmartSelection(
+    DiscoveredPeer peer, {
+    TransportSelectionRequest? request,
+    Duration? timeout,
+  }) async {
+    try {
+      return await connectDirectOnly(peer, request: request, timeout: timeout);
+    } catch (direct) {
+      final mesh = meshFallback;
+      if (mesh == null ||
+          direct is LinkUpgradeException && direct.declined != null) {
+        rethrow;
+      }
+      AppLogger.info(
+        'SmartTransportSelector',
+        'No direct route to ${peer.displayName}; trying through nearby phones',
+      );
+      try {
+        return await mesh(peer);
+      } catch (meshError) {
+        final noDirectRoute =
+            direct is NoViableTransportException &&
+            direct.attemptErrors.isEmpty;
+        if (noDirectRoute) rethrow;
+        throw direct;
+      }
+    }
+  }
+
+  /// Direct routes only (shared Wi-Fi, Wi-Fi Direct, Bluetooth). The mesh
+  /// itself uses this to reach its neighbours.
+  Future<SecureSession> connectDirectOnly(
     DiscoveredPeer peer, {
     TransportSelectionRequest? request,
     Duration? timeout,
@@ -426,6 +465,9 @@ class SmartTransportSelectorImpl implements TransportSelector {
       case TransportType.wifiDirect:
         // Joined through [_joinWifiDirect]; never a direct physical link.
         throw UnsupportedError('Wi-Fi Direct is joined over Bluetooth first');
+      case TransportType.relay:
+        // Opened by the mesh only, after every direct route failed.
+        throw UnsupportedError('Relayed sessions are opened by the mesh');
     }
   }
 

@@ -50,6 +50,12 @@ class DiscoveryBeacon {
 
   static const int _privateBit = 0x40;
 
+  /// This phone relays connections for nearby phones (mesh). Bit 0x08,
+  /// which older builds ignore.
+  final bool relaying;
+
+  static const int _relayBit = 0x08;
+
   DiscoveryBeacon({
     required this.deviceId,
     required this.port,
@@ -58,6 +64,7 @@ class DiscoveryBeacon {
     this.protocolVersion = AppConstants.protocolVersion,
     this.hosting = false,
     this.hostingPrivate = false,
+    this.relaying = false,
   }) : displayName = _sanitizeDisplayName(displayName) {
     if (deviceId.length != 16) {
       throw ArgumentError.value(
@@ -111,7 +118,8 @@ class DiscoveryBeacon {
     buffer[21] =
         _transportsToBitmask(supportedTransports) |
         (hosting ? _hostingBit : 0) |
-        (hosting && hostingPrivate ? _privateBit : 0);
+        (hosting && hostingPrivate ? _privateBit : 0) |
+        (relaying ? _relayBit : 0);
 
     // 6. Display name length (1B)
     buffer[22] = clampedNameBytes.length;
@@ -162,6 +170,7 @@ class DiscoveryBeacon {
     final transports = _bitmaskToTransports(bytes[21]);
     final hosting = (bytes[21] & _hostingBit) != 0;
     final hostingPrivate = hosting && (bytes[21] & _privateBit) != 0;
+    final relaying = (bytes[21] & _relayBit) != 0;
 
     // 6. Extract display name
     final nameLength = bytes[22];
@@ -200,6 +209,7 @@ class DiscoveryBeacon {
       protocolVersion: version,
       hosting: hosting,
       hostingPrivate: hostingPrivate,
+      relaying: relaying,
     );
   }
 

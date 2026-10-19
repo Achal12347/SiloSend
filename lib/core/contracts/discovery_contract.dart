@@ -80,6 +80,9 @@ class DiscoveredPeer {
   /// Its share needs a PIN (as heard in its latest beacon).
   bool get isHostingPrivate => isHosting && metadata['private'] == true;
 
+  /// It relays connections for nearby phones (mesh).
+  bool get isRelaying => metadata['relay'] == true;
+
   DiscoveredPeer({
     required this.deviceId,
     required this.displayName,
@@ -157,6 +160,9 @@ class DeviceAdvertisement {
   /// Its share needs a PIN.
   final bool hostingPrivate;
 
+  /// It relays connections for nearby phones (mesh).
+  final bool relaying;
+
   const DeviceAdvertisement({
     required this.deviceId,
     required this.displayName,
@@ -165,6 +171,7 @@ class DeviceAdvertisement {
     required this.protocolVersion,
     this.hosting = false,
     this.hostingPrivate = false,
+    this.relaying = false,
   });
 }
 

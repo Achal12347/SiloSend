@@ -82,18 +82,24 @@ class SecureSessionManager {
   SecureSessionImpl? getSessionForPeer(String remoteDeviceId) {
     final clean = remoteDeviceId.replaceAll('-', '').toLowerCase();
     SecureSessionImpl? bluetooth;
+    SecureSessionImpl? relayed;
     for (final session in _sessions.values) {
       if (session.remoteDeviceId.replaceAll('-', '').toLowerCase() == clean &&
           session.isEstablished) {
         // After a Wi-Fi Direct upgrade the peer has a Bluetooth session and
-        // a Wi-Fi one; transfers must use the Wi-Fi one.
-        if (session.connectionSession.connection.type != TransportType.ble) {
-          return session;
+        // a Wi-Fi one; transfers must use the Wi-Fi one. A session through
+        // another phone is used only when there is no direct one.
+        switch (session.connectionSession.connection.type) {
+          case TransportType.ble:
+            bluetooth ??= session;
+          case TransportType.relay:
+            relayed ??= session;
+          case TransportType.lan || TransportType.wifiDirect:
+            return session;
         }
-        bluetooth ??= session;
       }
     }
-    return bluetooth;
+    return bluetooth ?? relayed;
   }
 
   /// Initializes or loads the persistent Ed25519 identity keypair from [SecureKeyStore].

@@ -1,7 +1,11 @@
 import 'dart:typed_data';
 
 /// Enumerates the physical / radio transports supported by Vayu.
-enum TransportType { ble, wifiDirect, lan }
+///
+/// [relay] is not a radio: an end-to-end session carried through another
+/// Vayu phone (Phase 12 mesh). It is never advertised in beacons or
+/// handshakes; only the mesh opens it.
+enum TransportType { ble, wifiDirect, lan, relay }
 
 /// Dynamic quality and speed metrics for an active transport link.
 class LinkMetrics {
