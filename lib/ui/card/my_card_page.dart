@@ -50,6 +50,8 @@ class _MyCardPageState extends State<MyCardPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // The card is served over NFC, which needs the screen on.
+    widget.container.platformService.keepScreenOn(true);
     _cardSub = widget.container.myCardStream.listen((_) {
       if (!mounted) return;
       setState(() {});
@@ -71,6 +73,7 @@ class _MyCardPageState extends State<MyCardPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _cardSub?.cancel();
     if (_serving) _nfc.stopSharing();
+    widget.container.platformService.keepScreenOn(false);
     super.dispose();
   }
 

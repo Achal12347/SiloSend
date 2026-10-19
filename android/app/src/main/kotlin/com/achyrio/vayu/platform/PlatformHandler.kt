@@ -16,6 +16,7 @@ import android.nfc.NfcAdapter
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -164,6 +165,19 @@ class PlatformHandler(
             }
             "wifiLinkInfo" -> result.success(wifiLinkInfo())
             "thermalStatus" -> result.success(thermalStatus())
+            // While a screen serves a code over NFC: Android answers taps
+            // only while the screen is on.
+            "keepScreenOn" -> {
+                val on = call.argument<Boolean>("on") == true
+                activity.runOnUiThread {
+                    if (on) {
+                        activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                }
+                result.success(true)
+            }
             else -> result.notImplemented()
         }
     }

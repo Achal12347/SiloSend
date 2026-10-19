@@ -19,6 +19,9 @@ class AppConstants {
     featureBatchOffer,
     featureLateHash,
     featureLinkUpgrade,
+    featureChat,
+    featureHost,
+    featureChatFiles,
   };
 
   /// One batch offer and one consent for several files (packet 0x15/0x16).
@@ -32,6 +35,18 @@ class AppConstants {
   /// 0x40/0x41): the group's name and passphrase travel inside the encrypted
   /// Bluetooth session, then both phones connect over Wi-Fi.
   static const String featureLinkUpgrade = 'p2p-upgrade-v1';
+
+  /// Text messages and receipts (packets 0x20/0x21) over the same encrypted
+  /// sessions as files.
+  static const String featureChat = 'chat-v1';
+
+  /// Host & Client (packets 0x50-0x54): browse what a nearby phone hosts
+  /// and download chosen files as an ordinary batch transfer.
+  static const String featureHost = 'host-v1';
+
+  /// Files sent inside a chat (packets 0x22/0x23); older builds would drop
+  /// those packets, so they are only sent to peers listing this.
+  static const String featureChatFiles = 'chat-files-v1';
 
   /// Android minimum supported SDK version (Android 8.0 Oreo).
   static const int androidMinSdkVersion = 26;

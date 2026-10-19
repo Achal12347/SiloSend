@@ -69,6 +69,8 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // Offers are welcome while this screen is open, code or no code.
     _c.fileSharingCoordinator.openReceiveScreen();
+    // The code is also served over NFC, which needs the screen on.
+    _c.platformService.keepScreenOn(true);
     _acceptedSub = _c.fileSharingCoordinator.autoAcceptedBatches.listen(
       _onAccepted,
     );
@@ -99,7 +101,10 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
 
   Future<void> _serveByTap(PairingPayload payload) async {
     final nfc = await _c.nfcPairingService.writePayload(payload);
-    if (!mounted) return;
+    if (!mounted) {
+      _c.nfcPairingService.stopSharing();
+      return;
+    }
     setState(() {
       _nfcReady = nfc.isSuccess;
       _nfcOff = nfc.status == NfcOperationStatus.hardwareDisabled;
@@ -111,6 +116,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _acceptedSub?.cancel();
+    _c.platformService.keepScreenOn(false);
     try {
       _c.releaseDiscovery(this);
       _c.fileSharingCoordinator.closeReceiveScreen();
@@ -183,6 +189,14 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
           lifetime: widget.sessionLength,
         );
         final nfc = await _c.nfcPairingService.writePayload(payload);
+        if (!mounted) {
+          // Left while the code was being made: dispose already ran, so
+          // stop what was started after it (a stale code served by tap,
+          // an open receive session).
+          _c.nfcPairingService.stopSharing();
+          _c.fileSharingCoordinator.endReceiveSession();
+          return;
+        }
         _nfcReady = nfc.isSuccess;
         _nfcOff = nfc.status == NfcOperationStatus.hardwareDisabled;
         _endsAt = DateTime.now().add(widget.sessionLength);

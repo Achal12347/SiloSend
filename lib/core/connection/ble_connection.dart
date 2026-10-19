@@ -304,10 +304,12 @@ class BleConnection implements TransportConnection {
         ? (totalBytes ~/ durationSec)
         : totalBytes;
 
+    // Not measured on the GATT link: 0 means unknown. The scan RSSI of the
+    // peer (real) is used for route scoring instead.
     return LinkMetrics(
-      latencyMs: 45, // Typical BLE 4.2/5.0 connection interval latency
+      latencyMs: 0,
       estimatedThroughputBytesPerSec: throughput,
-      rssi: -65,
+      rssi: 0,
     );
   }
 }

@@ -45,6 +45,9 @@ class PairingCoordinator {
   /// Resolves this phone's local IPv4 addresses (overridable in tests).
   final Future<List<String>> Function() localAddresses;
 
+  /// Whether a Vayu server answers at host:port within the timeout.
+  final Future<bool> Function(String host, int port, Duration timeout) canReach;
+
   /// Live connection sessions, used to keep a hotspot up only while needed.
   final int Function() activeSessionCount;
   final Stream<Object?> sessionChanges;
@@ -68,10 +71,12 @@ class PairingCoordinator {
     required this.hotspot,
     this.wifiDirect = const UnsupportedWifiDirectService(),
     Future<List<String>> Function()? localAddresses,
+    Future<bool> Function(String host, int port, Duration timeout)? canReach,
     int Function()? activeSessionCount,
     Stream<Object?>? sessionChanges,
     this.hotspotIdleTimeout = const Duration(seconds: 60),
   }) : localAddresses = localAddresses ?? resolveLocalIPv4Addresses,
+       canReach = canReach ?? tcpReachable,
        activeSessionCount = activeSessionCount ?? (() => 0),
        sessionChanges = sessionChanges ?? const Stream.empty();
 
@@ -289,15 +294,21 @@ class PairingCoordinator {
     return _connectTo(payload, payload.lanAddress!);
   }
 
-  /// Wi-Fi Direct first (fast, no dialog, normal Wi-Fi stays on), then the
-  /// shared router, then the group joined like a hotspot (the only way for
-  /// phones without Wi-Fi Direct when there is no shared router).
+  /// Wi-Fi Direct first (owner's route rule since 2026-10-19: the phones
+  /// talk directly, on 5 GHz when both can, and normal Wi-Fi stays on), then
+  /// the shared router when both phones are on it, then the group joined
+  /// like a hotspot (phones without Wi-Fi Direct and no shared router).
   Future<DiscoveredPeer> _joinViaWifiDirect(
     PairingPayload payload,
     String ssid,
   ) async {
     final passphrase = payload.wifiPassphrase ?? '';
     final groupAddress = payload.lanAddress!;
+    final fallback = payload.fallbackLanAddress;
+    // Only reaching the phone is time-limited. The handshake that follows
+    // keeps its normal time: the first one after an app start (keys loaded
+    // cold) took longer than this limit, so the first scan always failed.
+    final port = payload.lanPort;
     if (await wifiDirect.isSupported()) {
       final owner = await wifiDirect.connect(
         networkName: ssid,
@@ -305,6 +316,15 @@ class PairingCoordinator {
       );
       if (owner != null) {
         _releaseJoinWhenIdle(wifiDirect.disconnect);
+        // The group's routes can take a moment after joining; connecting at
+        // once used to fail and drop a group that was about to work.
+        if (port != null) {
+          final until = DateTime.now().add(const Duration(seconds: 8));
+          while (!await canReach(groupAddress, port, sharedWifiProbeTimeout) &&
+              DateTime.now().isBefore(until)) {
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+          }
+        }
         try {
           return await _connectTo(payload, groupAddress);
         } on PairingException {
@@ -313,14 +333,21 @@ class PairingCoordinator {
           await wifiDirect.disconnect();
         }
       }
-      AppLogger.info('PairingCoordinator', 'Wi-Fi Direct join failed');
+      AppLogger.info(
+        'PairingCoordinator',
+        'Wi-Fi Direct join failed; trying the shared Wi-Fi',
+      );
     }
-    final fallback = payload.fallbackLanAddress;
-    if (fallback != null) {
+    if (fallback != null &&
+        port != null &&
+        await canReach(fallback, port, sharedWifiProbeTimeout)) {
       try {
         return await _connectTo(payload, fallback);
       } on PairingException {
-        AppLogger.info('PairingCoordinator', 'Shared Wi-Fi not reachable');
+        AppLogger.info(
+          'PairingCoordinator',
+          'Shared Wi-Fi reached but the connection failed; joining the group as Wi-Fi',
+        );
       }
     }
     await _joinHotspot(ssid, passphrase);
@@ -350,6 +377,11 @@ class PairingCoordinator {
       },
     );
   }
+
+  /// How long a scanned code's shared-Wi-Fi address may take to answer
+  /// before Wi-Fi Direct is tried. Phones on the same router answer well
+  /// within it.
+  static const Duration sharedWifiProbeTimeout = Duration(seconds: 3);
 
   Future<DiscoveredPeer> _connectTo(
     PairingPayload payload,
@@ -462,5 +494,16 @@ Future<List<String>> resolveLocalIPv4Addresses() async {
     return ranked.map((r) => r.$2).toList();
   } catch (_) {
     return const [];
+  }
+}
+
+/// Opens and closes a TCP connection: true when something listens there.
+Future<bool> tcpReachable(String host, int port, Duration timeout) async {
+  try {
+    final socket = await Socket.connect(host, port, timeout: timeout);
+    socket.destroy();
+    return true;
+  } catch (_) {
+    return false;
   }
 }

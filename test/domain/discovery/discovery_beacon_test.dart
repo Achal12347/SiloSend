@@ -211,4 +211,39 @@ void main() {
       expect(decoded.displayName, equals('📱 Phone-फोन'));
     });
   });
+
+  group('Bluetooth beacon size', () {
+    DiscoveryBeacon beacon(String name) => DiscoveryBeacon(
+      deviceId: Uint8List.fromList(List.filled(16, 7)),
+      port: 53531,
+      supportedTransports: {TransportType.ble, TransportType.wifiDirect},
+      displayName: name,
+    );
+
+    test('a long name still fits one advertisement + scan response', () {
+      // 25 bytes: made advertising fail silently before (beacon > 47 bytes).
+      final bytes = beacon("Achal Choudhary's Poco F6")
+          .toBytes(maxNameBytes: DiscoveryBeacon.maxBleDisplayNameBytes);
+      expect(bytes.length, lessThanOrEqualTo(47));
+      final decoded = DiscoveryBeacon.fromBytes(bytes);
+      expect(decoded.displayName, "Achal Choudhary's Po");
+      expect(decoded.supportedTransports, contains(TransportType.wifiDirect));
+    });
+
+    test('shortening never splits a character', () {
+      // Each Devanagari character is 3 bytes; 20 bytes hold 6 of them.
+      final bytes = beacon('फोनफोनफोनफोन')
+          .toBytes(maxNameBytes: DiscoveryBeacon.maxBleDisplayNameBytes);
+      final decoded = DiscoveryBeacon.fromBytes(bytes);
+      expect(decoded.displayName, 'फोनफोन');
+      expect(bytes.length, lessThanOrEqualTo(47));
+    });
+
+    test('the Wi-Fi beacon keeps the longer name', () {
+      final decoded = DiscoveryBeacon.fromBytes(
+        beacon("Achal Choudhary's Poco F6").toBytes(),
+      );
+      expect(decoded.displayName, "Achal Choudhary's Poco F6");
+    });
+  });
 }

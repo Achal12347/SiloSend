@@ -262,6 +262,8 @@ class DiscoveryCoordinator {
         rssi: incoming.rssi != 0 ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         isIdentityVerified: false, // Unverified at discovery
+        // The latest beacon says whether it is hosting now.
+        metadata: {...existing.metadata, ...incoming.metadata},
       );
     }
 

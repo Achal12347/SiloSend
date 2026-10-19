@@ -119,7 +119,6 @@ class ActiveConnectionsCard extends StatelessWidget {
     final remoteName = info.remoteDisplayName ?? 'Nearby device';
     final remoteId = info.remoteDeviceId;
 
-    final metrics = session.currentMetrics;
     final isLan = info.activeTransport == TransportType.lan;
     DiscoveredPeer? discoveredPeer;
     for (final peer in container.discoveredPeers) {
@@ -216,7 +215,7 @@ class ActiveConnectionsCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  info.activeTransport.name.toUpperCase(),
+                  routeName(info.activeTransport, info.remoteAddress),
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
@@ -224,25 +223,6 @@ class ActiveConnectionsCard extends StatelessWidget {
                         ? theme.colorScheme.onPrimaryContainer
                         : theme.colorScheme.onSecondaryContainer,
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              if (info.remoteAddress != null)
-                Text(
-                  info.remotePort != null
-                      ? '${info.remoteAddress}:${info.remotePort}'
-                      : info.remoteAddress!,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                    fontSize: 11,
-                  ),
-                ),
-              const Spacer(),
-              Text(
-                '${metrics.estimatedThroughputBytesPerSec} B/s',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 11,
                 ),
               ),
             ],
@@ -420,3 +400,15 @@ class ActiveConnectionsCard extends StatelessWidget {
     }
   }
 }
+
+/// The route a connection really uses, in user terms. TCP over a Wi-Fi
+/// Direct group is told apart by Android's fixed group subnet.
+String routeName(TransportType transport, String? remoteAddress) =>
+    switch (transport) {
+      TransportType.ble => 'Bluetooth',
+      TransportType.wifiDirect => 'Wi-Fi Direct',
+      TransportType.lan =>
+        (remoteAddress?.startsWith('192.168.49.') ?? false)
+            ? 'Wi-Fi Direct'
+            : 'Wi-Fi',
+    };

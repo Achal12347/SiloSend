@@ -9,6 +9,7 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.cardemulation.CardEmulation
 import android.nfc.tech.IsoDep
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -117,12 +118,18 @@ class NfcHandler(private val activity: Activity) :
     /** From MainActivity.onResume. */
     fun onResume() {
         if (readingWanted) enableReader()
-        if (servingWanted) preferVayu(true)
+        if (servingWanted) {
+            preferVayu(true)
+            listenOnly(true)
+        }
     }
 
     /** From MainActivity.onPause. */
     fun onPause() {
-        if (servingWanted) preferVayu(false)
+        if (servingWanted) {
+            preferVayu(false)
+            listenOnly(false)
+        }
         try {
             adapter?.disableReaderMode(activity)
         } catch (_: Exception) {}
@@ -144,6 +151,32 @@ class NfcHandler(private val activity: Activity) :
             }
         } catch (_: Exception) {
             // Not resumed or not supported: Android's default routing applies.
+        }
+    }
+
+    /**
+     * While this phone shares, it only listens (Android 15+). Two phones near
+     * each other both poll and listen; when the sharing phone polled first it
+     * read the other phone (which shares nothing) and held the link, so the
+     * other phone never read the card or code. Reading screens use reader
+     * mode, which already stops listening there.
+     */
+    private fun listenOnly(on: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
+        val nfc = adapter ?: return
+        try {
+            if (on) {
+                nfc.setDiscoveryTechnology(
+                    activity,
+                    NfcAdapter.FLAG_READER_DISABLE,
+                    NfcAdapter.FLAG_LISTEN_KEEP,
+                )
+            } else {
+                nfc.resetDiscoveryTechnology(activity)
+            }
+        } catch (e: Exception) {
+            // Not resumed or not supported: both modes stay on as before.
+            Log.w(TAG, "Listen-only not applied: ${e.javaClass.simpleName}")
         }
     }
 
@@ -179,6 +212,7 @@ class NfcHandler(private val activity: Activity) :
                 PairingHceService.payload = call.argument<ByteArray>("bytes")
                 servingWanted = true
                 preferVayu(true)
+                listenOnly(true)
                 result.success(true)
             }
             "serveCard" -> {
@@ -192,6 +226,7 @@ class NfcHandler(private val activity: Activity) :
                     NdefMessage(NdefRecord.createMime(CARD_MIME, card)).toByteArray()
                 servingWanted = true
                 preferVayu(true)
+                listenOnly(true)
                 result.success(true)
             }
             "stopServing" -> {
@@ -199,6 +234,7 @@ class NfcHandler(private val activity: Activity) :
                 PairingHceService.ndefMessage = null
                 servingWanted = false
                 preferVayu(false)
+                listenOnly(false)
                 result.success(true)
             }
             "takePendingCard" -> {

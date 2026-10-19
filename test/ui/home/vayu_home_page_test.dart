@@ -67,10 +67,21 @@ void main() {
 
       // 1. Header branding; readiness text appears only when it matters
       expect(find.text('Vayu'), findsOneWidget);
-      expect(find.textContaining('Ready ·'), findsNothing);
+      // One honest availability line under the name (2026-10-18 redesign).
+      expect(
+        find.byWidgetPredicate(
+          (w) =>
+              w is Text &&
+              RegExp(r'^(Visible nearby|Ready · search paused|Offline)')
+                  .hasMatch(w.data ?? ''),
+        ),
+        findsOneWidget,
+      );
 
       // 2. Hero Section
-      expect(find.text('Share files nearby'), findsOneWidget);
+      // Four actions replace the old hero card (reference layout).
+      expect(find.text('Contact sharing'), findsOneWidget);
+      expect(find.text('Apps & games'), findsOneWidget);
       expect(find.text('Send'), findsOneWidget);
       expect(find.text('Receive'), findsOneWidget);
 
@@ -115,21 +126,16 @@ void main() {
         // Peer row shows real reachability and an unverified identity honestly
         expect(find.text('Peer-Galaxy'), findsOneWidget);
         expect(find.text('New device'), findsOneWidget);
-        // The peer row's own Send (the hero has the other one).
+        // The row's only action is the chat (owner, 18 Oct): files go
+        // through the Send flow.
+        expect(find.byTooltip('Chat with Peer-Galaxy'), findsOneWidget);
         expect(
           find.descendant(
             of: find.byType(DiscoveredPeerCard),
             matching: find.text('Send'),
           ),
-          findsOneWidget,
+          findsNothing,
         );
-
-        // Manual connect lives in the row's menu
-        await tester.tap(find.byTooltip('More'));
-        await tester.pumpAndSettle();
-        expect(find.text('Connect'), findsOneWidget);
-        await tester.tapAt(const Offset(5, 5));
-        await tester.pumpAndSettle();
 
         await container.stopDiscoveryAndAdvertising();
         await tester.pump(const Duration(milliseconds: 100));

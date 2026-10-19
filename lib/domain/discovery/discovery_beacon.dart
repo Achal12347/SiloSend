@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:vayu/core/constants/app_constants.dart';
@@ -26,11 +27,28 @@ class DiscoveryBeacon {
       22; // Magic(2) + Ver(1) + Id(16) + Port(2) + Transports(1)
   static const int maxDisplayNameBytes = 32;
 
+  /// Longest name a Bluetooth beacon can carry: its second half must fit
+  /// one scan response (27 bytes), so the beacon is at most 47 bytes. The
+  /// full name arrives in the handshake.
+  static const int maxBleDisplayNameBytes = 20;
+
   final Uint8List deviceId;
   final int port;
   final Set<TransportType> supportedTransports;
   final String displayName;
   final int protocolVersion;
+
+  /// This phone is hosting files for nearby phones (Host & Client). Sent as
+  /// bit 0x80 of the transports byte, which older builds ignore.
+  final bool hosting;
+
+  static const int _hostingBit = 0x80;
+
+  /// The share needs a PIN (Host & Client, private). Bit 0x40, which older
+  /// builds ignore; meaningful only with [hosting].
+  final bool hostingPrivate;
+
+  static const int _privateBit = 0x40;
 
   DiscoveryBeacon({
     required this.deviceId,
@@ -38,6 +56,8 @@ class DiscoveryBeacon {
     required this.supportedTransports,
     required String displayName,
     this.protocolVersion = AppConstants.protocolVersion,
+    this.hosting = false,
+    this.hostingPrivate = false,
   }) : displayName = _sanitizeDisplayName(displayName) {
     if (deviceId.length != 16) {
       throw ArgumentError.value(
@@ -60,11 +80,13 @@ class DiscoveryBeacon {
       deviceId.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
   /// Encodes this beacon to binary wire format with IEEE 802.3 CRC32 checksum.
-  Uint8List toBytes() {
-    final nameBytes = utf8.encode(displayName);
-    final clampedNameBytes = nameBytes.length > maxDisplayNameBytes
-        ? nameBytes.sublist(0, maxDisplayNameBytes)
-        : nameBytes;
+  /// [maxNameBytes] shortens the name (on a character boundary) where the
+  /// medium is small: [maxBleDisplayNameBytes] for Bluetooth.
+  Uint8List toBytes({int maxNameBytes = maxDisplayNameBytes}) {
+    final clampedNameBytes = _utf8Prefix(
+      displayName,
+      min(maxNameBytes, maxDisplayNameBytes),
+    );
 
     final bodyLength =
         minHeaderSize + 1 + clampedNameBytes.length; // +1 for name length byte
@@ -86,7 +108,10 @@ class DiscoveryBeacon {
     byteData.setUint16(19, port, Endian.big);
 
     // 5. Transports bitmask (1B)
-    buffer[21] = _transportsToBitmask(supportedTransports);
+    buffer[21] =
+        _transportsToBitmask(supportedTransports) |
+        (hosting ? _hostingBit : 0) |
+        (hosting && hostingPrivate ? _privateBit : 0);
 
     // 6. Display name length (1B)
     buffer[22] = clampedNameBytes.length;
@@ -135,6 +160,8 @@ class DiscoveryBeacon {
 
     // 5. Extract transports bitmask
     final transports = _bitmaskToTransports(bytes[21]);
+    final hosting = (bytes[21] & _hostingBit) != 0;
+    final hostingPrivate = hosting && (bytes[21] & _privateBit) != 0;
 
     // 6. Extract display name
     final nameLength = bytes[22];
@@ -171,6 +198,8 @@ class DiscoveryBeacon {
       supportedTransports: transports,
       displayName: displayName,
       protocolVersion: version,
+      hosting: hosting,
+      hostingPrivate: hostingPrivate,
     );
   }
 
@@ -188,6 +217,18 @@ class DiscoveryBeacon {
     if ((mask & 0x02) != 0) transports.add(TransportType.ble);
     if ((mask & 0x04) != 0) transports.add(TransportType.wifiDirect);
     return transports;
+  }
+
+  /// UTF-8 bytes of [text], cut to at most [limit] bytes without splitting
+  /// a character (a split character made the beacon undecodable).
+  static List<int> _utf8Prefix(String text, int limit) {
+    final out = <int>[];
+    for (final rune in text.runes) {
+      final bytes = utf8.encode(String.fromCharCode(rune));
+      if (out.length + bytes.length > limit) break;
+      out.addAll(bytes);
+    }
+    return out;
   }
 
   static String _sanitizeDisplayName(String name) {

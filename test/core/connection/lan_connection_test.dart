@@ -136,7 +136,9 @@ void main() {
       final serverRaw = await serverConnectionFuture;
 
       final metrics = clientRaw.currentMetrics;
-      expect(metrics.latencyMs, equals(1));
+      // Latency is not measured on TCP: 0 means unknown (it used to report
+      // a made-up 1 ms).
+      expect(metrics.latencyMs, equals(0));
       expect(metrics.rssi, equals(0));
 
       await clientRaw.close();

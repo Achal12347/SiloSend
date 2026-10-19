@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/constants/app_constants.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
@@ -9,37 +10,45 @@ import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
-import 'package:vayu/core/state/app_orchestrator.dart';
 import 'package:vayu/core/state/app_scope.dart';
 import 'package:vayu/ui/connection/active_connections_card.dart';
+import 'package:vayu/ui/contacts/contact_sharing_page.dart';
+import 'package:vayu/ui/apps/apps_games_page.dart';
+import 'package:vayu/ui/chats/conversation_page.dart';
 import 'package:vayu/ui/home/capability_setup_banner.dart';
 import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/ui/home/local_device_card.dart';
-import 'package:vayu/platform/contact_picker.dart';
+import 'package:vayu/ui/home/nearby_devices_page.dart';
+import 'package:vayu/ui/home/share_actions.dart';
 import 'package:vayu/platform/share_intent_service.dart';
-import 'package:vayu/ui/settings/settings_page.dart';
+import 'package:vayu/ui/shell/primary_actions.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/incoming_batch_dialog.dart';
 import 'package:vayu/ui/transfer/incoming_transfer_dialog.dart';
 import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
-import 'package:vayu/ui/transfer/transfer_detail_page.dart';
+import 'package:vayu/ui/transfer/transfer_history_page.dart';
 import 'package:vayu/ui/transfer/transfer_progress_card.dart';
-import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
-import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
 import 'package:vayu/ui/receive/receive_page.dart';
-import 'package:vayu/ui/widgets/peer_picker_sheet.dart';
 import 'package:vayu/ui/widgets/permission_flow.dart';
 
-/// Primary Home screen.
+/// Home: the file-sharing dashboard.
 ///
-/// Reads top to bottom as the user's task: share (hero), who is nearby, what is
-/// moving, and who you appear as. Protocol details (device IDs, fingerprints,
-/// session internals) live in Diagnostics, not here.
+/// Top to bottom: what Vayu can do (Send, Receive, contacts, apps), who is
+/// nearby (a short preview), and what moved recently. Protocol details live
+/// in Diagnostics, not here. Also the place that listens for incoming
+/// requests and items shared from other apps, which is why it stays alive
+/// behind the other tabs.
 class VayuHomePage extends StatefulWidget {
   const VayuHomePage({super.key});
+
+  /// Nearby devices shown on Home; the rest are on the Nearby page.
+  static const int nearbyPreviewCount = 3;
+
+  /// Recent transfers shown on Home; View all opens the full history.
+  static const int recentCount = 5;
 
   @override
   State<VayuHomePage> createState() => _VayuHomePageState();
@@ -77,8 +86,7 @@ class _VayuHomePageState extends State<VayuHomePage>
   }
 
   bool _isTogglingDiscovery = false;
-  bool _isPickingHeroFile = false;
-  final Set<String> _connectingPeerIds = {};
+  bool _isSending = false;
   StreamSubscription<IncomingTransferRequest>? _incomingRequestsSub;
   StreamSubscription<IncomingBatchRequest>? _incomingBatchesSub;
   ShareIntentService? _shareIntents;
@@ -124,8 +132,8 @@ class _VayuHomePageState extends State<VayuHomePage>
     if (!mounted) return;
     final container = AppScope.of(context);
     try {
-      // Nearby access is asked in onboarding, by the setup banner, or when
-      // the user taps Send; never unprompted here.
+      // Nearby access is asked by the setup banner or when the user starts
+      // something that needs it; never unprompted here.
       // Searches for a short while, then stops to save battery.
       container.discoverFor(AppContainer.discoveryWindow);
     } catch (_) {}
@@ -187,22 +195,9 @@ class _VayuHomePageState extends State<VayuHomePage>
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 20,
-        title: const _Wordmark(),
-        actions: [
-          ProfileButton(container: container),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (context) => SettingsPage(container: container),
-                ),
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
+        toolbarHeight: 68,
+        title: _HomeTitle(container: container),
+        actions: primaryAppBarActions(context, container),
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -214,13 +209,16 @@ class _VayuHomePageState extends State<VayuHomePage>
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
             children: [
               ProfilePromptBanner(container: container),
-              _buildHero(context, container),
+              _buildActions(context, container),
               const SizedBox(height: 16),
               CapabilitySetupBanner(container: container),
+              TransferProgressCard(container: container),
               _buildNearbySection(context, container),
               const SizedBox(height: 24),
-              TransferProgressCard(container: container),
+              _buildRecentTransfers(context, container),
+              const SizedBox(height: 24),
               _buildConnectionsIfAny(container),
+              // The name other phones see, with rename.
               LocalDeviceCard(container: container),
             ],
           ),
@@ -229,148 +227,71 @@ class _VayuHomePageState extends State<VayuHomePage>
     );
   }
 
-  // --------------------------------------------------------------------- hero
+  // ------------------------------------------------------------------ actions
 
-  Widget _buildHero(BuildContext context, AppContainer container) {
-    final palette = VayuPalette.of(context);
-    final theme = Theme.of(context);
-
-    // Ink card with a soft sage glow: depth from tone, not from saturated color.
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        gradient: palette.heroGradient,
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: palette.heroBorder),
-      ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: -60,
-            top: -80,
-            child: IgnorePointer(
-              child: Container(
-                width: 240,
-                height: 240,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: [
-                      palette.heroGlow.withValues(alpha: 0.32),
-                      palette.heroGlow.withValues(alpha: 0.0),
-                    ],
-                  ),
-                ),
+  Widget _buildActions(BuildContext context, AppContainer container) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _ActionTile(
+                style: _TileStyle.primary,
+                icon: Icons.north_east_rounded,
+                title: 'Send',
+                subtitle: 'Files & folders',
+                busy: _isSending,
+                onTap: _isSending ? null : () => _send(container),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 22, 20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _ReadinessLine(container: container, color: palette.onHero),
-                Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        'Share files nearby',
-                        style: theme.textTheme.headlineMedium?.copyWith(
-                          color: palette.onHero,
-                        ),
-                      ),
-                    ),
-                    InfoDot(
-                      title: 'How Vayu shares',
-                      message:
-                          'Phones connect directly and everything is encrypted. No internet or mobile data is used.\n\n'
-                          'Send: pick files, then touch or scan a phone that shows Receive.\n'
-                          'Receive: show your code; files arrive by themselves.',
-                      color: palette.heroGlow,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: FilledButton.icon(
-                          onPressed: _isPickingHeroFile
-                              ? null
-                              : () => _onHeroSendFilePressed(container),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: palette.onHero,
-                            foregroundColor: const Color(0xFF1A1B1E),
-                            disabledBackgroundColor: palette.onHero.withValues(
-                              alpha: 0.6,
-                            ),
-                            textStyle: theme.textTheme.titleMedium,
-                          ),
-                          icon: _isPickingHeroFile
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.4,
-                                  ),
-                                )
-                              : const Icon(Icons.north_east_rounded),
-                          label: const Text('Send'),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: SizedBox(
-                        height: 56,
-                        child: OutlinedButton.icon(
-                          onPressed: () => ReceivePage.open(context, container),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: palette.onHero,
-                            side: BorderSide(
-                              color: palette.onHero.withValues(alpha: 0.4),
-                            ),
-                            textStyle: theme.textTheme.titleMedium,
-                          ),
-                          icon: const Icon(Icons.south_west_rounded),
-                          label: const Text('Receive'),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  children: [
-                    TextButton.icon(
-                      onPressed: _isPickingHeroFile
-                          ? null
-                          : () => _onSendFolderPressed(container),
-                      style: TextButton.styleFrom(
-                        foregroundColor: palette.onHeroMuted,
-                      ),
-                      icon: const Icon(Icons.folder_outlined, size: 18),
-                      label: const Text('Send a folder'),
-                    ),
-                    TextButton.icon(
-                      onPressed: () => _shareContactFromHero(container),
-                      style: TextButton.styleFrom(
-                        foregroundColor: palette.onHeroMuted,
-                      ),
-                      icon: const Icon(Icons.person_outline_rounded, size: 18),
-                      label: const Text('Send a contact'),
-                    ),
-                  ],
-                ),
-              ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ActionTile(
+                style: _TileStyle.accent,
+                icon: Icons.south_west_rounded,
+                title: 'Receive',
+                subtitle: 'QR & requests',
+                onTap: () => ReceivePage.open(context, container),
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _ActionTile(
+                style: _TileStyle.plain,
+                icon: Icons.contacts_outlined,
+                title: 'Contact sharing',
+                subtitle: 'Contacts & your card',
+                onTap: () => ContactSharingPage.open(context, container),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _ActionTile(
+                style: _TileStyle.plain,
+                icon: Icons.sports_esports_outlined,
+                title: 'Apps & games',
+                subtitle: 'Coming soon',
+                badge: 'Soon',
+                onTap: () => AppsGamesPage.open(context),
+              ),
+            ),
+          ],
+        ),
+      ],
     );
+  }
+
+  Future<void> _send(AppContainer container) async {
+    setState(() => _isSending = true);
+    try {
+      await ShareActions.send(context, container);
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
   }
 
   // ------------------------------------------------------------------ nearby
@@ -383,69 +304,68 @@ class _VayuHomePageState extends State<VayuHomePage>
         final isScanning =
             (statusSnapshot.data ?? DiscoveryStatus.idle).isActive;
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SectionHeader(
-              title: 'Nearby devices',
-              leading: _ScanIndicator(
-                active: isScanning,
-                animation: _pulseController,
-              ),
-              trailing: TextButton(
-                onPressed: _isTogglingDiscovery
-                    ? null
-                    : () => _toggleDiscovery(container, isScanning),
-                child: Text(isScanning ? 'Stop' : 'Search'),
-              ),
-            ),
-            StreamBuilder<List<DiscoveredPeer>>(
-              stream: container.discoveredPeersStream,
-              initialData: container.discoveredPeers,
-              builder: (context, peerSnapshot) {
-                final peers = peerSnapshot.data ?? [];
-                return StreamBuilder<DiscoveryOperationalState>(
-                  stream: container.discoveryCoordinator.operationalStateStream,
-                  initialData: container.discoveryCoordinator.operationalState,
-                  builder: (context, opSnapshot) {
-                    if (peers.isNotEmpty) {
-                      return Card(
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < peers.length; i++) ...[
-                              if (i > 0)
-                                const Divider(indent: 72, endIndent: 16),
-                              DiscoveredPeerCard(
-                                container: container,
-                                peer: peers[i],
-                                isConnecting: _connectingPeerIds.contains(
-                                  peers[i].deviceId,
-                                ),
-                                onConnectPressed: () =>
-                                    _connectToPeer(container, peers[i]),
-                                onSendFilePressed: () =>
-                                    _sendFileToPeerDirect(container, peers[i]),
-                                onSendContactPressed: () =>
-                                    _sendContactTo(container, peers[i]),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    }
-                    return _buildEmptyNearby(
+        return StreamBuilder<List<DiscoveredPeer>>(
+          stream: container.discoveredPeersStream,
+          initialData: container.discoveredPeers,
+          builder: (context, peerSnapshot) {
+            final peers = peerSnapshot.data ?? const <DiscoveredPeer>[];
+            final shown = peers.take(VayuHomePage.nearbyPreviewCount).toList();
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SectionHeader(
+                  title: 'Nearby devices',
+                  leading: _ScanIndicator(
+                    active: isScanning,
+                    animation: _pulseController,
+                  ),
+                  trailing: TextButton(
+                    onPressed: () => NearbyDevicesPage.open(context, container),
+                    child: Text(
+                      peers.length > shown.length
+                          ? 'View all (${peers.length})'
+                          : 'View all',
+                    ),
+                  ),
+                ),
+                if (shown.isNotEmpty)
+                  Card(
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < shown.length; i++) ...[
+                          if (i > 0) const Divider(indent: 72, endIndent: 16),
+                          DiscoveredPeerCard(
+                            container: container,
+                            peer: shown[i],
+                            onChatPressed: () => ConversationPage.open(
+                              context,
+                              container,
+                              peerDeviceId: shown[i].deviceId,
+                              peerName: shown[i].displayName,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  )
+                else
+                  StreamBuilder<DiscoveryOperationalState>(
+                    stream:
+                        container.discoveryCoordinator.operationalStateStream,
+                    initialData:
+                        container.discoveryCoordinator.operationalState,
+                    builder: (context, opSnapshot) => _buildEmptyNearby(
                       context,
                       container,
                       isScanning: isScanning,
                       opState:
                           opSnapshot.data ??
                           container.discoveryCoordinator.operationalState,
-                    );
-                  },
-                );
-              },
-            ),
-          ],
+                    ),
+                  ),
+              ],
+            );
+          },
         );
       },
     );
@@ -468,7 +388,7 @@ class _VayuHomePageState extends State<VayuHomePage>
       title = 'Search is paused';
       body = 'Vayu stops searching after 2 minutes to save battery. Search again to find phones nearby.';
       action = FilledButton.tonalIcon(
-        onPressed: () => _toggleDiscovery(container, false),
+        onPressed: _isTogglingDiscovery ? null : () => _startSearch(container),
         icon: const Icon(Icons.search_rounded),
         label: const Text('Start searching'),
       );
@@ -477,10 +397,13 @@ class _VayuHomePageState extends State<VayuHomePage>
       title = 'No devices found yet';
       body = 'Open Vayu on the other phone.';
       action = OutlinedButton.icon(
-        onPressed: () async {
-          await _toggleDiscovery(container, true);
-          await _toggleDiscovery(container, false);
-        },
+        onPressed: _isTogglingDiscovery
+            ? null
+            : () async {
+                container.endDiscoveryWindow();
+                await container.stopDiscoveryAndAdvertising();
+                await _startSearch(container);
+              },
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Search again'),
       );
@@ -492,36 +415,93 @@ class _VayuHomePageState extends State<VayuHomePage>
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
-        child: Column(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 56,
-              height: 56,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: theme.colorScheme.primaryContainer,
               ),
               child: Icon(icon, color: theme.colorScheme.onPrimaryContainer),
             ),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              body,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(
+                    body,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (action != null) ...[const SizedBox(height: 12), action],
+                ],
               ),
             ),
-            if (action != null) ...[const SizedBox(height: 16), action],
           ],
         ),
       ),
+    );
+  }
+
+  // --------------------------------------------------------- recent transfers
+
+  Widget _buildRecentTransfers(BuildContext context, AppContainer container) {
+    final theme = Theme.of(context);
+    // History grows when transfers finish; the transfers stream fires then.
+    return StreamBuilder<List<TransferTask>>(
+      stream: container.activeTransfersStream,
+      builder: (context, _) {
+        final records = container.transferHistory
+            .take(VayuHomePage.recentCount)
+            .toList();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SectionHeader(
+              title: 'History',
+              trailing: TextButton(
+                onPressed: () => TransferHistoryPage.open(context, container),
+                child: const Text('View all'),
+              ),
+            ),
+            Card(
+              child: records.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(
+                        'Files you send and receive will appear here.',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : Column(
+                      children: [
+                        for (var i = 0; i < records.length; i++) ...[
+                          if (i > 0) const Divider(indent: 72, endIndent: 16),
+                          HistoryRow(
+                            record: records[i],
+                            onOpen: () => openHistoryRecord(
+                              context,
+                              container,
+                              records[i],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -545,220 +525,39 @@ class _VayuHomePageState extends State<VayuHomePage>
     );
   }
 
-  // ----------------------------------------------------------------- actions
+  // ----------------------------------------------------------------- helpers
 
-  /// Hero flow: system file picker, then choose a nearby device.
-  Future<void> _onHeroSendFilePressed(AppContainer container) async {
-    setState(() => _isPickingHeroFile = true);
-    try {
-      final raw = container.capabilityCoordinator.rawCapabilities;
-      if (raw.isNearbyPermissionNotRequested) {
-        await container.capabilityCoordinator.requestNearbyAccess();
-      }
-
-      final docs = await container.filePickerService.pickMultipleDocuments();
-      if (docs.isNotEmpty && mounted) {
-        await PeerSelectionSheet.show(
-          context,
-          documents: docs,
-          container: container,
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        _showError('Couldn\'t open your files. Please try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isPickingHeroFile = false);
-      }
-    }
-  }
-
-  /// Folder flow: system folder picker, then choose a nearby device. The
-  /// receiver gets the same folder structure.
-  Future<void> _onSendFolderPressed(AppContainer container) async {
-    setState(() => _isPickingHeroFile = true);
-    try {
-      final raw = container.capabilityCoordinator.rawCapabilities;
-      if (raw.isNearbyPermissionNotRequested) {
-        await container.capabilityCoordinator.requestNearbyAccess();
-      }
-      final folder = await container.filePickerService.pickFolder();
-      if (folder == null || !mounted) return;
-      if (folder.documents.isEmpty) {
-        showVayuNotice(context, '"${folder.name}" has no files to send');
-        return;
-      }
-      if (folder.truncated) {
-        showVayuNotice(
-          context,
-          'Only the first ${folder.documents.length} files of "${folder.name}" will be sent',
-        );
-      }
-      await PeerSelectionSheet.show(
-        context,
-        documents: folder.documents,
-        container: container,
-      );
-    } catch (e) {
-      if (mounted) {
-        _showError('Couldn\'t open that folder. Please try again.');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isPickingHeroFile = false);
-      }
-    }
-  }
-
-  Future<void> _toggleDiscovery(
-    AppContainer container,
-    bool isCurrentlyScanning,
-  ) async {
+  Future<void> _startSearch(AppContainer container) async {
     setState(() => _isTogglingDiscovery = true);
     try {
-      if (isCurrentlyScanning) {
-        container.endDiscoveryWindow();
-        await container.stopDiscoveryAndAdvertising();
-      } else {
-        final raw = container.capabilityCoordinator.rawCapabilities;
-        // Explain, then ask; if Android will not ask any more, the sheet
-        // offers the settings page. Either way Wi-Fi discovery starts below.
-        if (raw.isNearbyPermissionNotRequested ||
-            (raw.isNearbyPermissionMissing && !raw.canUseLan)) {
-          await ensureFeature(context, container, VayuFeature.findPhones);
-        }
-        await container.startDiscoveryAndAdvertising();
-        container.discoverFor(AppContainer.discoveryWindow);
+      final raw = container.capabilityCoordinator.rawCapabilities;
+      // Explain, then ask; if Android will not ask any more, the sheet
+      // offers the settings page. Either way Wi-Fi discovery starts below.
+      if (raw.isNearbyPermissionNotRequested ||
+          (raw.isNearbyPermissionMissing && !raw.canUseLan)) {
+        await ensureFeature(context, container, VayuFeature.findPhones);
       }
+      await container.startDiscoveryAndAdvertising();
+      container.discoverFor(AppContainer.discoveryWindow);
     } catch (error) {
       if (mounted) {
-        _showError(error.toString().replaceFirst('Bad state: ', ''));
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isTogglingDiscovery = false);
-      }
-    }
-  }
-
-  Future<void> _connectToPeer(
-    AppContainer container,
-    DiscoveredPeer peer,
-  ) async {
-    setState(() => _connectingPeerIds.add(peer.deviceId));
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await container.connectToPeer(peer);
-      showVayuNotice(
-        null,
-        messenger: messenger,
-        'Connected to ${peer.displayName}',
-        tone: VayuNoticeTone.success,
-      );
-    } catch (e) {
-      if (mounted) {
-        _showError(
-          'Could not reach ${peer.displayName}. Move closer and try again.',
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _connectingPeerIds.remove(peer.deviceId));
-      }
-    }
-  }
-
-  Future<void> _sendFileToPeerDirect(
-    AppContainer container,
-    DiscoveredPeer peer,
-  ) async {
-    try {
-      final task = await container.fileSharingCoordinator.sendFileToPeer(peer);
-      if (task != null && mounted) {
-        await TransferDetailPage.open(
+        showVayuNotice(
           context,
-          container,
-          transferId: task.transferId,
+          error.toString().replaceFirst('Bad state: ', ''),
+          tone: VayuNoticeTone.problem,
         );
       }
-    } catch (e) {
-      if (mounted) {
-        _showError(friendlyError(e, peerName: peer.displayName));
-      }
+    } finally {
+      if (mounted) setState(() => _isTogglingDiscovery = false);
     }
-  }
-
-  /// Picks one contact with the system picker; null when the user backs out.
-  Future<PickedContact?> _pickContact() async {
-    try {
-      return await const ContactPicker().pick();
-    } on ContactPickerException catch (e) {
-      if (mounted) {
-        _showError(
-          e.isPermissionDenied
-              ? 'Vayu needs access to the contact you choose to share it.'
-              : 'Could not open contacts.',
-        );
-      }
-      return null;
-    }
-  }
-
-  Future<void> _sendContactTo(
-    AppContainer container,
-    DiscoveredPeer peer,
-  ) async {
-    final contact = await _pickContact();
-    if (contact == null || !mounted) return;
-    try {
-      final task = await container.fileSharingCoordinator.sendContactToPeer(
-        peer,
-        name: contact.name,
-        vcard: contact.vcard,
-      );
-      if (mounted) {
-        await TransferDetailPage.open(context, container, task: task);
-      }
-    } catch (e) {
-      if (mounted) _showError(friendlyError(e));
-    }
-  }
-
-  /// Hero flow for contacts: pick the contact first, then the device.
-  Future<void> _shareContactFromHero(AppContainer container) async {
-    final contact = await _pickContact();
-    if (contact == null || !mounted) return;
-    final peer = await pickNearbyPeer(
-      context,
-      container: container,
-      title: 'Send ${contact.name} to',
-    );
-    if (peer != null && mounted) {
-      try {
-        final task = await container.fileSharingCoordinator.sendContactToPeer(
-          peer,
-          name: contact.name,
-          vcard: contact.vcard,
-        );
-        if (mounted) {
-          await TransferDetailPage.open(context, container, task: task);
-        }
-      } catch (e) {
-        if (mounted) _showError(friendlyError(e));
-      }
-    }
-  }
-
-  void _showError(String message) {
-    showVayuNotice(context, message, tone: VayuNoticeTone.problem);
   }
 }
 
-/// App name with a small wind mark, used as the home title.
-class _Wordmark extends StatelessWidget {
-  const _Wordmark();
+/// App name and whether this phone can be found right now.
+class _HomeTitle extends StatelessWidget {
+  final AppContainer container;
+
+  const _HomeTitle({required this.container});
 
   @override
   Widget build(BuildContext context) {
@@ -768,51 +567,225 @@ class _Wordmark extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 32,
-          height: 32,
+          width: 36,
+          height: 36,
           decoration: BoxDecoration(
             gradient: palette.heroGradient,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(11),
           ),
-          child: Icon(Icons.air_rounded, color: palette.heroGlow, size: 20),
+          child: Icon(Icons.air_rounded, color: palette.heroGlow, size: 22),
         ),
-        const SizedBox(width: 10),
-        Text(
-          AppConstants.appName,
-          style: theme.textTheme.titleLarge?.copyWith(letterSpacing: -0.4),
+        const SizedBox(width: 12),
+        Flexible(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                AppConstants.appName,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  letterSpacing: -0.4,
+                  height: 1.1,
+                ),
+              ),
+              _Availability(container: container),
+            ],
+          ),
         ),
       ],
     );
   }
 }
 
-/// Battery Saver notice on the hero, shown only while it is active. Setup
-/// problems are explained by the setup banner instead.
-class _ReadinessLine extends StatelessWidget {
+/// One line of truth about reachability: offline, findable, or paused.
+class _Availability extends StatelessWidget {
   final AppContainer container;
-  final Color color;
 
-  const _ReadinessLine({required this.container, required this.color});
+  const _Availability({required this.container});
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final palette = VayuPalette.of(context);
-    return StreamBuilder<AppOrchestratorState>(
-      stream: container.orchestratorStateStream,
-      initialData: container.orchestrator.currentState,
-      builder: (context, orchestrator) {
-        final saver = orchestrator.data?.isBatterySaverActive ?? false;
-        if (!saver) return const SizedBox.shrink();
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: StatusPill(
-            label: 'Battery Saver',
-            icon: Icons.battery_saver_rounded,
-            foreground: color,
-            background: palette.onHero.withValues(alpha: 0.08),
-          ),
+    return StreamBuilder<EvaluatedCapabilityState>(
+      stream: container.capabilityCoordinator.stateStream,
+      initialData: container.capabilityCoordinator.state,
+      builder: (context, capSnapshot) {
+        final caps = capSnapshot.data ?? container.capabilityCoordinator.state;
+        return StreamBuilder<DiscoveryStatus>(
+          stream: container.discoveryStatusStream,
+          initialData: container.discoveryStatus,
+          builder: (context, statusSnapshot) {
+            final active =
+                (statusSnapshot.data ?? DiscoveryStatus.idle).isActive;
+            final saver =
+                container.orchestrator.currentState.isBatterySaverActive;
+            final (String label, Color color) = !caps.hasAnyReady
+                ? ('Offline · turn on Wi-Fi or Bluetooth', palette.warning)
+                : active
+                ? (
+                    saver ? 'Visible nearby · Battery Saver' : 'Visible nearby',
+                    palette.success,
+                  )
+                : ('Ready · search paused', theme.colorScheme.outline);
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
         );
       },
+    );
+  }
+}
+
+enum _TileStyle { primary, accent, plain }
+
+/// One of the four Home actions. Send is the ink tile, Receive the sage
+/// tile; contacts and apps are quiet surfaces.
+class _ActionTile extends StatelessWidget {
+  final _TileStyle style;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String? badge;
+  final bool busy;
+  final VoidCallback? onTap;
+
+  const _ActionTile({
+    required this.style,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.badge,
+    this.busy = false,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final palette = VayuPalette.of(context);
+    final big = style != _TileStyle.plain;
+    final (
+      Color bg,
+      Color fg,
+      Color muted,
+      Gradient? gradient,
+    ) = switch (style) {
+      _TileStyle.primary => (
+        Colors.transparent,
+        palette.onHero,
+        palette.onHeroMuted,
+        palette.heroGradient,
+      ),
+      _TileStyle.accent => (
+        palette.accentContainer,
+        theme.colorScheme.onSecondaryContainer,
+        theme.colorScheme.onSecondaryContainer.withValues(alpha: 0.75),
+        null,
+      ),
+      _TileStyle.plain => (
+        theme.colorScheme.surfaceContainerLowest,
+        theme.colorScheme.onSurface,
+        theme.colorScheme.onSurfaceVariant,
+        null,
+      ),
+    };
+    final radius = BorderRadius.circular(big ? 26 : 22);
+    return Semantics(
+      button: true,
+      label: '$title, $subtitle',
+      excludeSemantics: true,
+      child: Material(
+        color: Colors.transparent,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: gradient == null ? bg : null,
+            gradient: gradient,
+            borderRadius: radius,
+            border: style == _TileStyle.plain
+                ? Border.all(color: theme.colorScheme.outlineVariant)
+                : null,
+          ),
+          child: InkWell(
+            borderRadius: radius,
+            onTap: onTap,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: big ? 132 : 96),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Wraps at large text sizes: the badge moves under the
+                    // icon instead of overflowing.
+                    Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        busy
+                            ? SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: fg,
+                                ),
+                              )
+                            : Icon(icon, color: fg, size: big ? 28 : 24),
+                        if (badge != null)
+                          StatusPill(
+                            label: badge!,
+                            foreground: palette.warning,
+                            background: palette.warningContainer,
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: big ? 22 : 12),
+                    Text(
+                      title,
+                      style:
+                          (big
+                                  ? theme.textTheme.titleLarge
+                                  : theme.textTheme.titleSmall)
+                              ?.copyWith(color: fg),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

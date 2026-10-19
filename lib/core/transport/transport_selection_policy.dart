@@ -292,6 +292,8 @@ class TransportSelectionPolicy {
   }) {
     if (transport == TransportType.ble) {
       final rssi = peer.rssi;
+      // 0: not reported (a peer found over Wi-Fi only); neutral, not "strong".
+      if (rssi == 0) return weightSignalQuality * 0.6;
       if (rssi >= -60) return weightSignalQuality; // 5.0
       if (rssi >= -75) return weightSignalQuality * 0.6; // 3.0
       if (rssi >= -85) return weightSignalQuality * 0.2; // 1.0

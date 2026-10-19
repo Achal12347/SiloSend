@@ -11,6 +11,8 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/security/trust_level.dart';
 import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 import 'package:vayu/ui/widgets/nfc_off_row.dart';
+import 'package:vayu/ui/widgets/permission_flow.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/friendly_error.dart';
@@ -18,8 +20,12 @@ import 'package:vayu/core/pairing/pairing_coordinator.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/platform/qr_scanner.dart';
 
-/// Modal bottom sheet allowing the user to select a discovered nearby Vayu
-/// peer to receive a pre-selected document or batch of documents.
+/// Name of every screen in the send flow (review, device choice), so the
+/// flow closes as a whole when the transfer screen opens.
+const String sendFlowRouteName = 'send-flow';
+
+/// "Select device": choose the phone that receives the picked files, from
+/// the nearby list (filtered by how it was found) or by Scan QR / NFC tap.
 class PeerSelectionSheet extends StatefulWidget {
   final List<SelectedDocument> documents;
   final AppContainer container;
@@ -35,7 +41,7 @@ class PeerSelectionSheet extends StatefulWidget {
            documents ??
            (document != null ? [document] : const <SelectedDocument>[]);
 
-  /// Shows the peer selection bottom sheet.
+  /// Opens the device screen for [documents].
   static Future<void> show(
     BuildContext context, {
     SelectedDocument? document,
@@ -46,12 +52,12 @@ class PeerSelectionSheet extends StatefulWidget {
         documents ??
         (document != null ? [document] : const <SelectedDocument>[]);
     if (docs.isEmpty) return Future.value();
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) =>
-          PeerSelectionSheet(documents: docs, container: container),
+    return Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: sendFlowRouteName),
+        builder: (_) =>
+            PeerSelectionSheet(documents: docs, container: container),
+      ),
     );
   }
 
@@ -115,7 +121,11 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
       try {
         final raw = widget.container.capabilityCoordinator.rawCapabilities;
         if (raw.isNearbyPermissionNotRequested) {
-          await widget.container.capabilityCoordinator.requestNearbyAccess();
+          await ensureFeature(
+            context,
+            widget.container,
+            VayuFeature.findPhones,
+          );
         }
       } catch (_) {}
       if (!mounted) return;
@@ -271,189 +281,226 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
       (sum, d) => sum + (d.sizeBytes > 0 ? d.sizeBytes : 0),
     );
 
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Select device'),
+        actions: [_buildScanButton(), const SizedBox(width: 12)],
       ),
-      padding: EdgeInsets.only(
-        top: 16,
-        left: 20,
-        right: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Drag handle
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+          children: [
+            // File Summary Header Card
+            Container(
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: theme.colorScheme.outlineVariant,
-                borderRadius: BorderRadius.circular(2),
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // File Summary Header Card
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: theme.colorScheme.outlineVariant),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(
+                      isBatch
+                          ? Icons.folder_zip_rounded
+                          : _getFileIcon(doc.name, doc.mimeType),
+                      color: theme.colorScheme.onPrimaryContainer,
+                      size: 24,
+                    ),
                   ),
-                  child: Icon(
-                    isBatch
-                        ? Icons.folder_zip_rounded
-                        : _getFileIcon(doc.name, doc.mimeType),
-                    color: theme.colorScheme.onPrimaryContainer,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        folderName != null
-                            ? '$folderName (${widget.documents.length} ${widget.documents.length == 1 ? 'file' : 'files'})'
-                            : isBatch
-                            ? '${widget.documents.length} files selected'
-                            : doc.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        isBatch
-                            ? '${_formatFileSize(totalBatchBytes)} total • Batch transfer'
-                            : _formatFileSize(doc.sizeBytes),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded),
-                  tooltip: 'Cancel',
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Peer Selection Prompt
-          Row(
-            children: [
-              Text(
-                'Send to',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              StreamBuilder<DiscoveryOperationalState>(
-                stream: widget
-                    .container
-                    .discoveryCoordinator
-                    .operationalStateStream,
-                initialData:
-                    widget.container.discoveryCoordinator.operationalState,
-                builder: (context, snapshot) {
-                  final state = snapshot.data ?? DiscoveryOperationalState.idle;
-                  if (state == DiscoveryOperationalState.searching) {
-                    return Row(
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        AnimatedBuilder(
-                          animation: _pulseAnimation,
-                          builder: (context, child) {
-                            return Transform.scale(
-                              scale: _pulseAnimation.value,
-                              child: child,
-                            );
-                          },
-                          child: Icon(
-                            Icons.radar_rounded,
-                            size: 16,
-                            color: theme.colorScheme.primary,
+                        Text(
+                          folderName != null
+                              ? '$folderName (${widget.documents.length} ${widget.documents.length == 1 ? 'file' : 'files'})'
+                              : isBatch
+                              ? '${widget.documents.length} files selected'
+                              : doc.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(height: 2),
                         Text(
-                          'Searching…',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
+                          isBatch
+                              ? '${_formatFileSize(totalBatchBytes)} total • Batch transfer'
+                              : _formatFileSize(doc.sizeBytes),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
+            ),
+            const SizedBox(height: 16),
 
-          // Live Discovered Peers
-          StreamBuilder<List<DiscoveredPeer>>(
-            stream: widget.container.discoveredPeersStream,
-            initialData: widget.container.discoveredPeers,
-            builder: (context, snapshot) {
-              final peers = snapshot.data ?? [];
-
-              if (peers.isEmpty) {
-                return _buildEmptyPeerState(theme);
-              }
-
-              return ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+            // Peer Selection Prompt
+            Row(
+              children: [
+                Text(
+                  'Send to',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: peers.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    final peer = peers[index];
-                    return _buildPeerTile(context, theme, peer);
+                const Spacer(),
+                StreamBuilder<DiscoveryOperationalState>(
+                  stream: widget
+                      .container
+                      .discoveryCoordinator
+                      .operationalStateStream,
+                  initialData:
+                      widget.container.discoveryCoordinator.operationalState,
+                  builder: (context, snapshot) {
+                    final state =
+                        snapshot.data ?? DiscoveryOperationalState.idle;
+                    if (state == DiscoveryOperationalState.searching) {
+                      return Row(
+                        children: [
+                          AnimatedBuilder(
+                            animation: _pulseAnimation,
+                            builder: (context, child) {
+                              return Transform.scale(
+                                scale: _pulseAnimation.value,
+                                child: child,
+                              );
+                            },
+                            child: Icon(
+                              Icons.radar_rounded,
+                              size: 16,
+                              color: theme.colorScheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Searching…',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.colorScheme.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    return const SizedBox.shrink();
                   },
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-          _buildTapOrScan(theme),
-        ],
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Live Discovered Peers
+            StreamBuilder<List<DiscoveredPeer>>(
+              stream: widget.container.discoveredPeersStream,
+              initialData: widget.container.discoveredPeers,
+              builder: (context, snapshot) {
+                final peers = snapshot.data ?? [];
+
+                if (peers.isEmpty) {
+                  return _buildEmptyPeerState(theme);
+                }
+
+                final shown = peers.where(_matchesFilter).toList();
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        for (final f in _RouteFilter.values)
+                          ChoiceChip(
+                            label: Text(switch (f) {
+                              _RouteFilter.all => 'All',
+                              _RouteFilter.wifi => 'Wi-Fi',
+                              _RouteFilter.bluetooth => 'Bluetooth',
+                            }),
+                            selected: _filter == f,
+                            onSelected: (_) => setState(() => _filter = f),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (shown.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Text(
+                          'No phone found this way yet.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    for (var i = 0; i < shown.length; i++) ...[
+                      if (i > 0) const SizedBox(height: 8),
+                      _buildPeerTile(context, theme, shown[i]),
+                    ],
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            _buildTapOrScan(theme),
+          ],
+        ),
       ),
     );
   }
 
-  /// The quickest route: tap or scan a phone that is on its Receive screen.
+  _RouteFilter _filter = _RouteFilter.all;
+
+  /// Only what discovery really reported: a Wi-Fi or Bluetooth address.
+  bool _matchesFilter(DiscoveredPeer peer) => switch (_filter) {
+    _RouteFilter.all => true,
+    _RouteFilter.wifi => peer.lanEndpoint != null,
+    _RouteFilter.bluetooth => peer.bleEndpoint != null,
+  };
+
+  /// Always visible, top right: reaches a phone that is not in the list
+  /// (its Receive code connects over Wi-Fi or Wi-Fi Direct).
+  Widget _buildScanButton() => FilledButton.tonalIcon(
+    style: FilledButton.styleFrom(
+      minimumSize: const Size(0, 40),
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      visualDensity: VisualDensity.compact,
+    ),
+    onPressed: _joining || _isSending ? null : _scanReceiver,
+    icon: _joining
+        ? const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.qr_code_scanner_rounded, size: 18),
+    label: Text(_joining ? 'Connecting…' : 'Scan QR'),
+  );
+
+  /// Closes every screen of the send flow (review and this one), so Back
+  /// from the transfer screen returns to where Send was started.
+  void _closeFlow(NavigatorState navigator) {
+    navigator.popUntil((route) => route.settings.name != sendFlowRouteName);
+  }
+
+  /// Tapping a phone that is on its Receive screen (scanning is the Scan QR
+  /// button above). Shown only where NFC can be used or turned on.
   Widget _buildTapOrScan(ThemeData theme) {
+    if (!_nfcReady && !_nfcOff) return const SizedBox.shrink();
     final box = Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       decoration: BoxDecoration(
@@ -475,30 +522,18 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           const SizedBox(width: 14),
           Expanded(
             child: Text(
-              _joining
-                  ? 'Connecting…'
-                  : _nfcReady
-                  ? 'Tap or scan a phone on Receive'
-                  : 'Scan a phone on Receive',
+              _joining ? 'Connecting…' : 'Or tap a phone that is on Receive',
               style: theme.textTheme.bodyMedium,
             ),
-          ),
-          TextButton(
-            onPressed: _joining || _isSending ? null : _scanReceiver,
-            child: const Text('Scan'),
           ),
         ],
       ),
     );
     if (!_nfcOff) return box;
-    return Column(
-      children: [
-        box,
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 0, 0),
-          child: NfcOffRow(container: widget.container),
-        ),
-      ],
+    // NFC off: the row says so and opens the NFC settings page.
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 6, 0, 0),
+      child: NfcOffRow(container: widget.container),
     );
   }
 
@@ -690,9 +725,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           viaReceiveCode ||
           _folderName != null) {
         // The transfer screen follows this peer's files one by one.
-        if (mounted) {
-          navigator.pop(); // Close bottom sheet
-        }
+        if (mounted) _closeFlow(navigator);
         navigator.push(
           MaterialPageRoute(
             builder: (_) => TransferDetailPage(
@@ -710,9 +743,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
         final task = await widget.container.fileSharingCoordinator
             .sendFileToPeer(peer, preselectedDoc: widget.document);
 
-        if (mounted) {
-          navigator.pop(); // Close bottom sheet
-        }
+        if (mounted) _closeFlow(navigator);
 
         if (task != null) {
           navigator.push(
@@ -741,3 +772,5 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     }
   }
 }
+
+enum _RouteFilter { all, wifi, bluetooth }

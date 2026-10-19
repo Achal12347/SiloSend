@@ -55,6 +55,20 @@ class TransferEngineImpl implements TransferEngine {
   Stream<({SecureSession session, VayuPacket packet})> get linkUpgradePackets =>
       _linkUpgradePackets.stream;
 
+  final StreamController<({SecureSession session, VayuPacket packet})>
+  _chatPackets = StreamController.broadcast();
+
+  /// Chat messages and receipts (packets 0x20/0x21) of any session.
+  Stream<({SecureSession session, VayuPacket packet})> get chatPackets =>
+      _chatPackets.stream;
+
+  final StreamController<({SecureSession session, VayuPacket packet})>
+  _hostPackets = StreamController.broadcast();
+
+  /// Host & Client packets (0x50-0x54) of any session.
+  Stream<({SecureSession session, VayuPacket packet})> get hostPackets =>
+      _hostPackets.stream;
+
   final StreamController<IncomingTransferRequest> _incomingRequestsController =
       StreamController<IncomingTransferRequest>.broadcast();
   StreamSubscription<SecureSession>? _newSessionSubscription;
@@ -361,6 +375,25 @@ class TransferEngineImpl implements TransferEngine {
 
       case PacketType.transferDigest:
         _handleDigestPacket(session, packet);
+        break;
+
+      case PacketType.hostCatalogRequest:
+      case PacketType.hostCatalog:
+      case PacketType.hostDownloadRequest:
+      case PacketType.hostDownloadResponse:
+      case PacketType.hostEnded:
+        if (!_hostPackets.isClosed) {
+          _hostPackets.add((session: session, packet: packet));
+        }
+        break;
+
+      case PacketType.chatMessage:
+      case PacketType.chatDeliveryAck:
+      case PacketType.chatFileOffer:
+      case PacketType.chatFileAnswer:
+        if (!_chatPackets.isClosed) {
+          _chatPackets.add((session: session, packet: packet));
+        }
         break;
 
       case PacketType.linkUpgradeRequest:
@@ -853,6 +886,8 @@ class TransferEngineImpl implements TransferEngine {
     }
     _sessionSubscriptions.clear();
     await _linkUpgradePackets.close();
+    await _chatPackets.close();
+    await _hostPackets.close();
 
     for (final task in _tasks.values.toList()) {
       await task.cancel('TransferEngine disposed');
