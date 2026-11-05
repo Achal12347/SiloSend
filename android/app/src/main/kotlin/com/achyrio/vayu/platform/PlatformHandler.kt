@@ -2,6 +2,9 @@ package com.achyrio.vayu.platform
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.content.Context
@@ -14,10 +17,15 @@ import android.net.Uri
 import android.net.wifi.WifiManager
 import android.nfc.NfcAdapter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.app.ActivityCompat
+import com.achyrio.vayu.chat.ChatListeningService
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import io.flutter.plugin.common.BinaryMessenger
@@ -43,10 +51,13 @@ class PlatformHandler(
     companion object {
         const val CHANNEL = "com.achyrio.vayu/platform"
         const val REQUEST_CODE_ENABLE_BLUETOOTH = 1002
+        private const val BLUETOOTH_ON_POLLS = 15
+        private const val BLUETOOTH_ON_POLL_MS = 200L
     }
 
     private var channel: MethodChannel? = null
     private var pendingEnableBtResult: MethodChannel.Result? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
@@ -103,6 +114,23 @@ class PlatformHandler(
                 val page = call.argument<String>("page") ?: "app"
                 result.success(openSettingsPage(page))
             }
+            "notifyChatMessage" -> {
+                val peerName = call.argument<String>("peerName")?.take(80) ?: "Nearby phone"
+                result.success(showChatNotification(peerName))
+            }
+            "setChatPresence" -> {
+                if (call.argument<Boolean>("enabled") == true) {
+                    result.success(ChatListeningService.start(activity))
+                } else {
+                    ChatListeningService.stop(activity)
+                    result.success(true)
+                }
+            }
+            "holdAwakeBriefly" -> {
+                BriefWakeLock.hold(activity)
+                result.success(true)
+            }
+            "moveToBackground" -> result.success(activity.moveTaskToBack(true))
             "enableBluetooth" -> {
                 requestEnableBluetooth(result)
             }
@@ -175,6 +203,20 @@ class PlatformHandler(
                     } else {
                         activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     }
+                }
+                result.success(true)
+            }
+            "fullBrightness" -> {
+                val on = call.argument<Boolean>("on") == true
+                activity.runOnUiThread {
+                    val attrs = activity.window.attributes
+                    // Window-only override: the system setting is untouched.
+                    attrs.screenBrightness = if (on) {
+                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_FULL
+                    } else {
+                        WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    }
+                    activity.window.attributes = attrs
                 }
                 result.success(true)
             }
@@ -274,6 +316,14 @@ class PlatformHandler(
             }
         return mapOf(
             "rationale" to rationale,
+            // Android 12+: "Approximate" granted, "Use precise location" off.
+            "approximateLocationOnly" to (
+                sdk >= Build.VERSION_CODES.S &&
+                    ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                    PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_FINE_LOCATION) !=
+                    PackageManager.PERMISSION_GRANTED
+                ),
             "sdkVersion" to sdk,
             "nearby" to permissions.status(PermissionGate.nearbyPermissions()),
             // Before Android 12 this is the same location permission as "nearby".
@@ -328,6 +378,42 @@ class PlatformHandler(
             activity.startActivity(intent)
             true
         } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun showChatNotification(peerName: String): Boolean {
+        if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(
+                activity, Manifest.permission.POST_NOTIFICATIONS,
+            ) != PackageManager.PERMISSION_GRANTED
+        ) return false
+        val manager = activity.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // A channel's importance cannot be raised once it exists, hence the new ID.
+        val channelId = "vayu_chat_alerts"
+        manager.deleteNotificationChannel("vayu_chat_messages")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(channelId) == null) {
+            manager.createNotificationChannel(
+                NotificationChannel(channelId, "Chat messages", NotificationManager.IMPORTANCE_HIGH),
+            )
+        }
+        val openApp = PendingIntent.getActivity(
+            activity, 0, Intent(activity, com.achyrio.vayu.MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(activity, channelId)
+            .setSmallIcon(activity.applicationInfo.icon)
+            .setContentTitle("New message from $peerName")
+            .setContentText("Open Vayu to read it.")
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .build()
+        return try {
+            NotificationManagerCompat.from(activity).notify(peerName.hashCode(), notification)
+            true
+        } catch (_: SecurityException) {
             false
         }
     }
@@ -415,10 +501,28 @@ class PlatformHandler(
         if (requestCode == REQUEST_CODE_ENABLE_BLUETOOTH) {
             val res = pendingEnableBtResult ?: return false
             pendingEnableBtResult = null
-            res.success(bluetoothAdapter?.isEnabled == true)
+            if (resultCode != Activity.RESULT_OK) {
+                res.success(bluetoothAdapter?.isEnabled == true)
+                return true
+            }
+            // The user allowed it, but the radio is still turning on for a
+            // moment. Answering "off" here sent people to Bluetooth settings
+            // right after they had switched it on.
+            waitForBluetooth(res, attemptsLeft = BLUETOOTH_ON_POLLS)
             return true
         }
         return false
+    }
+
+    private fun waitForBluetooth(result: MethodChannel.Result, attemptsLeft: Int) {
+        val on = bluetoothAdapter?.isEnabled == true
+        if (on || attemptsLeft <= 0) {
+            // RESULT_OK means Android accepted the request even if the radio
+            // is slower than this wait.
+            result.success(true)
+            return
+        }
+        mainHandler.postDelayed({ waitForBluetooth(result, attemptsLeft - 1) }, BLUETOOTH_ON_POLL_MS)
     }
 
     private fun isWifiEnabled(): Boolean {

@@ -10,7 +10,9 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Receives files shared to Vayu from other apps (ACTION_SEND / ACTION_SEND_MULTIPLE).
+ * Receives files shared to Vayu from other apps (ACTION_SEND / ACTION_SEND_MULTIPLE),
+ * and Receive codes (`vayu://pair` links) opened by another app, usually the
+ * phone's camera after scanning a Receive QR code.
  *
  * The sending app grants read access to the shared URIs; Vayu reads them with
  * the same background reader as picked files. Shares that arrive before Flutter
@@ -25,6 +27,8 @@ class ShareIntentHandler(private val activity: Activity) : MethodChannel.MethodC
     private var channel: MethodChannel? = null
     private var pending: List<Map<String, Any?>> = emptyList()
     private var dartReady = false
+    private var pendingCode: String? = null
+    private var codeReady = false
 
     fun register(messenger: BinaryMessenger) {
         channel = MethodChannel(messenger, CHANNEL).also { it.setMethodCallHandler(this) }
@@ -34,6 +38,7 @@ class ShareIntentHandler(private val activity: Activity) : MethodChannel.MethodC
         channel?.setMethodCallHandler(null)
         channel = null
         dartReady = false
+        codeReady = false
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -43,13 +48,30 @@ class ShareIntentHandler(private val activity: Activity) : MethodChannel.MethodC
                 result.success(pending)
                 pending = emptyList()
             }
+            "takePendingCode" -> {
+                codeReady = true
+                result.success(pendingCode)
+                pendingCode = null
+            }
             else -> result.notImplemented()
         }
     }
 
     /** Called from MainActivity for the launch intent and every new intent. */
     fun handle(intent: Intent?) {
-        val docs = extract(intent ?: return)
+        if (intent == null) return
+        receiveCode(intent)?.let { code ->
+            // Consumed so a rotation or resume does not open it twice.
+            intent.action = Intent.ACTION_MAIN
+            intent.data = null
+            if (codeReady && channel != null) {
+                channel?.invokeMethod("onCode", code)
+            } else {
+                pendingCode = code
+            }
+            return
+        }
+        val docs = extract(intent)
         if (docs.isEmpty()) return
         // Consume the intent so a rotation or resume does not share the files twice.
         intent.action = Intent.ACTION_MAIN
@@ -58,6 +80,14 @@ class ShareIntentHandler(private val activity: Activity) : MethodChannel.MethodC
         } else {
             pending = docs
         }
+    }
+
+    /** A `vayu://pair` link, checked again in Dart before anything is joined. */
+    private fun receiveCode(intent: Intent): String? {
+        if (intent.action != Intent.ACTION_VIEW) return null
+        val data = intent.data ?: return null
+        if (data.scheme != "vayu" || data.host != "pair") return null
+        return intent.dataString?.takeIf { it.length <= 2048 }
     }
 
     @Suppress("DEPRECATION")

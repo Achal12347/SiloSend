@@ -128,17 +128,12 @@ class TransferEngineImpl implements TransferEngine {
         : null;
   }
 
-  /// Link name for speed diagnostics. TCP over a Wi-Fi Direct group is told
-  /// apart by Android's fixed group subnet.
+  /// Link name for speed diagnostics.
   String? _linkOf(String remoteDeviceId) {
     final session = _resolveSession(remoteDeviceId);
-    if (session is! SecureSessionImpl) return null;
-    final info = session.connectionSession.info;
-    if (info.activeTransport == TransportType.lan &&
-        (info.remoteAddress?.startsWith('192.168.49.') ?? false)) {
-      return 'wifiDirect';
-    }
-    return info.activeTransport.name;
+    return session is SecureSessionImpl
+        ? session.connectionSession.info.routeName
+        : null;
   }
 
   @override
@@ -164,7 +159,7 @@ class TransferEngineImpl implements TransferEngine {
   }
 
   void _recordStats(TransferStats stats, String remoteDeviceId) {
-    stats = stats.withLink(_linkOf(remoteDeviceId));
+    stats = stats.withLink(_linkOf(remoteDeviceId)).withPeer(remoteDeviceId);
     statsLog.record(stats);
     AppLogger.info('TransferStats', stats.summary());
   }

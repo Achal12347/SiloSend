@@ -35,6 +35,15 @@ class ConnectionSessionInfo {
     this.remoteFeatures = const {},
   });
 
+  /// The route this session really uses: `lan`, `wifiDirect`, `ble` or
+  /// `relay`. Wi-Fi Direct is TCP too, so it is told apart by the subnet
+  /// Android gives its groups.
+  String get routeName =>
+      activeTransport == TransportType.lan &&
+          (remoteAddress?.startsWith('192.168.49.') ?? false)
+      ? 'wifiDirect'
+      : activeTransport.name;
+
   ConnectionSessionInfo copyWith({
     String? sessionId,
     String? remoteDeviceId,

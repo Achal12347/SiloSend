@@ -26,6 +26,25 @@ TransferHistoryRecord _record(
 );
 
 void main() {
+  test('the route survives saving', () {
+    final record = TransferHistoryRecord(
+      transferId: 't',
+      outbound: true,
+      peerDeviceId: 'p',
+      peerName: 'Bo',
+      fileName: 'a.bin',
+      sizeBytes: 1,
+      mimeType: 'application/octet-stream',
+      outcome: TransferOutcome.completed,
+      finishedAt: DateTime(2026),
+      route: 'wifiDirect',
+    );
+    expect(
+      TransferHistoryRecord.tryFromJson(record.toJson())?.route,
+      'wifiDirect',
+    );
+  });
+
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('vayu_history_'));
   tearDown(() => dir.deleteSync(recursive: true));

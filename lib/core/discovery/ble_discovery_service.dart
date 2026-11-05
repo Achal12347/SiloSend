@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'package:vayu/core/contracts/discovery_contract.dart';
@@ -26,6 +27,11 @@ class BleDiscoveryService implements DiscoveryService {
   bool _isAdvertising = false;
   DeviceAdvertisement? _currentAdvertisement;
 
+  /// Why this phone is not announcing itself over Bluetooth (the platform's
+  /// error code), or null while it is or when it was not asked to. Screens
+  /// that say "visible" read this so they never claim it falsely.
+  final ValueNotifier<String?> advertisingProblem = ValueNotifier(null);
+
   BleDiscoveryService({
     required this.localDeviceId,
     MethodChannel? methodChannel,
@@ -49,7 +55,9 @@ class BleDiscoveryService implements DiscoveryService {
     if (_batterySaver == enabled) return;
     _batterySaver = enabled;
     if (_isScanning) {
-      stopDiscovery().then((_) => startDiscovery());
+      stopDiscovery().then((_) => startDiscovery()).catchError((Object e) {
+        AppLogger.warning('BleDiscoveryService', 'Scan restart failed: $e');
+      });
     }
     if (_isAdvertising && _currentAdvertisement != null) {
       final ad = _currentAdvertisement!;
@@ -79,12 +87,18 @@ class BleDiscoveryService implements DiscoveryService {
         'Failed to start BLE scan: ${e.message} (Code: ${e.code})',
       );
       _isScanning = false;
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+      rethrow;
     } on MissingPluginException {
       AppLogger.warning(
         'BleDiscoveryService',
         'BLE platform channel not available on this platform/configuration',
       );
       _isScanning = false;
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+      rethrow;
     } catch (e, stack) {
       AppLogger.error(
         'BleDiscoveryService',
@@ -93,6 +107,9 @@ class BleDiscoveryService implements DiscoveryService {
         stackTrace: stack,
       );
       _isScanning = false;
+      await _eventSubscription?.cancel();
+      _eventSubscription = null;
+      rethrow;
     }
   }
 
@@ -128,13 +145,18 @@ class BleDiscoveryService implements DiscoveryService {
         maxNameBytes: DiscoveryBeacon.maxBleDisplayNameBytes,
       );
 
-      await _methodChannel.invokeMethod('startAdvertising', {
-        'serviceUuid': vayuServiceUuid,
-        'beaconBytes': beaconBytes,
-        'batterySaver': _batterySaver,
-      });
+      // Android answers from a callback that some phones never call; discovery
+      // and everything waiting on it must not hang on that.
+      await _methodChannel
+          .invokeMethod('startAdvertising', {
+            'serviceUuid': vayuServiceUuid,
+            'beaconBytes': beaconBytes,
+            'batterySaver': _batterySaver,
+          })
+          .timeout(const Duration(seconds: 8));
 
       _isAdvertising = true;
+      advertisingProblem.value = null;
       AppLogger.info(
         'BleDiscoveryService',
         'Started BLE discovery advertising for: ${advertisement.displayName}',
@@ -145,6 +167,7 @@ class BleDiscoveryService implements DiscoveryService {
         'Failed to start BLE advertising: ${e.message} (Code: ${e.code})',
       );
       _isAdvertising = false;
+      advertisingProblem.value = e.code;
     } on MissingPluginException {
       AppLogger.warning(
         'BleDiscoveryService',
@@ -170,6 +193,7 @@ class BleDiscoveryService implements DiscoveryService {
     } catch (_) {}
     _isAdvertising = false;
     _currentAdvertisement = null;
+    advertisingProblem.value = null;
     AppLogger.info('BleDiscoveryService', 'Stopped BLE discovery advertising');
   }
 

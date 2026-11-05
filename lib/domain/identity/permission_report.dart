@@ -72,6 +72,10 @@ class PermissionReport {
   /// explains why before asking again.
   final Set<PermissionGroup> rationale;
 
+  /// Android 12: Location was allowed as "Approximate" only. Settings then
+  /// shows it as allowed, but Wi-Fi Direct needs "Use precise location".
+  final bool approximateLocationOnly;
+
   const PermissionReport({
     required this.permissions,
     required this.bluetooth,
@@ -81,6 +85,7 @@ class PermissionReport {
     required this.battery,
     this.sdkVersion,
     this.rationale = const {},
+    this.approximateLocationOnly = false,
   });
 
   /// A platform with nothing to grant (desktop, tests).
@@ -113,6 +118,7 @@ class PermissionReport {
             for (final group in PermissionGroup.values)
               if (group.name == name) group,
         },
+        approximateLocationOnly: map['approximateLocationOnly'] == true,
       );
 
   PermissionStatus statusOf(PermissionGroup group) =>

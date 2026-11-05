@@ -11,19 +11,26 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Size
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.Button
 import android.widget.ImageButton
 import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.CameraState
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -45,7 +52,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * executor. Only `vayu://` (or legacy `silosend://`) codes are accepted, so a
  * random QR code can never start a connection; with [EXTRA_ACCEPT_CARDS] a
  * contact card (vCard, as shown on another phone's My card) is accepted too. The camera permission is asked
- * here, at the moment the user chose to scan.
+ * by QrScannerHandler immediately before this Activity is launched.
  */
 class QrScanActivity : ComponentActivity() {
     companion object {
@@ -59,6 +66,16 @@ class QrScanActivity : ComponentActivity() {
     private lateinit var analysisExecutor: ExecutorService
     private val delivered = AtomicBoolean(false)
     private lateinit var hint: TextView
+    private lateinit var retry: Button
+    private lateinit var torch: ImageButton
+    private val main = Handler(Looper.getMainLooper())
+    private var camera: Camera? = null
+    private var torchOn = false
+    private var initAttempts = 0
+    private var binding = false
+
+    // Set while the camera is blocked or failed; cleared once it opens.
+    private var cameraFailed = false
     private val reader = MultiFormatReader().apply {
         setHints(
             mapOf(
@@ -67,11 +84,6 @@ class QrScanActivity : ComponentActivity() {
             ),
         )
     }
-
-    private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) startCamera() else finishWithError("permission")
-        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -86,11 +98,7 @@ class QrScanActivity : ComponentActivity() {
         root.addView(ViewfinderOverlay(this), FrameLayout.LayoutParams(MATCH, MATCH))
 
         hint = TextView(this).apply {
-            text = if (acceptCards) {
-                "Point at the card on the other phone"
-            } else {
-                "Point at the Vayu code on the other phone"
-            }
+            text = defaultHint()
             setTextColor(Color.parseColor("#F4F1EA"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             gravity = Gravity.CENTER
@@ -114,39 +122,143 @@ class QrScanActivity : ComponentActivity() {
                 leftMargin = dp(8)
             },
         )
+        retry = Button(this).apply {
+            text = "Try again"
+            visibility = View.GONE
+            setOnClickListener { bindCamera() }
+        }
+        root.addView(
+            retry,
+            FrameLayout.LayoutParams(WRAP, WRAP, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = dp(24)
+            },
+        )
+        torch = ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_menu_view)
+            setBackgroundColor(Color.TRANSPARENT)
+            contentDescription = "Turn on the light"
+            visibility = View.GONE
+            setOnClickListener { toggleTorch() }
+        }
+        root.addView(
+            torch,
+            FrameLayout.LayoutParams(dp(56), dp(56), Gravity.TOP or Gravity.END).apply {
+                topMargin = dp(24)
+                rightMargin = dp(8)
+            },
+        )
         setContentView(root)
         previewView = preview
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            startCamera()
-        } else {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
-        }
+        if (hasCameraPermission()) bindCamera() else finishWithError("permission")
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from a system camera prompt (privacy switch, an OEM camera
+        // prompt) or from Settings: the camera may be free now. The scanner
+        // used to stay black here until the app was restarted.
+        if (hasCameraPermission() && !binding && (camera == null || cameraFailed)) bindCamera()
+    }
+
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
 
     private lateinit var previewView: PreviewView
 
-    private fun startCamera() {
+    private fun bindCamera() {
+        if (binding) return
+        binding = true
+        retry.visibility = View.GONE
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
+            binding = false
             try {
                 val provider = future.get()
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
                 }
+                // Receive codes are dense (about 70 modules a side); the
+                // default 640x480 frames left too few pixels per module.
                 val analysis = ImageAnalysis.Builder()
+                    .setResolutionSelector(
+                        ResolutionSelector.Builder()
+                            .setResolutionStrategy(
+                                ResolutionStrategy(
+                                    Size(1280, 720),
+                                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER,
+                                ),
+                            )
+                            .build(),
+                    )
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
                 analysis.setAnalyzer(analysisExecutor) { image -> analyze(image) }
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                val bound = provider.bindToLifecycle(
+                    this,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview,
+                    analysis,
+                )
+                camera = bound
+                cameraFailed = false
+                initAttempts = 0
+                hint.text = defaultHint()
+                torch.visibility = if (bound.cameraInfo.hasFlashUnit()) View.VISIBLE else View.GONE
+                bound.cameraInfo.cameraState.removeObservers(this)
+                bound.cameraInfo.cameraState.observe(this) { state -> onCameraState(state) }
             } catch (e: Exception) {
-                finishWithError("camera")
+                // Right after the permission is granted some phones report no
+                // camera for a moment; try a few times before giving up.
+                if (++initAttempts < 3) {
+                    main.postDelayed({ bindCamera() }, 700L * initAttempts)
+                } else {
+                    showCameraProblem("The camera could not be started. Tap Try again.")
+                }
             }
         }, ContextCompat.getMainExecutor(this))
     }
+
+    private fun onCameraState(state: CameraState) {
+        val error = state.error
+        if (error == null) {
+            if (state.type == CameraState.Type.OPEN && cameraFailed) {
+                cameraFailed = false
+                retry.visibility = View.GONE
+                hint.text = defaultHint()
+            }
+            return
+        }
+        showCameraProblem(
+            when (error.code) {
+                CameraState.ERROR_CAMERA_DISABLED ->
+                    "Camera access is turned off. Allow it, then tap Try again."
+                CameraState.ERROR_CAMERA_IN_USE, CameraState.ERROR_MAX_CAMERAS_IN_USE ->
+                    "Another app is using the camera. Close it, then tap Try again."
+                CameraState.ERROR_DO_NOT_DISTURB_MODE_ENABLED ->
+                    "Do Not Disturb is blocking the camera. Turn it off, then tap Try again."
+                else -> "The camera stopped. Tap Try again."
+            },
+        )
+    }
+
+    private fun showCameraProblem(message: String) {
+        cameraFailed = true
+        hint.text = message
+        retry.visibility = View.VISIBLE
+    }
+
+    private fun toggleTorch() {
+        val cam = camera ?: return
+        torchOn = !torchOn
+        cam.cameraControl.enableTorch(torchOn)
+        torch.contentDescription = if (torchOn) "Turn off the light" else "Turn on the light"
+    }
+
+    private fun defaultHint() =
+        if (acceptCards) "Point at the card on the other phone" else "Point at the Vayu code on the other phone"
 
     private fun analyze(image: ImageProxy) {
         try {
@@ -200,6 +312,7 @@ class QrScanActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        main.removeCallbacksAndMessages(null)
         analysisExecutor.shutdown()
         super.onDestroy()
     }

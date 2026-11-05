@@ -20,6 +20,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.achyrio.vayu.platform.BriefWakeLock
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -61,6 +62,12 @@ class BleConnectionHandler(private val context: Context) :
         const val ATT_HEADER_SIZE = 3
         const val CLIENT_PREFIX = "ble_"
         const val SERVER_PREFIX = "ble_server_"
+
+        // A first connect often fails at once with GATT_ERROR (133) while the
+        // controller is busy (common on Samsung and Xiaomi); a fresh GATT
+        // object a moment later usually connects.
+        private const val CONNECT_RETRIES = 2
+        private const val CONNECT_RETRY_MS = 400L
     }
 
     /** Outgoing byte queue for one link, drained one GATT operation at a time. */
@@ -84,6 +91,11 @@ class BleConnectionHandler(private val context: Context) :
 
     private val clientGatts = ConcurrentHashMap<String, BluetoothGatt>()
     private val pendingConnects = ConcurrentHashMap<String, MethodChannel.Result>()
+
+    // GATT objects still connecting (not yet in [clientGatts]), so a caller
+    // giving up can close them, and how many retries each link has used.
+    private val connectingGatts = ConcurrentHashMap<String, BluetoothGatt>()
+    private val connectRetries = ConcurrentHashMap<String, Int>()
     private val servicesRequested = ConcurrentHashMap<String, Boolean>()
     private val serverDevices = ConcurrentHashMap<String, BluetoothDevice>()
     private val subscribedServerLinks = ConcurrentHashMap<String, Boolean>()
@@ -193,6 +205,8 @@ class BleConnectionHandler(private val context: Context) :
             val callback = object : BluetoothGattCallback() {
                 override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
                     if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
+                        connectingGatts.remove(connectionId)
+                        connectRetries.remove(connectionId)
                         clientGatts[connectionId] = gatt
                         // One GATT operation at a time: MTU first, services after it completes.
                         if (!gatt.requestMtu(requestedMtu)) {
@@ -203,10 +217,28 @@ class BleConnectionHandler(private val context: Context) :
                     ) {
                         Log.i(TAG, "Client link $connectionId closed (status $status)")
                         clientGatts.remove(connectionId)
+                        connectingGatts.remove(connectionId)
                         servicesRequested.remove(connectionId)
                         try {
                             gatt.close()
                         } catch (_: Exception) {}
+                        val used = connectRetries[connectionId] ?: 0
+                        if (pendingConnects.containsKey(connectionId) &&
+                            status != BluetoothGatt.GATT_SUCCESS &&
+                            used < CONNECT_RETRIES
+                        ) {
+                            connectRetries[connectionId] = used + 1
+                            Log.w(TAG, "Connect to $connectionId failed (status $status); retry ${used + 1}")
+                            val callback = this
+                            mainHandler.postDelayed({
+                                // The caller may have given up meanwhile.
+                                if (pendingConnects.containsKey(connectionId)) {
+                                    openGatt(connectionId, device, callback)
+                                }
+                            }, CONNECT_RETRY_MS * (used + 1))
+                            return
+                        }
+                        connectRetries.remove(connectionId)
                         if (!failConnect(connectionId, "GATT connection failed (status $status)")) {
                             clearLink(connectionId, "GATT disconnected")
                             emitEvent(
@@ -290,12 +322,22 @@ class BleConnectionHandler(private val context: Context) :
                 }
             }
 
-            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+            connectRetries.remove(connectionId)
+            openGatt(connectionId, device, callback)
         } catch (e: Exception) {
             pendingConnects.remove(connectionId)
             clearLink(connectionId, "Connect failed")
             Log.e(TAG, "Failed to connect to BLE device: ${e.message}", e)
             result.error("CONNECT_FAILED", "Failed to connect to BLE device: ${e.message}", null)
+        }
+    }
+
+    private fun openGatt(connectionId: String, device: BluetoothDevice, callback: BluetoothGattCallback) {
+        try {
+            device.connectGatt(context, false, callback, BluetoothDevice.TRANSPORT_LE)
+                ?.let { connectingGatts[connectionId] = it }
+        } catch (e: SecurityException) {
+            failConnect(connectionId, "Bluetooth permission missing")
         }
     }
 
@@ -380,6 +422,7 @@ class BleConnectionHandler(private val context: Context) :
                 override fun onConnectionStateChange(device: BluetoothDevice, status: Int, newState: Int) {
                     val connectionId = SERVER_PREFIX + device.address
                     if (newState == BluetoothProfile.STATE_CONNECTED) {
+                        BriefWakeLock.hold(context)
                         serverDevices[connectionId] = device
                         linkMtus[connectionId] = DEFAULT_ATT_MTU
                         outboxes[connectionId] = Outbox()
@@ -416,6 +459,7 @@ class BleConnectionHandler(private val context: Context) :
                     offset: Int,
                     value: ByteArray?,
                 ) {
+                    BriefWakeLock.hold(context)
                     if (responseNeeded) {
                         gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, null)
                     }
@@ -630,6 +674,13 @@ class BleConnectionHandler(private val context: Context) :
             return
         }
         failConnect(connectionId, "Disconnected by caller")
+        connectRetries.remove(connectionId)
+        connectingGatts.remove(connectionId)?.let {
+            try {
+                it.disconnect()
+                it.close()
+            } catch (_: Exception) {}
+        }
         val gatt = clientGatts.remove(connectionId)
         servicesRequested.remove(connectionId)
         clearLink(connectionId, "Disconnected by caller")

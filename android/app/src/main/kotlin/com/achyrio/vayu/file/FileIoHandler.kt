@@ -75,6 +75,7 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
             return
         }
         when (call.method) {
+            "fileSize" -> fileSize(uriString, result)
             "readChunk" -> readChunk(uriString, call, result)
             "sha256" -> hashers.execute { sha256(uriString, result) }
             "closeFile" -> {
@@ -82,6 +83,17 @@ class FileIoHandler(private val context: Context) : MethodChannel.MethodCallHand
                 result.success(null)
             }
             else -> result.notImplemented()
+        }
+    }
+
+    private fun fileSize(uriString: String, result: MethodChannel.Result) {
+        try {
+            val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uriString), "r")
+                ?: throw IllegalArgumentException("Cannot open descriptor")
+            val size = try { descriptor.statSize } finally { descriptor.close() }
+            result.success(size)
+        } catch (e: Exception) {
+            result.error("SIZE_FAILED", "Failed to read document size: ${e.message}", null)
         }
     }
 

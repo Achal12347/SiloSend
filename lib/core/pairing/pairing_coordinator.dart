@@ -16,7 +16,8 @@ import 'package:vayu/domain/pairing/pairing_payload.dart';
 /// Thrown when a pairing payload cannot lead to a connection.
 class PairingException implements Exception {
   final String message;
-  const PairingException(this.message);
+  final Object? cause;
+  const PairingException(this.message, {this.cause});
   @override
   String toString() => message;
 }
@@ -52,6 +53,12 @@ class PairingCoordinator {
   final int Function() activeSessionCount;
   final Stream<Object?> sessionChanges;
 
+  /// A session runs over the shared Wi-Fi and none over Wi-Fi Direct.
+  final bool Function() hasSharedWifiSession;
+
+  /// Testing switch in Diagnostics: a code does not use the shared Wi-Fi.
+  final bool Function() avoidSharedWifi;
+
   /// How long a hotspot (hosted or joined) survives with no sessions.
   final Duration hotspotIdleTimeout;
 
@@ -74,11 +81,15 @@ class PairingCoordinator {
     Future<bool> Function(String host, int port, Duration timeout)? canReach,
     int Function()? activeSessionCount,
     Stream<Object?>? sessionChanges,
+    bool Function()? hasSharedWifiSession,
+    bool Function()? avoidSharedWifi,
     this.hotspotIdleTimeout = const Duration(seconds: 60),
   }) : localAddresses = localAddresses ?? resolveLocalIPv4Addresses,
        canReach = canReach ?? tcpReachable,
        activeSessionCount = activeSessionCount ?? (() => 0),
-       sessionChanges = sessionChanges ?? const Stream.empty();
+       sessionChanges = sessionChanges ?? const Stream.empty(),
+       hasSharedWifiSession = hasSharedWifiSession ?? (() => false),
+       avoidSharedWifi = avoidSharedWifi ?? (() => false);
 
   /// Starts phone-to-phone Wi-Fi for a pairing screen that is about to show a
   /// code. It stays up until [releaseHotspotWhenIdle] and no session uses it.
@@ -91,6 +102,8 @@ class PairingCoordinator {
   /// Called when the pairing screen closes: stop hosting once no session has
   /// used the hotspot for [hotspotIdleTimeout].
   void releaseHotspotWhenIdle() {
+    _codeGroupWatch?.cancel();
+    _codeGroupWatch = null;
     if (wifiDirect.isHosting) {
       _groupRelease?.cancel();
       _groupRelease = _IdleRelease(
@@ -184,6 +197,7 @@ class PairingCoordinator {
           'PairingCoordinator',
           'Wi-Fi Direct group up (${group.frequencyMhz} MHz)',
         );
+        _watchCodeGroup();
         final direct = await buildLocalPayload(
           hotspotCredentials: group.credentials,
           wifiDirect: true,
@@ -215,6 +229,29 @@ class PairingCoordinator {
     return (payload, null);
   }
 
+  StreamSubscription<Object?>? _codeGroupWatch;
+
+  /// A group kept up during a transfer over the shared Wi-Fi makes the one
+  /// radio split its time between two networks, which slows that transfer and
+  /// makes its speed uneven. Once a sender has connected over the shared
+  /// Wi-Fi, the code's group is no longer needed.
+  void _watchCodeGroup() {
+    _codeGroupWatch?.cancel();
+    _codeGroupWatch = sessionChanges.listen((_) {
+      if (!hasSharedWifiSession() || !wifiDirect.isHosting) return;
+      AppLogger.info(
+        'PairingCoordinator',
+        'Connected over the shared Wi-Fi; removing the Wi-Fi Direct group',
+      );
+      _codeGroupWatch?.cancel();
+      _codeGroupWatch = null;
+      _groupRelease?.cancel();
+      _groupRelease = null;
+      hostedGroupFrequencyMhz = null;
+      wifiDirect.removeGroup();
+    });
+  }
+
   /// Sending side: joins the phone whose code was scanned or tapped and
   /// remembers its Receive ticket, so files sent to it next carry a proof
   /// (accepted without a prompt if that phone is on its Receive screen).
@@ -239,24 +276,6 @@ class PairingCoordinator {
     }
   }
 
-  /// Parses a pasted or scanned `vayu://pair` link (or `IP:port`) and joins.
-  Future<DiscoveredPeer> joinFromText(String text) {
-    final input = text.trim();
-    if (input.startsWith('${PairingPayload.uriScheme}://') ||
-        input.startsWith('${PairingPayload.legacyUriScheme}://')) {
-      final PairingPayload payload;
-      try {
-        payload = PairingPayload.fromUri(Uri.parse(input));
-      } on FormatException catch (e) {
-        throw PairingException('This pairing link is not valid: ${e.message}');
-      }
-      return join(payload);
-    }
-    throw const PairingException(
-      'Paste the full vayu://pair link shown on the other phone',
-    );
-  }
-
   /// Joins the phone described by [payload] and returns it as a Nearby peer.
   Future<DiscoveredPeer> join(PairingPayload payload) async {
     final self = identity();
@@ -264,9 +283,11 @@ class PairingCoordinator {
       throw const PairingException('This is your own pairing code');
     }
     if (payload.lanAddress == null || payload.lanPort == null) {
+      // Receive never shows a code without an address; this one is from an
+      // older Vayu or was cut short.
       throw const PairingException(
-        'The other phone is not on Wi-Fi. On that phone, choose '
-        '"Not on the same Wi-Fi?" so it can create a direct connection.',
+        "That code can't be used to connect. On the other phone, close "
+        'Receive and open it again, then scan the new code.',
       );
     }
 
@@ -294,10 +315,10 @@ class PairingCoordinator {
     return _connectTo(payload, payload.lanAddress!);
   }
 
-  /// Wi-Fi Direct first (owner's route rule since 2026-10-19: the phones
-  /// talk directly, on 5 GHz when both can, and normal Wi-Fi stays on), then
-  /// the shared router when both phones are on it, then the group joined
-  /// like a hotspot (phones without Wi-Fi Direct and no shared router).
+  /// The shared Wi-Fi first when both phones are on it, as for phones found
+  /// nearby: it answers in moments, while a group join can take half a
+  /// minute and can fail on some phones. Then Wi-Fi Direct, then the group
+  /// joined like a hotspot (phones without Wi-Fi Direct and no shared Wi-Fi).
   Future<DiscoveredPeer> _joinViaWifiDirect(
     PairingPayload payload,
     String ssid,
@@ -309,36 +330,8 @@ class PairingCoordinator {
     // keeps its normal time: the first one after an app start (keys loaded
     // cold) took longer than this limit, so the first scan always failed.
     final port = payload.lanPort;
-    if (await wifiDirect.isSupported()) {
-      final owner = await wifiDirect.connect(
-        networkName: ssid,
-        passphrase: passphrase,
-      );
-      if (owner != null) {
-        _releaseJoinWhenIdle(wifiDirect.disconnect);
-        // The group's routes can take a moment after joining; connecting at
-        // once used to fail and drop a group that was about to work.
-        if (port != null) {
-          final until = DateTime.now().add(const Duration(seconds: 8));
-          while (!await canReach(groupAddress, port, sharedWifiProbeTimeout) &&
-              DateTime.now().isBefore(until)) {
-            await Future<void>.delayed(const Duration(milliseconds: 500));
-          }
-        }
-        try {
-          return await _connectTo(payload, groupAddress);
-        } on PairingException {
-          _joinRelease?.cancel();
-          _joinRelease = null;
-          await wifiDirect.disconnect();
-        }
-      }
-      AppLogger.info(
-        'PairingCoordinator',
-        'Wi-Fi Direct join failed; trying the shared Wi-Fi',
-      );
-    }
-    if (fallback != null &&
+    if (!avoidSharedWifi() &&
+        fallback != null &&
         port != null &&
         await canReach(fallback, port, sharedWifiProbeTimeout)) {
       try {
@@ -346,11 +339,86 @@ class PairingCoordinator {
       } on PairingException {
         AppLogger.info(
           'PairingCoordinator',
-          'Shared Wi-Fi reached but the connection failed; joining the group as Wi-Fi',
+          'Shared Wi-Fi reached but the connection failed; trying Wi-Fi Direct',
         );
       }
     }
-    await _joinHotspot(ssid, passphrase);
+    WifiDirectJoinException? directJoinFailure;
+    final directSupported = await wifiDirect.isSupported();
+    var directAttempted = false;
+    if (directSupported) {
+      directAttempted = true;
+      WifiDirectJoinResult? joined;
+      try {
+        joined = await wifiDirect.connectWithDetails(
+          networkName: ssid,
+          passphrase: passphrase,
+        );
+      } on WifiDirectJoinException catch (error) {
+        directJoinFailure = error;
+        AppLogger.warning(
+          'PairingCoordinator',
+          'Wi-Fi Direct join failed (${error.code}): ${error.message}',
+        );
+      }
+      if (joined != null) {
+        _releaseJoinWhenIdle(wifiDirect.disconnect);
+        // The group's routes can take a moment after joining; connecting at
+        // once used to fail and drop a group that was about to work.
+        if (port != null) {
+          final until = DateTime.now().add(const Duration(seconds: 8));
+          while (joined.localAddress == null &&
+              !await canReach(
+                joined.ownerAddress,
+                port,
+                sharedWifiProbeTimeout,
+              ) &&
+              DateTime.now().isBefore(until)) {
+            await Future<void>.delayed(const Duration(milliseconds: 500));
+          }
+        }
+        try {
+          // Use the address from the completed P2P join; the payload address
+          // may be stale or differ across Wi-Fi Direct implementations.
+          return await _connectTo(
+            payload,
+            joined.ownerAddress,
+            sourceAddress: joined.localAddress,
+          );
+        } on PairingException {
+          _joinRelease?.cancel();
+          _joinRelease = null;
+          await wifiDirect.disconnect();
+          directJoinFailure = const WifiDirectJoinException(
+            'SERVER_UNREACHABLE',
+            'The Wi-Fi Direct group joined, but the Vayu connection did not complete',
+          );
+        }
+      }
+    }
+    // On Android 10+, WifiNetworkSpecifier presents a system network-join
+    // prompt. Do not send users to that prompt after a failed P2P attempt;
+    // it is not a valid way to join a Wi-Fi Direct group.
+    if (directAttempted) {
+      final detail = directJoinFailure?.message;
+      throw PairingException(
+        detail == null
+            ? 'Wi-Fi Direct could not connect. Keep Vayu open on both phones and try again.'
+            : 'Wi-Fi Direct failed: $detail. Keep Vayu open on both phones and try again.',
+        cause: directJoinFailure,
+      );
+    }
+    try {
+      await _joinHotspot(ssid, passphrase);
+    } on PairingException catch (fallbackError) {
+      final directFailure = directJoinFailure;
+      if (directFailure != null) {
+        throw PairingException(
+          'Direct Wi-Fi failed: ${directFailure.message}. ${fallbackError.message}',
+        );
+      }
+      rethrow;
+    }
     return _connectTo(payload, groupAddress);
   }
 
@@ -385,8 +453,9 @@ class PairingCoordinator {
 
   Future<DiscoveredPeer> _connectTo(
     PairingPayload payload,
-    String address,
-  ) async {
+    String address, {
+    String? sourceAddress,
+  }) async {
     final peer = DiscoveredPeer(
       deviceId: payload.deviceIdHex.toLowerCase(),
       displayName: payload.displayName,
@@ -402,7 +471,10 @@ class PairingCoordinator {
     try {
       await transportSelector.connectWithSmartSelection(
         peer,
-        request: TransportSelectionRequest(targetPeer: peer),
+        request: TransportSelectionRequest(
+          targetPeer: peer,
+          localSourceAddress: sourceAddress,
+        ),
       );
       final trust = secureSessionManager
           .getSessionForPeer(peer.deviceId)
@@ -411,10 +483,17 @@ class PairingCoordinator {
         'PairingCoordinator',
         'Paired with ${peer.displayName} (trust: ${trust?.name ?? 'unknown'})',
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      AppLogger.error(
+        'PairingCoordinator',
+        'Pairing connection failed for ${peer.deviceId}',
+        error: e,
+        stackTrace: stackTrace,
+      );
       throw PairingException(
         'Found ${peer.displayName} but could not connect. '
         'Keep Vayu open on both phones and try again.',
+        cause: e,
       );
     }
     return peer;

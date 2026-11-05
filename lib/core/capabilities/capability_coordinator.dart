@@ -137,7 +137,8 @@ class CapabilityCoordinator {
       StreamController<EvaluatedCapabilityState>.broadcast();
 
   EvaluatedCapabilityState _currentState;
-  bool _isRefreshing = false;
+  Future<EvaluatedCapabilityState>? _refreshing;
+  bool _refreshAgain = false;
   bool _lanOnlyDismissed = false;
 
   CapabilityCoordinator({
@@ -166,10 +167,29 @@ class CapabilityCoordinator {
   SystemCapabilities get rawCapabilities => _currentState.capabilities;
 
   /// Probes capabilities from physical platform and reconciles state.
-  Future<EvaluatedCapabilityState> refresh() async {
-    if (_isRefreshing) return _currentState;
-    _isRefreshing = true;
+  ///
+  /// A call during a refresh waits for one more probe: a switch turned on
+  /// meanwhile must not be missed because an older probe was running.
+  Future<EvaluatedCapabilityState> refresh() {
+    final running = _refreshing;
+    if (running != null) {
+      _refreshAgain = true;
+      return running;
+    }
+    return _refreshing = _refreshUntilCurrent().whenComplete(() {
+      _refreshing = null;
+    });
+  }
 
+  Future<EvaluatedCapabilityState> _refreshUntilCurrent() async {
+    do {
+      _refreshAgain = false;
+      await _probe();
+    } while (_refreshAgain);
+    return _currentState;
+  }
+
+  Future<void> _probe() async {
     _updateState(
       _currentState = EvaluatedCapabilityState(
         capabilities: _currentState.capabilities,
@@ -203,11 +223,7 @@ class CapabilityCoordinator {
         lanOnlyDismissed: _lanOnlyDismissed,
       );
       _updateState(_currentState);
-    } finally {
-      _isRefreshing = false;
     }
-
-    return _currentState;
   }
 
   /// Automatically triggered when application returns to foreground.

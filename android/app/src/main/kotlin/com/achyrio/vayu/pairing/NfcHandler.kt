@@ -1,6 +1,7 @@
 package com.achyrio.vayu.pairing
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.ComponentName
 import android.content.Intent
 import android.nfc.NdefMessage
@@ -38,6 +39,7 @@ class NfcHandler(private val activity: Activity) :
         private const val METHOD = "com.achyrio.vayu/nfc"
         private const val EVENTS = "com.achyrio.vayu/nfc_events"
         private const val CARD_EVENTS = "com.achyrio.vayu/nfc_cards"
+        private const val TAP_HINTS = "com.achyrio.vayu/nfc_tap_hints"
 
         /** MIME type of a Vayu card in a standard NFC tag (lower case, as Android requires). */
         const val CARD_MIME = "application/vnd.achyrio.vayu.card"
@@ -65,6 +67,9 @@ class NfcHandler(private val activity: Activity) :
     private var cardEvents: EventChannel? = null
     private var cardSink: EventChannel.EventSink? = null
     private var pendingCard: ByteArray? = null
+    private var tapHints: EventChannel? = null
+    private var tapHintSink: EventChannel.EventSink? = null
+    private var lastHintAt = 0L
     private val main = Handler(Looper.getMainLooper())
     private val adapter: NfcAdapter? get() = NfcAdapter.getDefaultAdapter(activity)
 
@@ -82,12 +87,34 @@ class NfcHandler(private val activity: Activity) :
                 }
             })
         }
+        tapHints = EventChannel(messenger, TAP_HINTS).also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    tapHintSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    tapHintSink = null
+                }
+            })
+        }
     }
 
     /** Called from MainActivity for the launch intent and every new intent. */
     fun handleIntent(intent: Intent?) {
-        if (intent?.action != NfcAdapter.ACTION_NDEF_DISCOVERED) return
-        val card = extractCard(intent) ?: return
+        val action = intent?.action
+        if (action != NfcAdapter.ACTION_NDEF_DISCOVERED &&
+            action != NfcAdapter.ACTION_TECH_DISCOVERED &&
+            action != NfcAdapter.ACTION_TAG_DISCOVERED
+        ) {
+            return
+        }
+        val card = if (action == NfcAdapter.ACTION_NDEF_DISCOVERED) extractCard(intent) else null
+        if (card == null) {
+            intent.action = Intent.ACTION_MAIN
+            onUnusableTap()
+            return
+        }
         // Consume it so a rotation or resume does not show the card twice.
         intent.action = Intent.ACTION_MAIN
         val live = cardSink
@@ -95,6 +122,41 @@ class NfcHandler(private val activity: Activity) :
             live.success(card)
         } else {
             pendingCard = card
+        }
+    }
+
+    // A phone showing a Receive code is not a tag Android can read, so Android's
+    // own reader said the tag had no data. Screens reading or sharing a code
+    // need no hint. Phones held together are detected repeatedly: one hint.
+    private fun onUnusableTap() {
+        if (servingWanted || readingWanted) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastHintAt < SAME_TAP_MS) return
+        lastHintAt = now
+        tapHintSink?.success(true)
+    }
+
+    // Only while Vayu is on screen, so tags reach Vayu instead of Android's
+    // reader. Reader mode, where a screen uses it, takes priority over this.
+    private fun catchTaps(on: Boolean) {
+        val nfc = adapter ?: return
+        try {
+            if (on) {
+                // Mutable: Android adds the tag to the intent. Explicit target.
+                val mutable =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+                val pending = PendingIntent.getActivity(
+                    activity,
+                    0,
+                    Intent(activity, activity.javaClass).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    mutable or PendingIntent.FLAG_UPDATE_CURRENT,
+                )
+                nfc.enableForegroundDispatch(activity, pending, null, null)
+            } else {
+                nfc.disableForegroundDispatch(activity)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Tag catching not changed: ${e.javaClass.simpleName}")
         }
     }
 
@@ -117,6 +179,7 @@ class NfcHandler(private val activity: Activity) :
 
     /** From MainActivity.onResume. */
     fun onResume() {
+        catchTaps(true)
         if (readingWanted) enableReader()
         if (servingWanted) {
             preferVayu(true)
@@ -126,6 +189,7 @@ class NfcHandler(private val activity: Activity) :
 
     /** From MainActivity.onPause. */
     fun onPause() {
+        catchTaps(false)
         if (servingWanted) {
             preferVayu(false)
             listenOnly(false)
@@ -189,6 +253,8 @@ class NfcHandler(private val activity: Activity) :
         methods?.setMethodCallHandler(null)
         events?.setStreamHandler(null)
         cardEvents?.setStreamHandler(null)
+        tapHints?.setStreamHandler(null)
+        tapHints = null
         methods = null
         events = null
         cardEvents = null

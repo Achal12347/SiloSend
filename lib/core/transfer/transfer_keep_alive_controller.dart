@@ -14,6 +14,9 @@ class TransferKeepAliveController {
   /// Minimum gap between notification refreshes, to avoid flooding the platform.
   final Duration updateInterval;
 
+  /// Told when the first transfer starts and when the last one ends.
+  final void Function(bool busy)? onBusyChanged;
+
   int _holders = 0;
   bool _askedNotifications = false;
   DateTime _lastUpdate = DateTime.fromMillisecondsSinceEpoch(0);
@@ -22,12 +25,14 @@ class TransferKeepAliveController {
   TransferKeepAliveController({
     required this.keepAlive,
     this.updateInterval = const Duration(seconds: 1),
+    this.onBusyChanged,
   });
 
   /// Acquires one reference and returns its single-use release callback.
   void Function() acquire({required String title, required String text}) {
     _holders++;
     if (_holders == 1) {
+      onBusyChanged?.call(true);
       _enqueue(() async {
         if (!_askedNotifications) {
           _askedNotifications = true;
@@ -43,6 +48,7 @@ class TransferKeepAliveController {
       released = true;
       _holders--;
       if (_holders == 0) {
+        onBusyChanged?.call(false);
         _enqueue(keepAlive.stop);
       }
     };

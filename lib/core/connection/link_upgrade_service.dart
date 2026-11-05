@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:vayu/core/connection/connection_session.dart';
@@ -22,6 +23,9 @@ class UpgradedLink {
   /// Group channel as the host reported it (0 when unknown).
   final int frequencyMhz;
 
+  /// Local P2P IPv4 address used to bind the outgoing TCP socket.
+  final String? localAddress;
+
   /// Leaves the group (the phone returns to its normal Wi-Fi).
   final Future<void> Function() leave;
 
@@ -29,6 +33,7 @@ class UpgradedLink {
     required this.host,
     required this.port,
     required this.frequencyMhz,
+    this.localAddress,
     required this.leave,
   });
 }
@@ -153,6 +158,10 @@ class LinkUpgradeService {
           payload: request.toBytes(),
         ),
       );
+      AppLogger.info(
+        'LinkUpgrade',
+        'stage=handoff_request_sent fiveGhz=${request.fiveGhz}',
+      );
       response = await completer.future.timeout(
         answerTimeout,
         onTimeout: () => throw const LinkUpgradeException(
@@ -166,6 +175,10 @@ class LinkUpgradeService {
 
     final reason = response.declined;
     if (reason != null) {
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=handoff_declined reason=${reason.name}',
+      );
       throw LinkUpgradeException(
         'The other phone did not start Wi-Fi Direct (${reason.name})',
         declined: reason,
@@ -174,30 +187,55 @@ class LinkUpgradeService {
     final name = response.networkName!;
     final passphrase = response.passphrase!;
 
-    if (await wifiDirect.isSupported()) {
-      final owner = await wifiDirect.connect(
-        networkName: name,
-        passphrase: passphrase,
-      );
-      if (owner == null) {
+    // A hotspot (host without Wi-Fi Direct) is joined as ordinary Wi-Fi.
+    if (response.kind != LinkUpgradeKind.hotspot &&
+        await wifiDirect.isSupported()) {
+      final WifiDirectJoinResult? joined;
+      try {
+        joined = await wifiDirect.connectWithDetails(
+          networkName: name,
+          passphrase: passphrase,
+        );
+      } on WifiDirectJoinException catch (error) {
+        AppLogger.warning(
+          'LinkUpgrade',
+          'stage=group_join_failed code=${error.code}',
+        );
+        throw LinkUpgradeException(
+          'Wi-Fi Direct join failed (${error.code}): ${error.message}',
+        );
+      }
+      if (joined == null) {
         throw const LinkUpgradeException(
           'Could not join the Wi-Fi Direct group',
         );
       }
       AppLogger.info(
         'LinkUpgrade',
-        'Joined Wi-Fi Direct group (${response.frequencyMhz} MHz)',
+        'stage=group_join_succeeded ownerAddressPresent=true '
+            'localAddressPresent=${joined.localAddress != null} '
+            'port=${response.port} frequencyMhz=${response.frequencyMhz}',
       );
       return UpgradedLink(
-        host: response.hostAddress!,
+        host: joined.ownerAddress,
         port: response.port!,
         frequencyMhz: response.frequencyMhz,
+        localAddress: joined.localAddress,
         leave: wifiDirect.disconnect,
       );
     }
-    // Without Wi-Fi Direct (Android 8-9) the group is joined as Wi-Fi.
+    // A hotspot, or a group joined by a phone without Wi-Fi Direct
+    // (Android 8-9): both are joined as ordinary Wi-Fi.
+    AppLogger.info(
+      'LinkUpgrade',
+      'stage=wifi_join_start kind=${response.kind.name}',
+    );
     if (!await hotspot.join(ssid: name, passphrase: passphrase)) {
-      throw const LinkUpgradeException('Could not join the Wi-Fi Direct group');
+      throw LinkUpgradeException(
+        response.kind == LinkUpgradeKind.hotspot
+            ? "Could not join the other phone's Wi-Fi"
+            : 'Could not join the Wi-Fi Direct group',
+      );
     }
     return UpgradedLink(
       host: response.hostAddress!,
@@ -243,6 +281,19 @@ class LinkUpgradeService {
         payload: response.toBytes(),
       ),
     );
+    if (response.isAccepted) {
+      AppLogger.info(
+        'LinkUpgrade',
+        'stage=handoff_response_sent ssidBytes=${utf8.encode(response.networkName!).length} '
+            'passphraseLength=${response.passphrase!.length} '
+            'port=${response.port} ownerAddressPresent=${response.hostAddress != null}',
+      );
+    } else {
+      AppLogger.info(
+        'LinkUpgrade',
+        'stage=handoff_response_sent declined=${response.declined!.name}',
+      );
+    }
   }
 
   Future<LinkUpgradeResponse> _decide(
@@ -257,23 +308,56 @@ class LinkUpgradeService {
 
     final blocker = await hostingBlocker(peerDeviceId);
     if (blocker != null) return decline(blocker);
-    if (!await wifiDirect.isSupported()) {
-      return decline(LinkUpgradeDeclineReason.unsupported);
-    }
     final port = lanPort();
-    if (port == null) return decline(LinkUpgradeDeclineReason.failed);
+    if (port == null || port < 1 || port > 65535) {
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=host_preflight_failed reason=server_port_unavailable',
+      );
+      return decline(LinkUpgradeDeclineReason.failed);
+    }
+    if (!await wifiDirect.isSupported()) {
+      return _hostHotspot(request, port, decline);
+    }
 
+    AppLogger.info(
+      'LinkUpgrade',
+      'stage=group_create_requested port=$port fiveGhz=${request.fiveGhz}',
+    );
     final created = await wifiDirect.createGroup(allow5Ghz: request.fiveGhz);
     final group = created.group;
     if (group == null) {
-      return decline(switch (created.error) {
-        HotspotStartError.permissionDenied ||
-        HotspotStartError.locationOff => LinkUpgradeDeclineReason.notAllowed,
-        HotspotStartError.unsupported => LinkUpgradeDeclineReason.unsupported,
-        _ => LinkUpgradeDeclineReason.failed,
-      });
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=group_create_failed reason=${created.error?.name ?? 'unknown'}',
+      );
+      return decline(_declineFor(created.error));
+    }
+    final ssidBytes = utf8.encode(group.credentials.ssid).length;
+    final passphraseLength = group.credentials.passphrase.length;
+    final passwordPrintableAscii = group.credentials.passphrase.codeUnits.every(
+      (unit) => unit >= 0x20 && unit <= 0x7e,
+    );
+    if (ssidBytes < 1 ||
+        ssidBytes > 32 ||
+        passphraseLength < 8 ||
+        passphraseLength > 63 ||
+        !passwordPrintableAscii) {
+      AppLogger.error(
+        'LinkUpgrade',
+        'stage=group_validation_failed ssidBytes=$ssidBytes '
+            'passphraseLength=$passphraseLength',
+      );
+      await wifiDirect.removeGroup();
+      return decline(LinkUpgradeDeclineReason.failed);
     }
     onHosted?.call();
+    AppLogger.info(
+      'LinkUpgrade',
+      'stage=group_ready ssidBytes=$ssidBytes passphraseLength=$passphraseLength '
+          'port=$port ownerAddressPresent=${group.credentials.hostAddress != null} '
+          'frequencyMhz=${group.frequencyMhz}',
+    );
     return LinkUpgradeResponse.accepted(
       requestId: request.requestId,
       networkName: group.credentials.ssid,
@@ -284,6 +368,57 @@ class LinkUpgradeService {
     );
   }
 
+  /// Hosts without Wi-Fi Direct (Android 8-9) offer a local-only hotspot,
+  /// so a Bluetooth session still moves to Wi-Fi on every Android version.
+  Future<LinkUpgradeResponse> _hostHotspot(
+    LinkUpgradeRequest request,
+    int port,
+    LinkUpgradeResponse Function(LinkUpgradeDeclineReason) decline,
+  ) async {
+    AppLogger.info('LinkUpgrade', 'stage=hotspot_create_requested port=$port');
+    final started = await hotspot.start();
+    final credentials = started.credentials;
+    if (credentials == null) {
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=hotspot_create_failed reason=${started.error?.name ?? 'unknown'}',
+      );
+      return decline(_declineFor(started.error));
+    }
+    final host = credentials.hostAddress;
+    final passphrase = credentials.passphrase;
+    if (host == null ||
+        InternetAddressCheck.parseIpv4(host) == null ||
+        passphrase.length < 8 ||
+        passphrase.length > 63) {
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=hotspot_validation_failed hostPresent=${host != null} '
+            'passphraseLength=${passphrase.length}',
+      );
+      return decline(LinkUpgradeDeclineReason.failed);
+    }
+    onHosted?.call();
+    AppLogger.info('LinkUpgrade', 'stage=hotspot_ready port=$port');
+    return LinkUpgradeResponse.accepted(
+      requestId: request.requestId,
+      networkName: credentials.ssid,
+      passphrase: passphrase,
+      hostAddress: host,
+      port: port,
+      kind: LinkUpgradeKind.hotspot,
+    );
+  }
+
+  static LinkUpgradeDeclineReason _declineFor(HotspotStartError? error) =>
+      switch (error) {
+        HotspotStartError.permissionDenied ||
+        HotspotStartError.locationOff ||
+        HotspotStartError.wifiOff => LinkUpgradeDeclineReason.notAllowed,
+        HotspotStartError.unsupported => LinkUpgradeDeclineReason.unsupported,
+        _ => LinkUpgradeDeclineReason.failed,
+      };
+
   void _onResponse(SecureSession session, VayuPacket packet) {
     final LinkUpgradeResponse response;
     try {
@@ -293,7 +428,21 @@ class LinkUpgradeService {
       return;
     }
     // Only the session that was asked may answer.
-    if (_pendingSessions[response.requestId] != session.sessionId) return;
+    if (_pendingSessions[response.requestId] != session.sessionId) {
+      AppLogger.warning(
+        'LinkUpgrade',
+        'stage=handoff_response_ignored reason=session_mismatch',
+      );
+      return;
+    }
+    AppLogger.info(
+      'LinkUpgrade',
+      response.isAccepted
+          ? 'stage=handoff_response_received ssidBytes=${utf8.encode(response.networkName!).length} '
+                'passphraseLength=${response.passphrase!.length} '
+                'port=${response.port} frequencyMhz=${response.frequencyMhz}'
+          : 'stage=handoff_response_received declined=${response.declined!.name}',
+    );
     final completer = _pending[response.requestId];
     if (completer != null && !completer.isCompleted) {
       completer.complete(response);

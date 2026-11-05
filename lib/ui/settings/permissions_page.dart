@@ -108,7 +108,7 @@ class _PermissionsPageState extends State<PermissionsPage>
   Widget build(BuildContext context) {
     final report = _report;
     return Scaffold(
-      appBar: AppBar(title: const Text('Permissions & settings')),
+      appBar: AppBar(title: const Text('Permissions')),
       body: report == null
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -139,6 +139,7 @@ class _PermissionsPageState extends State<PermissionsPage>
         title: 'Bluetooth',
         why: 'Finds phones near you.',
         onFix: _turnOnBluetooth,
+        page: SettingsPage.bluetooth,
       ),
       _switchRow(
         state: report.wifi,
@@ -146,6 +147,7 @@ class _PermissionsPageState extends State<PermissionsPage>
         title: 'Wi-Fi',
         why: 'The fast way to send. No internet needed.',
         onFix: () => _run(() => _openSettings(SettingsPage.wifi)),
+        page: SettingsPage.wifi,
       ),
       _switchRow(
         state: report.location,
@@ -154,6 +156,7 @@ class _PermissionsPageState extends State<PermissionsPage>
         why:
             'Android ${_versionName(sdk)} needs Location turned on to find phones and to connect without a shared Wi-Fi.',
         onFix: () => _run(() => _openSettings(SettingsPage.location)),
+        page: SettingsPage.location,
       ),
     ];
     final optional = <Widget>[
@@ -162,7 +165,10 @@ class _PermissionsPageState extends State<PermissionsPage>
         status: report.statusOf(PermissionGroup.directWifi),
         icon: Icons.wifi_tethering_rounded,
         title: sdk >= 33 ? 'Nearby Wi-Fi devices' : 'Location',
-        why: 'Send when the phones are not on the same Wi-Fi.',
+        why: report.approximateLocationOnly && sdk < 33
+            ? 'Send when the phones are not on the same Wi-Fi. Needs "Use precise location" on.'
+            : 'Send when the phones are not on the same Wi-Fi.',
+        approximateOnly: report.approximateLocationOnly && sdk < 33,
       ),
       _switchRow(
         state: report.nfc,
@@ -170,6 +176,7 @@ class _PermissionsPageState extends State<PermissionsPage>
         title: 'NFC',
         why: 'Tap phones together to send or share your card.',
         onFix: () => _run(() => _openSettings(SettingsPage.nfc)),
+        page: SettingsPage.nfc,
       ),
       _permissionRow(
         group: PermissionGroup.camera,
@@ -198,6 +205,7 @@ class _PermissionsPageState extends State<PermissionsPage>
         title: 'Unrestricted battery',
         why: 'Keeps long transfers going with the screen off. Choose "Unrestricted" or "Don\'t optimise" for Vayu.',
         onFix: () => _run(() => _openSettings(SettingsPage.battery)),
+        page: SettingsPage.battery,
         onLabel: 'Unrestricted',
         offLabel: 'Optimised',
         fixLabel: 'Open settings',
@@ -247,8 +255,27 @@ class _PermissionsPageState extends State<PermissionsPage>
     required IconData icon,
     required String title,
     required String why,
+    bool approximateOnly = false,
   }) {
     if (status == PermissionStatus.notRequired) return const SizedBox.shrink();
+    final settingsPage = group == PermissionGroup.notifications
+        ? SettingsPage.notifications
+        : SettingsPage.app;
+    if (approximateOnly && status != PermissionStatus.granted) {
+      // Settings shows Location as allowed; only the precise switch is off.
+      return _Row(
+        icon: icon,
+        title: title,
+        why: why,
+        statusLabel: 'Approximate only',
+        tone: _Tone.warn,
+        // Asking again shows Android's "Use precise location?" dialog.
+        actionLabel: status == PermissionStatus.permanentlyDenied
+            ? 'Open settings'
+            : 'Allow',
+        onAction: _busy ? null : () => _fixPermission(group, status),
+      );
+    }
     final (label, tone) = switch (status) {
       PermissionStatus.granted => ('Allowed', _Tone.good),
       PermissionStatus.permanentlyDenied => ('Blocked', _Tone.bad),
@@ -261,12 +288,17 @@ class _PermissionsPageState extends State<PermissionsPage>
       why: why,
       statusLabel: label,
       tone: tone,
+      // Allowed rows still lead to Settings, where it can be changed.
       actionLabel: switch (status) {
-        PermissionStatus.granted => null,
+        PermissionStatus.granted => 'Manage',
         PermissionStatus.permanentlyDenied => 'Open settings',
         _ => 'Allow',
       },
-      onAction: _busy ? null : () => _fixPermission(group, status),
+      onAction: _busy
+          ? null
+          : status == PermissionStatus.granted
+          ? () => _run(() => _openSettings(settingsPage))
+          : () => _fixPermission(group, status),
     );
   }
 
@@ -276,6 +308,7 @@ class _PermissionsPageState extends State<PermissionsPage>
     required String title,
     required String why,
     required VoidCallback onFix,
+    required SettingsPage page,
     String onLabel = 'On',
     String offLabel = 'Off',
     String fixLabel = 'Turn on',
@@ -299,8 +332,12 @@ class _PermissionsPageState extends State<PermissionsPage>
       why: why,
       statusLabel: on ? onLabel : offLabel,
       tone: on ? _Tone.good : _Tone.warn,
-      actionLabel: on ? null : fixLabel,
-      onAction: _busy || on ? null : onFix,
+      actionLabel: on ? 'Settings' : fixLabel,
+      onAction: _busy
+          ? null
+          : on
+          ? () => _run(() => _openSettings(page))
+          : onFix,
     );
   }
 

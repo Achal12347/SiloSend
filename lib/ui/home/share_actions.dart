@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
+import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/platform/contact_picker.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/transfer/selected_items_page.dart';
@@ -18,13 +19,19 @@ class ShareActions {
   static void _problem(BuildContext context, String message) =>
       showVayuNotice(context, message, tone: VayuNoticeTone.problem);
 
-  /// Send: choose Files or Folder, pick them with Android's picker, review
-  /// them, then choose the device (with Scan QR).
-  static Future<void> send(BuildContext context, AppContainer container) async {
+  /// Send: choose Files or Folder, pick them, review them, then
+  /// choose the device (with Scan QR). With [receiverCode] the device is
+  /// already known and is joined as soon as the items are chosen.
+  static Future<void> send(
+    BuildContext context,
+    AppContainer container, {
+    String? receiverCode,
+    String title = 'Send',
+  }) async {
     final choice = await showVayuSheet<_SendKind>(
       context: context,
       builder: (sheetContext) => VayuSheet(
-        title: 'Send',
+        title: title,
         content: Column(
           children: [
             _ChoiceTile(
@@ -45,17 +52,41 @@ class ShareActions {
       ),
     );
     if (choice == null || !context.mounted) return;
-    if (choice == _SendKind.files) {
-      await sendFiles(context, container);
-    } else {
-      await sendFolder(context, container);
+    switch (choice) {
+      case _SendKind.files:
+        await sendFiles(context, container, receiverCode: receiverCode);
+      case _SendKind.folder:
+        await sendFolder(context, container, receiverCode: receiverCode);
     }
+  }
+
+  /// A Receive code opened from outside Vayu (the phone's own camera app
+  /// scanned it): choose what to send, then it goes to that phone.
+  static Future<void> sendToCode(
+    BuildContext context,
+    AppContainer container,
+    String code,
+  ) async {
+    final PairingPayload payload;
+    try {
+      payload = PairingPayload.fromUri(Uri.parse(code));
+    } on FormatException {
+      _problem(context, "That code isn't a Vayu Receive code.");
+      return;
+    }
+    await send(
+      context,
+      container,
+      receiverCode: code,
+      title: 'Send to ${payload.displayName}',
+    );
   }
 
   static Future<void> sendFiles(
     BuildContext context,
-    AppContainer container,
-  ) async {
+    AppContainer container, {
+    String? receiverCode,
+  }) async {
     try {
       final docs = await container.filePickerService.pickMultipleDocuments();
       if (docs.isNotEmpty && context.mounted) {
@@ -63,6 +94,7 @@ class ShareActions {
           context,
           documents: docs,
           container: container,
+          receiverCode: receiverCode,
         );
       }
     } catch (_) {
@@ -75,8 +107,9 @@ class ShareActions {
   /// The receiver gets the same folder structure.
   static Future<void> sendFolder(
     BuildContext context,
-    AppContainer container,
-  ) async {
+    AppContainer container, {
+    String? receiverCode,
+  }) async {
     try {
       final folder = await container.filePickerService.pickFolder();
       if (folder == null || !context.mounted) return;
@@ -95,6 +128,7 @@ class ShareActions {
         documents: folder.documents,
         container: container,
         folderName: folder.name,
+        receiverCode: receiverCode,
       );
     } catch (_) {
       if (context.mounted) {

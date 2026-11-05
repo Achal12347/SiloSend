@@ -68,7 +68,17 @@ class _Phone {
     await app.stopDiscoveryAndAdvertising();
     app.dispose();
     await server.stop();
-    dir.deleteSync(recursive: true);
+    // Windows can hold a just-closed file for a moment under load. A file
+    // that really stays open still fails here.
+    for (var attempt = 1; ; attempt++) {
+      try {
+        dir.deleteSync(recursive: true);
+        return;
+      } on FileSystemException {
+        if (attempt == 20) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+    }
   }
 }
 

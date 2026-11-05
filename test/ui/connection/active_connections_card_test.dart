@@ -99,7 +99,7 @@ void main() {
 
       expect(find.text('Receiver-Laptop'), findsOneWidget);
       // The route in user terms, not the internal transport name.
-      expect(find.text('Wi-Fi'), findsWidgets);
+      expect(find.text('LAN'), findsWidgets);
       expect(find.text('1 Active'), findsOneWidget);
       expect(
         find.text('Transport link established (Phase 5 unauthenticated)'),
@@ -126,6 +126,6 @@ void main() {
     expect(routeName(TransportType.relay, 'via Bo'), 'Through Bo');
     expect(routeName(TransportType.relay, null), 'Through another phone');
     expect(routeName(TransportType.lan, '192.168.49.1'), 'Wi-Fi Direct');
-    expect(routeName(TransportType.lan, '192.168.1.5'), 'Wi-Fi');
+    expect(routeName(TransportType.lan, '192.168.1.5'), 'LAN');
   });
 }

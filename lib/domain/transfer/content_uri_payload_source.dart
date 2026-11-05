@@ -32,6 +32,7 @@ class ContentUriPayloadSource implements PayloadSource {
   /// call; avoids streaming the whole file through per-chunk channel round trips.
   final Future<({String sha256, int size})> Function(String uri)?
   sha256Callback;
+  final Future<int?> Function(String uri)? sizeCallback;
 
   ContentUriPayloadSource({
     required this.uri,
@@ -39,7 +40,16 @@ class ContentUriPayloadSource implements PayloadSource {
     required this.readChunkCallback,
     this.closeCallback,
     this.sha256Callback,
+    this.sizeCallback,
   }) : _totalBytes = length;
+
+  /// Resolves an unknown provider size before transport selection where possible.
+  Future<int> resolveLength() async {
+    if (_totalBytes >= 0) return _totalBytes;
+    final result = await sizeCallback?.call(uri);
+    if (result != null && result >= 0) _totalBytes = result;
+    return _totalBytes;
+  }
 
   @override
   int get length => _totalBytes;

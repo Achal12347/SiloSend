@@ -52,8 +52,14 @@ class LanConnection implements TransportConnection {
     String host,
     int port, {
     Duration timeout = const Duration(seconds: 5),
+    String? sourceAddress,
   }) async {
-    final socket = await Socket.connect(host, port, timeout: timeout);
+    final socket = await Socket.connect(
+      host,
+      port,
+      sourceAddress: sourceAddress,
+      timeout: timeout,
+    );
     socket.setOption(SocketOption.tcpNoDelay, true);
 
     final connectionId =

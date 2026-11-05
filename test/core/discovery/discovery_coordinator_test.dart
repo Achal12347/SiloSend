@@ -59,6 +59,13 @@ void main() {
       bleService.dispose();
     });
 
+    test('starts only the radios it is told are usable', () async {
+      await coordinator.startDiscovery(transports: {TransportType.lan});
+      expect(lanService.isScanning, isTrue);
+      expect(bleService.isScanning, isFalse);
+      expect(coordinator.activeTransports, {TransportType.lan});
+    });
+
     test('aggregates discovered peers from multiple services', () async {
       await coordinator.startDiscovery();
       expect(coordinator.status, equals(DiscoveryStatus.active));

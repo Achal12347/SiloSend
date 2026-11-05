@@ -5,6 +5,9 @@ import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/contracts/transport_selector_contract.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
+import 'package:vayu/core/connection/link_upgrade_service.dart';
+import 'package:vayu/core/pairing/local_hotspot_service.dart';
+import 'package:vayu/core/pairing/wifi_direct_service.dart';
 import 'package:vayu/core/security/crypto_service.dart';
 import 'package:vayu/core/security/peer_trust_store.dart';
 import 'package:vayu/core/security/secure_key_store.dart';
@@ -326,5 +329,99 @@ void main() {
         greaterThanOrEqualTo(result.rankedCandidates[1].score),
       );
     });
+
+    test('a usable LAN endpoint is preferred over Wi-Fi Direct for a 2 MB transfer', () async {
+      final peer = DiscoveredPeer(
+        deviceId: '8899aabbccddeeff0011223344556677',
+        displayName: 'LAN and P2P Peer',
+        transportType: TransportType.lan,
+        availableTransports: {
+          TransportType.lan,
+          TransportType.ble,
+          TransportType.wifiDirect,
+        },
+        transportEndpoints: {
+          TransportType.lan: '192.168.1.90:53531',
+          TransportType.ble: 'AA:BB:CC:DD:EE:FF',
+        },
+        rssi: -55,
+        lastSeen: DateTime.now(),
+      );
+      final lanFirst = SmartTransportSelectorImpl(
+        platformService: platformService,
+        batteryProvider: batteryProvider,
+        connectionManager: connectionManager,
+        secureSessionManager: secureSessionManager,
+        linkUpgrade: LinkUpgradeService(
+          localDeviceId: () => localIdentity.idHex,
+          wifiDirect: const UnsupportedWifiDirectService(),
+          hotspot: const UnsupportedHotspotService(),
+          lanPort: () => 53531,
+          hostingBlocker: (_) async => null,
+        ),
+        wifiDirectSupported: () async => true,
+      );
+
+      final result = await lanFirst.selectTransport(
+        TransportSelectionRequest(
+          targetPeer: peer,
+          payloadSizeBytes: 2 * 1024 * 1024,
+        ),
+      );
+
+      expect(result.selectedTransport, TransportType.lan);
+      expect(result.fallbackChain, contains(TransportType.wifiDirect));
+    });
+
+    test(
+      'measured per-peer throughput can select Wi-Fi Direct over slow LAN',
+      () async {
+        final peer = DiscoveredPeer(
+          deviceId: '8899aabbccddeeff0011223344556677',
+          displayName: 'Measured peer',
+          transportType: TransportType.lan,
+          availableTransports: {
+            TransportType.lan,
+            TransportType.ble,
+            TransportType.wifiDirect,
+          },
+          transportEndpoints: {
+            TransportType.lan: '192.168.1.90:53531',
+            TransportType.ble: 'AA:BB:CC:DD:EE:FF',
+          },
+          rssi: -55,
+          lastSeen: DateTime.now(),
+        );
+        final measured = SmartTransportSelectorImpl(
+          platformService: platformService,
+          batteryProvider: batteryProvider,
+          connectionManager: connectionManager,
+          secureSessionManager: secureSessionManager,
+          linkUpgrade: LinkUpgradeService(
+            localDeviceId: () => localIdentity.idHex,
+            wifiDirect: const UnsupportedWifiDirectService(),
+            hotspot: const UnsupportedHotspotService(),
+            lanPort: () => 53531,
+            hostingBlocker: (_) async => null,
+          ),
+          wifiDirectSupported: () async => true,
+          observedThroughput: (_, route) => switch (route) {
+            TransportType.lan => 1 * 1024 * 1024,
+            TransportType.wifiDirect => 20 * 1024 * 1024,
+            _ => null,
+          },
+        );
+
+        final result = await measured.selectTransport(
+          TransportSelectionRequest(
+            targetPeer: peer,
+            payloadSizeBytes: 100 * 1024 * 1024,
+          ),
+        );
+
+        expect(result.selectedTransport, TransportType.wifiDirect);
+        expect(result.fallbackChain, contains(TransportType.lan));
+      },
+    );
   });
 }

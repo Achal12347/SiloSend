@@ -314,7 +314,7 @@ class _CapabilitySetupBannerState extends State<CapabilitySetupBanner> {
                             size: 18,
                             color: iconColor,
                           ),
-                          tooltip: 'Permissions & settings',
+                          tooltip: 'Permissions',
                           onPressed: () =>
                               PermissionsPage.open(context, widget.container),
                         ),

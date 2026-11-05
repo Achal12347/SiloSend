@@ -122,9 +122,7 @@ class _HostViewState extends State<_HostView> {
     final ok = await showVayuConfirm(
       context,
       title: 'Stop hosting?',
-      message:
-          'Connected phones are told. Downloads already running finish; '
-          'waiting ones are dropped.',
+      message: 'Downloads in progress will finish.',
       confirmLabel: 'Stop hosting',
       destructive: true,
     );
@@ -152,23 +150,13 @@ class _HostViewState extends State<_HostView> {
                   ),
                   const SizedBox(height: 12),
                   Text('Start hosting', style: theme.textTheme.titleLarge),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Share files or a folder. Nearby phones with Vayu can '
-                    'browse them and download what they choose, over the '
-                    'same encrypted connection as any transfer.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
                   const SizedBox(height: 16),
                   Text('Who can open it', style: theme.textTheme.titleSmall),
                   const SizedBox(height: 8),
                   _AccessChoice(
                     icon: Icons.public_rounded,
                     title: 'Open to all',
-                    subtitle:
-                        'Any nearby phone with Vayu can browse and download.',
+                    subtitle: 'Any nearby phone can download',
                     selected: _access == HostAccess.public,
                     onTap: () => setState(() => _access = HostAccess.public),
                   ),
@@ -176,9 +164,7 @@ class _HostViewState extends State<_HostView> {
                   _AccessChoice(
                     icon: Icons.lock_outline_rounded,
                     title: 'Private (PIN)',
-                    subtitle:
-                        'Only phones that enter the 6-digit PIN shown here '
-                        'can see your files.',
+                    subtitle: 'Only phones with the PIN',
                     selected: _access == HostAccess.private,
                     onTap: () => setState(() => _access = HostAccess.private),
                   ),
@@ -365,8 +351,7 @@ class _ClientView extends StatelessWidget {
                   ? Padding(
                       padding: const EdgeInsets.all(20),
                       child: Text(
-                        'No phone is hosting nearby. On the other phone, '
-                        'open Host & Client and start hosting.',
+                        'No phone is hosting nearby.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -522,8 +507,7 @@ class _PinPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Tell it only to people you want to let in. After several wrong '
-            'tries it changes by itself.',
+            'Share it only with people you trust.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,

@@ -6,8 +6,8 @@ import 'package:vayu/platform/platform_service.dart';
 
 /// Things the user can do in Vayu that need something from the phone.
 ///
-/// Permissions are asked for only when one of these is about to run, never
-/// up front.
+/// [findPhones] is the baseline, asked once on Home after onboarding. The
+/// others are asked when the user starts something that needs them.
 enum VayuFeature {
   /// Finding phones over Bluetooth (Wi-Fi discovery needs nothing).
   findPhones,
@@ -18,6 +18,9 @@ enum VayuFeature {
 
   /// Scanning the code on another phone.
   scanCode,
+
+  /// Notifying the user about nearby chat messages.
+  chatNotifications,
 
   /// The progress notification of long transfers (Android 13+).
   transferNotifications,
@@ -135,6 +138,7 @@ class PermissionManager {
         VayuFeature.directWifi =>
           sdk < 31 ? PermissionGroup.nearby : PermissionGroup.directWifi,
         VayuFeature.scanCode => PermissionGroup.camera,
+        VayuFeature.chatNotifications => PermissionGroup.notifications,
         VayuFeature.transferNotifications => PermissionGroup.notifications,
         VayuFeature.saveToDownloads => PermissionGroup.storage,
       };
@@ -178,6 +182,7 @@ class PermissionManager {
           blockers.add(const Blocker.switchOff(BlockerKind.locationOff));
         }
       case VayuFeature.scanCode:
+      case VayuFeature.chatNotifications:
       case VayuFeature.transferNotifications:
       case VayuFeature.saveToDownloads:
         break;
@@ -194,7 +199,7 @@ class PermissionManager {
       _requesting.remove(group);
     }
     final report = await refresh();
-    await _notifyChanged();
+    _notifyChanged();
     return stateOf(group, report);
   }
 
@@ -209,7 +214,7 @@ class PermissionManager {
         report.statusOf(PermissionGroup.nearby) == PermissionStatus.granted;
     if (canAsk && await _platform.requestEnableBluetooth()) {
       await refresh();
-      await _notifyChanged();
+      _notifyChanged();
       return true;
     }
     await _platform.openSettingsPage(SettingsPage.bluetooth);
@@ -237,10 +242,13 @@ class PermissionManager {
   /// listeners if it changed.
   Future<PermissionReport> recheck() async {
     final report = await refresh();
-    await _notifyChanged();
+    _notifyChanged();
     return report;
   }
 
+  // Not awaited by callers: listeners may restart discovery, which takes
+  // seconds. Permission screens waiting for that showed only a spinner after
+  // the user had already answered.
   Future<void> _notifyChanged() async {
     final callback = onChanged;
     if (callback == null) return;

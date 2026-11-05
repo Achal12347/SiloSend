@@ -1,6 +1,19 @@
 /// Human-readable formatting shared by transfer screens and cards.
 library;
 
+/// Vayu has no install permission, so Android would refuse to install a
+/// received APK opened from here. Such files are saved, but not offered to open.
+bool isApkFile(String path) => path.toLowerCase().endsWith('.apk');
+
+/// How a transfer travelled, in words; null when unknown.
+String? routeLabel(String? route) => switch (route) {
+  'lan' => 'LAN',
+  'wifiDirect' => 'Wi-Fi Direct',
+  'ble' => 'Bluetooth',
+  'relay' => 'another phone',
+  _ => null,
+};
+
 String formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';

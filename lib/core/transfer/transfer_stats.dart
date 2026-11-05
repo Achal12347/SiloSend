@@ -5,6 +5,9 @@
 /// estimated. Where a stage can overlap with others (pipelined sends), its
 /// time is the sum of its own waits, so stages need not add up to [elapsed].
 class TransferStats {
+  /// Task identity lets the transfer page associate measured results with the
+  /// file that just finished without relying on list order or file name.
+  final String? transferId;
   final bool outbound;
   final int bytes;
   final int chunkSize;
@@ -44,6 +47,9 @@ class TransferStats {
   /// Link the transfer used ("lan", "wifiDirect", "ble"), when known.
   final String? link;
 
+  /// Peer identity for route learning; no address, file name or content.
+  final String? peerDeviceId;
+
   /// Batch the file belonged to, so a folder can be measured as a whole.
   final String? batchId;
 
@@ -52,6 +58,7 @@ class TransferStats {
   final String? environment;
 
   TransferStats({
+    this.transferId,
     required this.outbound,
     required this.bytes,
     required this.chunkSize,
@@ -69,13 +76,19 @@ class TransferStats {
     required this.succeeded,
     DateTime? finishedAt,
     this.link,
+    this.peerDeviceId,
     this.batchId,
     this.environment,
   }) : finishedAt = finishedAt ?? DateTime.now();
 
   DateTime get startedAt => finishedAt.subtract(elapsed);
 
-  TransferStats _copy({String? link, String? environment}) => TransferStats(
+  TransferStats _copy({
+    String? link,
+    String? environment,
+    String? peerDeviceId,
+  }) => TransferStats(
+    transferId: transferId,
     outbound: outbound,
     bytes: bytes,
     chunkSize: chunkSize,
@@ -93,11 +106,15 @@ class TransferStats {
     succeeded: succeeded,
     finishedAt: finishedAt,
     link: link ?? this.link,
+    peerDeviceId: peerDeviceId ?? this.peerDeviceId,
     batchId: batchId,
     environment: environment ?? this.environment,
   );
 
   TransferStats withLink(String? link) => _copy(link: link);
+
+  TransferStats withPeer(String peerDeviceId) =>
+      _copy(peerDeviceId: peerDeviceId);
 
   TransferStats withEnvironment(String? environment) =>
       _copy(environment: environment);
@@ -183,6 +200,32 @@ class TransferStatsLog {
   Future<String?> Function()? environmentProbe;
 
   List<TransferStats> get recent => List.unmodifiable(_entries);
+
+  /// Robust per-peer link estimate from recent successful outbound transfers.
+  /// Small files are excluded because setup and verification dominate them.
+  double? estimatedThroughput({
+    required String peerDeviceId,
+    required String link,
+  }) {
+    final samples =
+        _entries
+            .where(
+              (s) =>
+                  s.outbound &&
+                  s.succeeded &&
+                  s.peerDeviceId?.toLowerCase() == peerDeviceId.toLowerCase() &&
+                  s.link == link &&
+                  s.bytes >= 256 * 1024 &&
+                  s.elapsed >= const Duration(milliseconds: 500),
+            )
+            .take(7)
+            .map((s) => s.bytes / (s.elapsed.inMicroseconds / 1e6))
+            .where((rate) => rate.isFinite && rate > 0)
+            .toList()
+          ..sort();
+    if (samples.isEmpty) return null;
+    return samples[samples.length ~/ 2];
+  }
 
   void record(TransferStats stats) {
     _entries.insert(0, stats);

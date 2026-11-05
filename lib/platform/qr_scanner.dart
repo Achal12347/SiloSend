@@ -6,6 +6,14 @@ enum QrScanError { permissionDenied, cameraUnavailable, unsupported }
 class QrScanException implements Exception {
   final QrScanError error;
   const QrScanException(this.error);
+
+  String get message => switch (error) {
+    QrScanError.permissionDenied =>
+      'Camera permission is off. Allow Camera access to scan a Vayu code.',
+    QrScanError.cameraUnavailable =>
+      'The camera could not start. Close other camera apps and try again.',
+    QrScanError.unsupported => 'QR scanning is unavailable on this device.',
+  };
 }
 
 /// Opens the native camera scanner (QrScanActivity) for a Vayu pairing code,

@@ -16,11 +16,15 @@ class SelectedItemsPage extends StatefulWidget {
   /// Name of the picked folder, when a folder is sent.
   final String? folderName;
 
+  /// See [PeerSelectionSheet.receiverCode].
+  final String? receiverCode;
+
   const SelectedItemsPage({
     super.key,
     required this.documents,
     required this.container,
     this.folderName,
+    this.receiverCode,
   });
 
   static Future<void> open(
@@ -28,6 +32,7 @@ class SelectedItemsPage extends StatefulWidget {
     required List<SelectedDocument> documents,
     required AppContainer container,
     String? folderName,
+    String? receiverCode,
   }) {
     if (documents.isEmpty) return Future.value();
     return Navigator.of(context).push(
@@ -37,6 +42,7 @@ class SelectedItemsPage extends StatefulWidget {
           documents: documents,
           container: container,
           folderName: folderName,
+          receiverCode: receiverCode,
         ),
       ),
     );
@@ -80,6 +86,7 @@ class _SelectedItemsPageState extends State<SelectedItemsPage> {
                     context,
                     documents: List.of(_docs),
                     container: widget.container,
+                    receiverCode: widget.receiverCode,
                   ),
             icon: const Icon(Icons.arrow_forward_rounded),
             label: const Text('Next: choose device'),

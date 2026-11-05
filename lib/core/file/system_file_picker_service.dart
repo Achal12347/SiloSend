@@ -173,6 +173,8 @@ class SystemFilePickerService implements FilePickerService {
     return ContentUriPayloadSource(
       uri: document.identifier,
       length: document.sizeBytes,
+      sizeCallback: (uri) async =>
+          await ioChannel.invokeMethod<int>('fileSize', {'uri': uri}),
       readChunkCallback: (uri, offset, length) async {
         final result = await ioChannel.invokeMethod<Uint8List>('readChunk', {
           'uri': uri,

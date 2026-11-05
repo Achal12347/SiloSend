@@ -120,6 +120,36 @@ void main() {
       );
     });
 
+    test('with Avoid LAN on, the shared Wi-Fi is never tried', () async {
+      final avoiding = SmartTransportSelectorImpl(
+        platformService: _FallbackPlatformService(),
+        batteryProvider: _FallbackBatteryProvider(),
+        connectionManager: connectionManager,
+        secureSessionManager: secureSessionManager,
+        avoidSharedWifi: () => true,
+      );
+      final peer = DiscoveredPeer(
+        deviceId: '00112233445566778899aabbccddeeff',
+        displayName: 'Same Wi-Fi',
+        transportType: TransportType.lan,
+        availableTransports: {TransportType.lan},
+        rssi: -60,
+        endpointAddress: '127.0.0.1:59999',
+        lastSeen: DateTime.now(),
+      );
+      await expectLater(
+        avoiding.connectDirectOnly(peer),
+        // No attempt at all: a refused connection would be listed here.
+        throwsA(
+          isA<NoViableTransportException>().having(
+            (e) => e.attemptErrors,
+            'attemptErrors',
+            isEmpty,
+          ),
+        ),
+      );
+    });
+
     test('selectTransport correctly identifies fallback chain for dual-transport peer', () async {
       final peer = DiscoveredPeer(
         deviceId: '112233445566778899aabbccddeeff00',

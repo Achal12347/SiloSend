@@ -34,10 +34,13 @@ class _FakeWifiDirect implements WifiDirectService {
   final joined = <String>[];
   int disconnects = 0;
 
+  /// False stands in for Android 8-9 (no Wi-Fi Direct).
+  bool supported = true;
+
   _FakeWifiDirect({this.fiveGhz = true});
 
   @override
-  Future<bool> isSupported() async => true;
+  Future<bool> isSupported() async => supported;
 
   @override
   bool get isHosting => createdWith5Ghz.isNotEmpty;
@@ -78,7 +81,54 @@ class _FakeWifiDirect implements WifiDirectService {
   }
 
   @override
+  Future<WifiDirectJoinResult?> connectWithDetails({
+    required String networkName,
+    required String passphrase,
+  }) async {
+    final owner = await connect(
+      networkName: networkName,
+      passphrase: passphrase,
+    );
+    return owner == null
+        ? null
+        : WifiDirectJoinResult(ownerAddress: owner, localAddress: '127.0.0.1');
+  }
+
+  @override
   Future<void> disconnect() async => disconnects++;
+}
+
+/// Local-only hotspot stand-in: hosting reports loopback as its address.
+class _FakeHotspot implements LocalHotspotService {
+  final joined = <String>[];
+  int starts = 0;
+
+  @override
+  bool get isHosting => starts > 0;
+
+  @override
+  Future<HotspotStartResult> start() async {
+    starts++;
+    return const HotspotStartResult.success(
+      HotspotCredentials(
+        ssid: 'AndroidShare_4821',
+        passphrase: 'hotspotpass1',
+        hostAddress: '127.0.0.1',
+      ),
+    );
+  }
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<bool> join({required String ssid, required String passphrase}) async {
+    joined.add('$ssid/$passphrase');
+    return true;
+  }
+
+  @override
+  Future<void> leave() async {}
 }
 
 /// Two phones over loopback with authenticated sessions; B hosts.
@@ -88,6 +138,8 @@ class _Pair {
   final server = LanConnectionServer(requestedPort: 0);
   final wifiA = _FakeWifiDirect(fiveGhz: false);
   final wifiB = _FakeWifiDirect();
+  final hotspotA = _FakeHotspot();
+  final hotspotB = _FakeHotspot();
   LinkUpgradeDeclineReason? blocker;
   late final ConnectionManager managerA;
   late final ConnectionManager managerB;
@@ -127,7 +179,7 @@ class _Pair {
     upgradeA = LinkUpgradeService(
       localDeviceId: () => a.idHex,
       wifiDirect: wifiA,
-      hotspot: const UnsupportedHotspotService(),
+      hotspot: hotspotA,
       lanPort: () => null,
       hostingBlocker: (_) async => LinkUpgradeDeclineReason.notReceiving,
       sessionChanges: managerA.activeSessionsStream,
@@ -136,7 +188,7 @@ class _Pair {
     upgradeB = LinkUpgradeService(
       localDeviceId: () => b.idHex,
       wifiDirect: wifiB,
-      hotspot: const UnsupportedHotspotService(),
+      hotspot: hotspotB,
       lanPort: () => server.boundPort,
       hostingBlocker: (_) async => blocker,
     );
@@ -234,10 +286,41 @@ void main() {
       expect(declined.declined, LinkUpgradeDeclineReason.notReceiving);
     });
 
+    test('the kind travels only for a hotspot, so older builds still read '
+        'Wi-Fi Direct answers', () {
+      const group = LinkUpgradeResponse.accepted(
+        requestId: '0123456789abcdef0123456789abcdef',
+        networkName: 'DIRECT-vy-abc',
+        passphrase: 'secret1234',
+        hostAddress: '192.168.49.1',
+        port: 53531,
+      );
+      expect(utf8.decode(group.toBytes()), isNot(contains('kind')));
+      expect(
+        LinkUpgradeResponse.fromBytes(group.toBytes()).kind,
+        LinkUpgradeKind.wifiDirect,
+      );
+      const hotspot = LinkUpgradeResponse.accepted(
+        requestId: '0123456789abcdef0123456789abcdef',
+        networkName: 'AndroidShare_1',
+        passphrase: 'secret1234',
+        hostAddress: '192.168.43.1',
+        port: 53531,
+        kind: LinkUpgradeKind.hotspot,
+      );
+      expect(
+        LinkUpgradeResponse.fromBytes(hotspot.toBytes()).kind,
+        LinkUpgradeKind.hotspot,
+      );
+    });
+
     test('malformed answers are rejected', () {
       for (final bad in [
         '{"id":"short","ssid":"a","pass":"b","host":"1.2.3.4","port":1}',
         '{"id":"0123456789abcdef0123456789abcdef","ssid":"a","pass":"b","host":"evil.example","port":1}',
+        '{"id":"0123456789abcdef0123456789abcdef","ssid":"DIRECT-vy-a","pass":"short","host":"192.168.49.1","port":53531}',
+        '{"id":"0123456789abcdef0123456789abcdef","ssid":"DIRECT-vy-a","pass":"valid🔒pass","host":"192.168.49.1","port":53531}',
+        '{"id":"0123456789abcdef0123456789abcdef","ssid":"${List.filled(33, 'a').join()}","pass":"validpass","host":"192.168.49.1","port":53531}',
         '{"id":"0123456789abcdef0123456789abcdef","ssid":"a","pass":"b","host":"1.2.3.4","port":70000}',
         '{"id":"0123456789abcdef0123456789abcdef","ssid":"","pass":"b","host":"1.2.3.4","port":5}',
         '[]',
@@ -307,12 +390,14 @@ void main() {
       TransportSelectionRequest(targetPeer: p, payloadSizeBytes: bytes),
     );
 
-    test('on the same Wi-Fi too: Wi-Fi Direct from Bluetooth first, '
-        'the router as the fallback', () async {
-      final result = await choose(peer());
-      expect(result.selectedTransport, TransportType.wifiDirect);
-      expect(result.fallbackChain.first, TransportType.lan);
-    });
+    test(
+      'on the same Wi-Fi: LAN first, Wi-Fi Direct as the fallback',
+      () async {
+        final result = await choose(peer());
+        expect(result.selectedTransport, TransportType.lan);
+        expect(result.fallbackChain.first, TransportType.wifiDirect);
+      },
+    );
 
     test('small items on the same Wi-Fi do not make a group', () async {
       final result = await choose(peer(), bytes: 2000);
@@ -404,6 +489,50 @@ void main() {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         }
         expect(pair.wifiA.disconnects, 1);
+      } finally {
+        await pair.dispose();
+      }
+    });
+
+    test('a host without Wi-Fi Direct (Android 8-9) offers its hotspot, '
+        'which the asking phone joins as Wi-Fi', () async {
+      final pair = _Pair();
+      pair.wifiB.supported = false;
+      await pair.start();
+      try {
+        final control = await pair.control();
+        final link = await pair.upgradeA.upgrade(control);
+
+        expect(pair.hotspotB.starts, 1);
+        expect(pair.wifiB.createdWith5Ghz, isEmpty);
+        // Joined as ordinary Wi-Fi even though A has Wi-Fi Direct.
+        expect(pair.hotspotA.joined, ['AndroidShare_4821/hotspotpass1']);
+        expect(pair.wifiA.joined, isEmpty);
+        expect(link.port, pair.server.boundPort);
+
+        final wifi = await pair.secureA.secureOutboundConnection(
+          await pair.managerA.connectToLanPeer(
+            remoteAddress: link.host,
+            remotePort: link.port,
+          ),
+        );
+        expect(wifi.remoteDeviceId, control.remoteDeviceId);
+        await wifi.connectionSession.close(reason: 'done');
+      } finally {
+        await pair.dispose();
+      }
+    });
+
+    test('a phone without Wi-Fi Direct joins a group as Wi-Fi', () async {
+      final pair = _Pair();
+      pair.wifiA.supported = false;
+      await pair.start();
+      try {
+        final control = await pair.control();
+        await pair.upgradeA.upgrade(control);
+        expect(pair.wifiB.createdWith5Ghz, isNotEmpty);
+        expect(pair.hotspotA.joined, ['DIRECT-vy-test01/groupsecret12345']);
+        expect(pair.wifiA.joined, isEmpty);
       } finally {
         await pair.dispose();
       }

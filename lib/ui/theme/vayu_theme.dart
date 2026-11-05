@@ -304,8 +304,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
   final LinearGradient heroGradient;
   final Color heroBorder;
 
-  /// Soft sage glow drawn in a hero corner.
-  final Color heroGlow;
   final Color onHero;
   final Color onHeroMuted;
 
@@ -324,7 +322,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
   const VayuPalette({
     required this.heroGradient,
     required this.heroBorder,
-    required this.heroGlow,
     required this.onHero,
     required this.onHeroMuted,
     required this.accent,
@@ -346,7 +343,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
       colors: [Color(0xFF1D1F23), Color(0xFF2B2E33)],
     ),
     heroBorder: Color(0xFF34373D),
-    heroGlow: Color(0xFF6E9C8B),
     onHero: Color(0xFFF4F1EA),
     onHeroMuted: Color(0xFFB9B5AC),
     // Darkened from 4F7F6E / 9A7136 to reach WCAG 4.5:1 for text on every
@@ -370,7 +366,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
       colors: [Color(0xFF1B1D20), Color(0xFF25282C)],
     ),
     heroBorder: Color(0xFF33363B),
-    heroGlow: Color(0xFF7FB4A1),
     onHero: Color(0xFFF1EEE8),
     onHeroMuted: Color(0xFFA9A59D),
     accent: Color(0xFF8DBDAB),
@@ -395,7 +390,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
   VayuPalette copyWith({
     LinearGradient? heroGradient,
     Color? heroBorder,
-    Color? heroGlow,
     Color? onHero,
     Color? onHeroMuted,
     Color? accent,
@@ -412,7 +406,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
     return VayuPalette(
       heroGradient: heroGradient ?? this.heroGradient,
       heroBorder: heroBorder ?? this.heroBorder,
-      heroGlow: heroGlow ?? this.heroGlow,
       onHero: onHero ?? this.onHero,
       onHeroMuted: onHeroMuted ?? this.onHeroMuted,
       accent: accent ?? this.accent,
@@ -435,7 +428,6 @@ class VayuPalette extends ThemeExtension<VayuPalette> {
     return VayuPalette(
       heroGradient: LinearGradient.lerp(heroGradient, other.heroGradient, t)!,
       heroBorder: c(heroBorder, other.heroBorder),
-      heroGlow: c(heroGlow, other.heroGlow),
       onHero: c(onHero, other.onHero),
       onHeroMuted: c(onHeroMuted, other.onHeroMuted),
       accent: c(accent, other.accent),

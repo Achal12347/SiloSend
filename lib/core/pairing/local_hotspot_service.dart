@@ -22,6 +22,9 @@ enum HotspotStartError {
   permissionDenied,
   locationOff,
   tetheringActive,
+
+  /// Wi-Fi is switched off (apps cannot turn it on from Android 10).
+  wifiOff,
   unsupported,
   failed,
 }
@@ -104,6 +107,7 @@ class AndroidHotspotService implements LocalHotspotService {
         'PERMISSION_DENIED' => HotspotStartError.permissionDenied,
         'LOCATION_OFF' => HotspotStartError.locationOff,
         'INCOMPATIBLE_MODE' => HotspotStartError.tetheringActive,
+        'WIFI_OFF' => HotspotStartError.wifiOff,
         'UNSUPPORTED' => HotspotStartError.unsupported,
         _ => HotspotStartError.failed,
       };

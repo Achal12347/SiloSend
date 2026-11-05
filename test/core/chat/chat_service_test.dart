@@ -40,6 +40,12 @@ class _Pair {
   /// Whether A can open a session to B right now.
   bool reachable = true;
 
+  /// Whether B's app is on screen.
+  bool bOnScreen = true;
+
+  /// Notifications B has shown, by sender name.
+  final bNotified = <String>[];
+
   Future<void> start() async {
     await server.start();
     managerA = ConnectionManager(localIdentity: a, displayName: () => 'Ana');
@@ -73,6 +79,8 @@ class _Pair {
       secureB,
       storageB,
       connect: (_) async => throw const ChatUnavailableException('test'),
+      onScreen: () => bOnScreen,
+      notify: (name) async => bNotified.add(name),
     );
     chatA.attach(
       packets: engineA.chatPackets,
@@ -89,7 +97,11 @@ class _Pair {
     SecureSessionManager secure,
     ChatStorage storage, {
     required Future<SecureSession> Function(String) connect,
+    bool Function()? onScreen,
+    Future<void> Function(String)? notify,
   }) => ChatService(
+    isInForeground: onScreen ?? () => true,
+    onIncomingMessage: notify,
     localDeviceId: () => me.idHex,
     sessionFor: secure.getSessionForPeer,
     connect: connect,
@@ -135,6 +147,74 @@ Future<void> _until(bool Function() condition) async {
 }
 
 void main() {
+  test('someone new reaches a phone only once its app is on screen', () async {
+    final pair = _Pair();
+    await pair.start();
+    try {
+      pair.bOnScreen = false;
+      await pair.chatA.send(
+        deviceId: pair.b.idHex,
+        peerName: 'Bo',
+        text: 'Hello from someone new',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(pair.chatB.requests, isEmpty);
+      expect(pair.bNotified, isEmpty);
+      expect(pair.chatA.chats.single.messages.single.state, MessageState.sent);
+
+      pair.bOnScreen = true;
+      pair.chatB.appForegrounded();
+      await _until(() => pair.chatB.requests.isNotEmpty);
+      expect(
+        pair.chatB.requests.single.messages.single.text,
+        'Hello from someone new',
+      );
+      // Already on screen: no notification for it.
+      expect(pair.bNotified, isEmpty);
+      await _until(
+        () =>
+            pair.chatA.chats.single.messages.single.state ==
+            MessageState.delivered,
+      );
+    } finally {
+      await pair.dispose();
+    }
+  });
+
+  test(
+    'an accepted chat arrives in the background, with a notification',
+    () async {
+      final pair = _Pair();
+      await pair.start();
+      try {
+        await pair.chatA.send(
+          deviceId: pair.b.idHex,
+          peerName: 'Bo',
+          text: 'First',
+        );
+        await _until(() => pair.chatB.requests.isNotEmpty);
+        await pair.chatB.open(pair.a.idHex);
+        pair.bNotified.clear();
+
+        pair.bOnScreen = false;
+        await pair.chatA.send(
+          deviceId: pair.b.idHex,
+          peerName: 'Bo',
+          text: 'Second',
+        );
+        await _until(() => pair.chatB.chats.single.messages.length == 2);
+        expect(pair.bNotified, ['Ana']);
+        await _until(
+          () =>
+              pair.chatA.chats.single.messages.last.state ==
+              MessageState.delivered,
+        );
+      } finally {
+        await pair.dispose();
+      }
+    },
+  );
+
   test('a first message is a request on the receiving phone', () async {
     final pair = _Pair();
     await pair.start();

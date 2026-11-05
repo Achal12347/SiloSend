@@ -166,6 +166,9 @@ void main() {
           lifecycleManager: lifecycleManager,
         );
         await container.initialize();
+        // This test verifies foreground-only discovery and screen holders.
+        // Background chat discovery has its own setting and defaults on.
+        await container.setChatListeningEnabled(false);
         Future<void> until(bool Function() ok) async {
           for (var i = 0; i < 300 && !ok(); i++) {
             await Future<void>.delayed(const Duration(milliseconds: 10));

@@ -156,7 +156,7 @@ class VayuCardView extends StatelessWidget {
                         ),
                         const Spacer(),
                         Icon(
-                          Icons.air_rounded,
+                          Icons.air,
                           color: style.onCardMuted.withValues(alpha: 0.8),
                           size: 22,
                         ),

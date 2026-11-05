@@ -146,6 +146,22 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
                   vertical: 12.0,
                 ),
                 children: [
+                  _buildSectionHeader(theme, 'Testing'),
+                  Card(
+                    child: SwitchListTile(
+                      title: const Text('Avoid LAN'),
+                      subtitle: const Text(
+                        'Uses Wi-Fi Direct on the same Wi-Fi. Turn it on for '
+                        'the sender. Off after restarting Vayu.',
+                      ),
+                      value: container.avoidSharedWifi,
+                      onChanged: (on) async {
+                        await container.setAvoidSharedWifi(on);
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   _buildSectionHeader(theme, 'Android & System Platform'),
                   _buildCard(theme, [
                     _buildRow(
@@ -543,6 +559,7 @@ class _DiagnosticsPageState extends State<DiagnosticsPage> {
     buffer.writeln(
       '- LAN: ${caps.lanState.name} (Port: ${container.lanServer?.boundPort ?? 53531})',
     );
+    buffer.writeln('- Testing, avoid LAN: ${container.avoidSharedWifi}');
     buffer.writeln('- NFC: ${container.capabilities.nfc.name}');
     buffer.writeln(
       '- Permissions: nearby=${caps.nearbyPermission.name}, locationRequired=${caps.locationRequiredForBle}, locationEnabled=${caps.locationEnabled}',

@@ -51,7 +51,7 @@ void main() {
     });
     await tester.pump();
 
-    expect(find.text("Visible as Riya's phone"), findsOneWidget);
+    expect(find.text("Receiving as Riya's phone"), findsOneWidget);
     // Either a code is shown (and files with its ticket are accepted), or
     // the screen explains how to get one; never a silent blank.
     final hasCode = find
@@ -64,7 +64,8 @@ void main() {
     } else {
       expect(find.text('Start again'), findsOneWidget);
     }
-    expect(find.text('Other ways to connect'), findsOneWidget);
+    // The receiver only shows its code; scanning belongs to the sender.
+    expect(find.text('Other ways to connect'), findsNothing);
 
     // Leaving the screen ends the session.
     await tester.pumpWidget(const SizedBox());

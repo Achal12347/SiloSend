@@ -5,7 +5,6 @@ import 'package:vayu/core/pairing/pairing_coordinator.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/platform/qr_scanner.dart';
 import 'package:vayu/ui/friendly_error.dart';
-import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
@@ -38,8 +37,6 @@ class _PeerPickerSheetState extends State<_PeerPickerSheet> {
 
   Future<void> _scan() async {
     final c = widget.container;
-    if (!await ensureCameraAccess(context, c)) return;
-    if (!mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     setState(() => _joining = true);
     try {
@@ -47,10 +44,10 @@ class _PeerPickerSheetState extends State<_PeerPickerSheet> {
       if (text == null || !mounted) return;
       final peer = await c.pairingCoordinator.joinToSendFromText(text);
       if (mounted) Navigator.of(context).pop(peer);
-    } on QrScanException {
+    } on QrScanException catch (e) {
       showVayuNotice(
         null,
-        'The camera could not be opened.',
+        e.message,
         messenger: messenger,
         tone: VayuNoticeTone.problem,
       );

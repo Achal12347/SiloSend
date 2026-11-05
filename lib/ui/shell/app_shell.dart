@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:vayu/core/state/app_scope.dart';
+import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/domain/chat/chat_models.dart';
 
 import 'package:vayu/ui/chats/chats_page.dart';
@@ -8,6 +10,7 @@ import 'package:vayu/ui/home/vayu_home_page.dart';
 import 'package:vayu/ui/host/host_client_page.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/readable_width.dart';
+import 'package:vayu/ui/widgets/permission_flow.dart';
 
 /// The three main destinations with a bottom navigation bar.
 ///
@@ -48,9 +51,17 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: _index == 0,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop && _index != 0) setState(() => _index = 0);
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (_index != 0) {
+          setState(() => _index = 0);
+          return;
+        }
+        // Closing the screen would also end what receives chat messages.
+        final moved = await AppScope.of(context).platformService
+            .moveToBackground();
+        if (!moved) await SystemNavigator.pop();
       },
       child: Builder(
         builder: (context) {
@@ -58,7 +69,16 @@ class _AppShellState extends State<AppShell> {
             index: _index,
             children: const [VayuHomePage(), ChatsPage(), HostClientPage()],
           );
-          void select(int i) => setState(() => _index = i);
+          void select(int i) {
+            setState(() => _index = i);
+            final container = AppScope.of(context);
+            // Offered once; afterwards it stays on the Permissions page.
+            if (i == 1 && !container.userSettings.chatNotificationsAsked) {
+              container.markChatNotificationsAsked();
+              ensureFeature(context, container, VayuFeature.chatNotifications);
+            }
+          }
+
           // Tablets, landscape and wide windows: navigation at the side.
           if (isWideLayout(context)) {
             return Scaffold(

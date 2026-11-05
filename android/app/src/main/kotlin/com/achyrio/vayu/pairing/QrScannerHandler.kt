@@ -5,9 +5,13 @@ import android.content.Intent
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import com.achyrio.vayu.platform.PermissionGate
 
 /** Channel `com.achyrio.vayu/qr_scanner`: opens [QrScanActivity] and returns the decoded text. */
-class QrScannerHandler(private val activity: Activity) : MethodChannel.MethodCallHandler {
+class QrScannerHandler(
+    private val activity: Activity,
+    private val permissions: PermissionGate,
+) : MethodChannel.MethodCallHandler {
     companion object {
         private const val CHANNEL = "com.achyrio.vayu/qr_scanner"
         private const val REQUEST_CODE = 4105
@@ -37,9 +41,27 @@ class QrScannerHandler(private val activity: Activity) : MethodChannel.MethodCal
             return
         }
         pending = result
-        val intent = Intent(activity, QrScanActivity::class.java)
-            .putExtra(QrScanActivity.EXTRA_ACCEPT_CARDS, call.argument<Boolean>("cards") == true)
-        activity.startActivityForResult(intent, REQUEST_CODE)
+        permissions.request(PermissionGate.cameraPermissions()) { status ->
+            if (pending !== result) return@request
+            if (status != PermissionGate.GRANTED) {
+                pending = null
+                result.error("PERMISSION", "Camera permission was not granted", null)
+                return@request
+            }
+            val intent = Intent(activity, QrScanActivity::class.java)
+                .putExtra(QrScanActivity.EXTRA_ACCEPT_CARDS, call.argument<Boolean>("cards") == true)
+            try {
+                activity.startActivityForResult(intent, REQUEST_CODE)
+            } catch (e: Exception) {
+                // Keep a failed launch from blocking every later scan attempt.
+                pending = null
+                result.error(
+                    "CAMERA_LAUNCH_FAILED",
+                    "Could not open the QR scanner: ${e.message}",
+                    null,
+                )
+            }
+        }
     }
 
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {

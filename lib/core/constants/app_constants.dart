@@ -5,6 +5,18 @@ class AppConstants {
   /// User-facing application name.
   static const String appName = 'Vayu';
 
+  /// This build's version; must match `version` in pubspec.yaml (a test
+  /// checks it). MAJOR.MINOR.PATCH, with a stage until the first stable release.
+  static const String appVersion = '0.1.0-alpha';
+
+  /// [appVersion] as people read it.
+  static String get appVersionLabel => appVersion.replaceAll('-', ' ');
+
+  static const String brandName = 'Achyrio';
+  static const String developerName = 'Achal Choudhary';
+  static const String developerGitHubUrl = 'https://github.com/Achal12347';
+  static const String sourceCodeUrl = 'https://github.com/Achal12347/SiloSend';
+
   /// Application identifier.
   static const String applicationId = 'com.achyrio.vayu';
 

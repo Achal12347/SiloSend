@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import 'package:vayu/core/capabilities/capability_coordinator.dart';
@@ -30,6 +31,7 @@ import 'package:vayu/domain/connection/link_upgrade_payloads.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
+import 'package:vayu/core/contracts/connection_attempt_progress.dart';
 import 'package:vayu/core/discovery/ble_discovery_service.dart';
 import 'package:vayu/core/discovery/discovery_coordinator.dart';
 import 'package:vayu/core/discovery/lan_discovery_service.dart';
@@ -150,6 +152,16 @@ class AppContainer {
   /// Keeps every session's idle countdown fed (see [_trackSessionActivity]).
   final List<StreamSubscription<Object?>> _activitySubs = [];
 
+  BleDiscoveryService? _bleDiscovery;
+  static final ValueNotifier<String?> _noAdvertisingProblem = ValueNotifier(
+    null,
+  );
+
+  /// Why this phone is not announcing itself over Bluetooth, or null (see
+  /// [BleDiscoveryService.advertisingProblem]).
+  ValueListenable<String?> get bleAdvertisingProblem =>
+      _bleDiscovery?.advertisingProblem ?? _noAdvertisingProblem;
+
   /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
   bool _wifiDirectSupported = false;
   AppOrchestrator? _orchestrator;
@@ -157,6 +169,17 @@ class AppContainer {
   UserSettings _userSettings = const UserSettings();
   final StreamController<UserSettings> _userSettingsController =
       StreamController<UserSettings>.broadcast();
+  final StreamController<ConnectionAttemptProgress>
+  _connectionAttemptController =
+      StreamController<ConnectionAttemptProgress>.broadcast();
+  ConnectionAttemptProgress? _latestConnectionAttempt;
+
+  void _publishConnectionAttempt(ConnectionAttemptProgress progress) {
+    _latestConnectionAttempt = progress;
+    if (!_connectionAttemptController.isClosed) {
+      _connectionAttemptController.add(progress);
+    }
+  }
 
   bool _isInitialized = false;
   DeviceCapabilities _capabilities = DeviceCapabilities.unknown;
@@ -519,6 +542,13 @@ class AppContainer {
   /// Whether this phone has Wi-Fi Direct (Android 10+ with the hardware).
   bool get wifiDirectSupported => _wifiDirectSupported;
 
+  /// Whether a Bluetooth session can move onto Wi-Fi: with Wi-Fi Direct,
+  /// or (Android 8-9) through a local-only hotspot, which every Android
+  /// phone Vayu runs on can host and join. Advertised as the Wi-Fi Direct
+  /// transport so phones of every version find this route.
+  bool get _wifiHandoverSupported =>
+      _wifiDirectSupported || _hotspotService is AndroidHotspotService;
+
   /// One-to-one messages over the same encrypted sessions as files.
   ChatService get chatService {
     final service = _chatService;
@@ -626,6 +656,21 @@ class AppContainer {
         }
       }),
     );
+    // With the screen off, the CPU may sleep again before a message is handled.
+    void holdAwakeInBackground(Object? _) {
+      if (_inBackground) platformService.holdAwakeBriefly().ignore();
+    }
+
+    _activitySubs.add(
+      _secureSessionManager!.secureSessions.listen(holdAwakeInBackground),
+    );
+    if (engine is TransferEngineImpl) {
+      _activitySubs.add(engine.chatPackets.listen(holdAwakeInBackground));
+    }
+    final chat = _chatService;
+    if (chat != null) {
+      _activitySubs.add(chat.changes.listen((_) => _syncChatListening()));
+    }
     _chatService?.onActivity = (s) => policy.recordActivity(s.sessionId);
     _hostService?.onActivity = (s) => policy.recordActivity(s.sessionId);
   }
@@ -844,7 +889,11 @@ class AppContainer {
     }
     return transportSelector.connectWithSmartSelection(
       peer,
-      request: TransportSelectionRequest(targetPeer: peer),
+      request: TransportSelectionRequest(
+        targetPeer: peer,
+        payloadType: PayloadType.message,
+        payloadSizeBytes: 0,
+      ),
     );
   }
 
@@ -993,6 +1042,12 @@ class AppContainer {
   /// Reactive stream of user settings changes.
   Stream<UserSettings> get userSettingsStream => _userSettingsController.stream;
 
+  ConnectionAttemptProgress? get latestConnectionAttempt =>
+      _latestConnectionAttempt;
+
+  Stream<ConnectionAttemptProgress> get connectionAttemptStream =>
+      _connectionAttemptController.stream;
+
   /// Initializes core services, loads/creates device identity, binds discovery coordinator,
   /// starts transport servers, and initializes connection manager and pairing services.
   /// Milliseconds each startup step took on this phone (Phase 18: measure
@@ -1063,6 +1118,7 @@ class AppContainer {
         final bleService = BleDiscoveryService(
           localDeviceId: loadedIdentity.idHex,
         );
+        _bleDiscovery = bleService;
         _discoveryCoordinator = DiscoveryCoordinator(
           services: [lanService, bleService],
         );
@@ -1136,7 +1192,7 @@ class AppContainer {
           supportedTransports: {
             TransportType.lan,
             if (_capabilities.supportsBle) TransportType.ble,
-            if (_wifiDirectSupported) TransportType.wifiDirect,
+            if (_wifiHandoverSupported) TransportType.wifiDirect,
           },
         );
 
@@ -1256,7 +1312,17 @@ class AppContainer {
             connectionManager: _connectionManager!,
             secureSessionManager: _secureSessionManager!,
             linkUpgrade: _linkUpgradeService,
-            wifiDirectSupported: () async => _wifiDirectSupported,
+            wifiDirectSupported: () async => _wifiHandoverSupported,
+            avoidSharedWifi: () => _avoidSharedWifi,
+            observedThroughput: engine is TransferEngineImpl
+                ? (peerId, transport) => engine.statsLog.estimatedThroughput(
+                    peerDeviceId: peerId,
+                    link: transport == TransportType.wifiDirect
+                        ? 'wifiDirect'
+                        : transport.name,
+                  )
+                : null,
+            onConnectionProgress: _publishConnectionAttempt,
           );
 
       _startupStep('battery+selector');
@@ -1269,6 +1335,9 @@ class AppContainer {
           SessionLifecyclePolicy(
             idleTimeout: const Duration(minutes: 3),
             keepAliveAfterTransfer: true,
+            // Long enough for the gap between files and for sending something
+            // else straight away without pairing again.
+            postTransferGracePeriod: const Duration(seconds: 30),
             onDisconnectSession: (sessionId, reason) async {
               await disconnectSession(sessionId, reason: reason);
             },
@@ -1311,6 +1380,7 @@ class AppContainer {
                 ?.addFile(path, via: ReceivedVia.nearby, fromName: peerName)
                 .ignore(),
             keepAliveController: TransferKeepAliveController(
+              onBusyChanged: _onTransfersBusyChanged,
               keepAlive: Platform.isAndroid
                   ? const AndroidTransferKeepAlive()
                   : const NoopTransferKeepAlive(),
@@ -1335,6 +1405,14 @@ class AppContainer {
         activeSessionCount: () =>
             _connectionManager?.activeSessions.length ?? 0,
         sessionChanges: _connectionManager?.activeSessionsStream,
+        avoidSharedWifi: () => _avoidSharedWifi,
+        hasSharedWifiSession: () {
+          final routes = [
+            for (final s in _connectionManager?.activeSessions ?? const [])
+              s.info.routeName,
+          ];
+          return routes.contains('lan') && !routes.contains('wifiDirect');
+        },
       );
 
       _startupStep('files+history+cards');
@@ -1357,6 +1435,9 @@ class AppContainer {
               AppConstants.featureChatFiles,
             ),
         files: _ChatFiles(this),
+        onIncomingMessage: (peerName) =>
+            platformService.showChatNotification(peerName).then((_) {}),
+        isInForeground: () => !_inBackground,
         storage:
             _injectedChatStorage ??
             (Platform.isAndroid && !_isTestEnvironment
@@ -1428,7 +1509,8 @@ class AppContainer {
         _userSettings.batterySaverMode,
         initialSnapshot,
       );
-      _discoveryCoordinator?.setBatterySaver(isBatterySaverActive);
+      _batterySaverOn = isBatterySaverActive;
+      _applyScanPower();
 
       _startupStep('orchestrator+battery');
       // 14. Connect lifecycle transitions with discovery state
@@ -1436,6 +1518,7 @@ class AppContainer {
 
       _startupStep('lifecycle hooks');
       _isInitialized = true;
+      _syncChatListening();
       AppLogger.info(
         'AppContainer',
         'Startup took $startupTotalMs ms: ${startupSteps.entries.map((e) => '${e.key} ${e.value}').join(', ')}',
@@ -1463,6 +1546,7 @@ class AppContainer {
       // an open Receive or Send screen keeps it going.
       _inBackground = true;
       AppLogger.info('AppContainer', 'App backgrounded: pausing search');
+      _applyScanPower();
       _reconcileDiscovery();
     } else if (state == AppLifecycleState.resumed) {
       _inBackground = false;
@@ -1470,6 +1554,11 @@ class AppContainer {
         'AppContainer',
         'App resumed: refreshing platform capabilities',
       );
+      _applyScanPower();
+      _chatService?.appForegrounded();
+      // Android only allows starting it while on screen, so a start refused
+      // earlier is tried again here.
+      _syncChatListening(force: true);
       refreshCapabilities().ignore();
       // Coming back usually means sharing: search for a while.
       discoverFor(discoveryWindow);
@@ -1493,6 +1582,7 @@ class AppContainer {
 
   bool get _discoveryWanted =>
       _discoveryHolders.isNotEmpty ||
+      (_inBackground && _wantsChatListening) ||
       (!_inBackground && (_discoveryWindowTimer?.isActive ?? false));
 
   /// Keeps discovery running while [holder] (a Receive or Send screen) is open.
@@ -1533,7 +1623,10 @@ class AppContainer {
         _discoveryCoordinator == null) {
       return;
     }
-    final running = discoveryStatus != DiscoveryStatus.idle;
+    // A failed start is not running: the next wanted search tries again.
+    final running =
+        discoveryStatus != DiscoveryStatus.idle &&
+        discoveryStatus != DiscoveryStatus.error;
     if (_discoveryWanted && !running) {
       if (capabilityCoordinator.state.hasAnyReady) {
         await startDiscoveryAndAdvertising();
@@ -1636,7 +1729,7 @@ class AppContainer {
       if (canLan) TransportType.lan,
       if (canBle) TransportType.ble,
       // Credentials travel over Bluetooth, so only with Bluetooth.
-      if (canBle && _wifiDirectSupported) TransportType.wifiDirect,
+      if (canBle && _wifiHandoverSupported) TransportType.wifiDirect,
     };
 
     final serverPort = _lanServer?.boundPort ?? 53531;
@@ -1663,8 +1756,12 @@ class AppContainer {
       }
     }
 
-    await discoveryCoordinator.startAdvertising(ad);
-    await discoveryCoordinator.startDiscovery();
+    final radios = {
+      if (canLan) TransportType.lan,
+      if (canBle) TransportType.ble,
+    };
+    await discoveryCoordinator.startAdvertising(ad, transports: radios);
+    await discoveryCoordinator.startDiscovery(transports: radios);
   }
 
   /// Stops discovery and advertising.
@@ -1735,6 +1832,9 @@ class AppContainer {
     if (!_userSettingsController.isClosed) {
       _userSettingsController.close();
     }
+    if (!_connectionAttemptController.isClosed) {
+      _connectionAttemptController.close();
+    }
     _receivedCards?.dispose();
     if (!_myCardController.isClosed) {
       _myCardController.close();
@@ -1776,9 +1876,19 @@ class AppContainer {
     final snapshot =
         await _batteryProvider?.getBatterySnapshot() ??
         BatterySnapshot.unknown();
-    final isActive = _shouldBatterySaverBeActive(mode, snapshot);
-    _discoveryCoordinator?.setBatterySaver(isActive);
+    _batterySaverOn = _shouldBatterySaverBeActive(mode, snapshot);
+    _applyScanPower();
     _orchestrator?.refreshState();
+  }
+
+  Future<void> setChatListeningEnabled(bool enabled) async {
+    _userSettings = _userSettings.copyWith(chatListeningEnabled: enabled);
+    await settingsStorage.saveSettings(_userSettings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(_userSettings);
+    }
+    _syncChatListening();
+    _reconcileDiscovery();
   }
 
   /// Updates device display name, persists change, and restarts advertising if active.
@@ -1866,6 +1976,81 @@ class AppContainer {
     await settingsStorage.saveSettings(_userSettings);
     if (!_userSettingsController.isClosed) {
       _userSettingsController.add(_userSettings);
+    }
+  }
+
+  bool _avoidSharedWifi = false;
+
+  /// Testing switch in Diagnostics; off again after every app start.
+  bool get avoidSharedWifi => _avoidSharedWifi;
+
+  /// Open sessions on the shared Wi-Fi are closed, or the next send would
+  /// simply reuse them.
+  Future<void> setAvoidSharedWifi(bool avoid) async {
+    _avoidSharedWifi = avoid;
+    if (!avoid) return;
+    final onSharedWifi = [
+      for (final s in activeSessions)
+        if (s.info.routeName == 'lan') s.sessionId,
+    ];
+    for (final id in onSharedWifi) {
+      await disconnectSession(id, reason: 'Testing Wi-Fi Direct');
+    }
+  }
+
+  bool _batterySaverOn = false;
+  bool _transfersBusy = false;
+
+  /// Bluetooth and 2.4 GHz Wi-Fi share an antenna on most phones, and a
+  /// full-speed scan takes air time from a transfer, so scans run in low power
+  /// while files are moving.
+  void _onTransfersBusyChanged(bool busy) {
+    _transfersBusy = busy;
+    _applyScanPower();
+  }
+
+  void _applyScanPower() => _discoveryCoordinator?.setBatterySaver(
+    _batterySaverOn || _transfersBusy || _inBackground,
+  );
+
+  /// Waiting for messages needs at least one chat: new people reach this
+  /// phone only while the app is on screen, so without chats nothing runs in
+  /// the background and no notification stays up.
+  bool get _wantsChatListening =>
+      _userSettings.chatListeningEnabled &&
+      (_chatService?.chats.isNotEmpty ?? false);
+
+  bool _chatListeningOn = false;
+
+  void _syncChatListening({bool force = false}) {
+    final want = _wantsChatListening;
+    if (want == _chatListeningOn && !force) return;
+    if (want && _inBackground) return;
+    _chatListeningOn = want;
+    platformService.setChatPresenceEnabled(want).ignore();
+    _reconcileDiscovery();
+  }
+
+  /// Whether [peer] can only be reached by phone-to-phone Wi-Fi for a large
+  /// transfer, so its permission should be explained before sending.
+  bool mayNeedDirectWifi(DiscoveredPeer peer) =>
+      wifiDirectSupported &&
+      (peer.lanEndpoint == null ||
+          !capabilityCoordinator.rawCapabilities.canUseLan);
+
+  /// The baseline permission sheet has been shown on Home.
+  Future<void> markBaselinePermissionsAsked() =>
+      _saveSettings(_userSettings.copyWith(baselinePermissionsAsked: true));
+
+  /// Notifications have been offered on opening Chats.
+  Future<void> markChatNotificationsAsked() =>
+      _saveSettings(_userSettings.copyWith(chatNotificationsAsked: true));
+
+  Future<void> _saveSettings(UserSettings settings) async {
+    _userSettings = settings;
+    await settingsStorage.saveSettings(settings);
+    if (!_userSettingsController.isClosed) {
+      _userSettingsController.add(settings);
     }
   }
 

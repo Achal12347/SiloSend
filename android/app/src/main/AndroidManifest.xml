@@ -44,6 +44,8 @@
     <!-- Foreground transfer service: keeps long transfers alive with the screen off -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Waiting for messages from existing chats with the screen off -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -107,6 +109,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/vnd.achyrio.vayu.card" />
             </intent-filter>
+            <!-- A Receive code scanned with the phone's own camera app opens
+                 Vayu's send flow for that phone. Nothing is sent until the
+                 user picks what to send. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="vayu" android:host="pair" />
+            </intent-filter>
             <!-- "Share to Vayu" from Gallery, Files and other apps -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
@@ -140,13 +151,17 @@
         <activity
             android:name=".pairing.QrScanActivity"
             android:exported="false"
-            android:screenOrientation="portrait"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <service
             android:name=".transfer.TransferForegroundService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".chat.ChatListeningService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -12,7 +12,15 @@ class NfcCardInbox {
     'com.achyrio.vayu/nfc_cards',
   );
 
+  static const EventChannel _tapHints = EventChannel(
+    'com.achyrio.vayu/nfc_tap_hints',
+  );
+
   const NfcCardInbox();
+
+  /// Phones touched on a screen that does not use NFC.
+  Stream<void> get tapHints =>
+      _tapHints.receiveBroadcastStream().map<void>((_) {}).handleError((_) {});
 
   /// Cards delivered while Vayu is running.
   Stream<Uint8List> get cards => _events

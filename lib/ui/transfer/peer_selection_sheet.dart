@@ -14,8 +14,8 @@ import 'package:vayu/core/pairing/nfc_pairing_service.dart';
 import 'package:vayu/ui/widgets/nfc_off_row.dart';
 import 'package:vayu/ui/widgets/permission_flow.dart';
 import 'package:vayu/core/permissions/permission_manager.dart';
-import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/widgets/connection_attempt_card.dart';
 import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/core/pairing/pairing_coordinator.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
@@ -31,6 +31,10 @@ class PeerSelectionSheet extends StatefulWidget {
   final List<SelectedDocument> documents;
   final AppContainer container;
 
+  /// A Receive code scanned before the files were chosen (the phone's own
+  /// camera opened a `vayu://pair` link): that phone is joined at once.
+  final String? receiverCode;
+
   SelectedDocument get document => documents.first;
 
   PeerSelectionSheet({
@@ -38,6 +42,7 @@ class PeerSelectionSheet extends StatefulWidget {
     SelectedDocument? document,
     List<SelectedDocument>? documents,
     required this.container,
+    this.receiverCode,
   }) : documents =
            documents ??
            (document != null ? [document] : const <SelectedDocument>[]);
@@ -48,6 +53,7 @@ class PeerSelectionSheet extends StatefulWidget {
     SelectedDocument? document,
     List<SelectedDocument>? documents,
     required AppContainer container,
+    String? receiverCode,
   }) {
     final docs =
         documents ??
@@ -56,8 +62,11 @@ class PeerSelectionSheet extends StatefulWidget {
     return Navigator.of(context).push(
       MaterialPageRoute(
         settings: const RouteSettings(name: sendFlowRouteName),
-        builder: (_) =>
-            PeerSelectionSheet(documents: docs, container: container),
+        builder: (_) => PeerSelectionSheet(
+          documents: docs,
+          container: container,
+          receiverCode: receiverCode,
+        ),
       ),
     );
   }
@@ -119,15 +128,17 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     // Search for phones for as long as the sheet is open.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      final code = widget.receiverCode;
+      if (code != null) {
+        // Already scanned: no search or Bluetooth prompt needed first.
+        unawaited(
+          _sendToReceiver(
+            () => widget.container.pairingCoordinator.joinToSendFromText(code),
+          ),
+        );
+      }
       try {
-        final raw = widget.container.capabilityCoordinator.rawCapabilities;
-        if (raw.isNearbyPermissionNotRequested) {
-          await ensureFeature(
-            context,
-            widget.container,
-            VayuFeature.findPhones,
-          );
-        }
+        await ensureFindPhonesIfNeeded(context, widget.container);
       } catch (_) {}
       if (!mounted) return;
       widget.container.holdDiscovery(this);
@@ -176,21 +187,15 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
   }
 
   Future<void> _scanReceiver() async {
-    if (!await ensureCameraAccess(context, widget.container)) return;
-    if (!mounted) return;
     try {
       final text = await const QrScanner().scan();
       if (text == null) return;
       await _sendToReceiver(
         () => widget.container.pairingCoordinator.joinToSendFromText(text),
       );
-    } on QrScanException {
+    } on QrScanException catch (e) {
       if (mounted) {
-        showVayuNotice(
-          context,
-          'The camera could not be opened.',
-          tone: VayuNoticeTone.problem,
-        );
+        showVayuNotice(context, e.message, tone: VayuNoticeTone.problem);
       }
     }
   }
@@ -201,6 +206,14 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
     if (_joining || _isSending) return;
     setState(() => _joining = true);
     try {
+      // Without a shared Wi-Fi the code is joined over Wi-Fi Direct: ask now,
+      // not from the middle of connecting.
+      final container = widget.container;
+      if (container.wifiDirectSupported &&
+          !container.capabilityCoordinator.rawCapabilities.canUseLan) {
+        await ensureFeature(context, container, VayuFeature.directWifi);
+        if (!mounted) return;
+      }
       final peer = await join();
       if (!mounted) return;
       await _sendToPeer(peer);
@@ -338,7 +351,7 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                         const SizedBox(height: 2),
                         Text(
                           isBatch
-                              ? '${_formatFileSize(totalBatchBytes)} total • Batch transfer'
+                              ? '${_formatFileSize(totalBatchBytes)} total'
                               : _formatFileSize(doc.sizeBytes),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
@@ -350,6 +363,13 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
                 ],
               ),
             ),
+            if (_isSending) ...[
+              const SizedBox(height: 12),
+              ConnectionAttemptCard(
+                container: widget.container,
+                peerId: _sendingToPeerId,
+              ),
+            ],
             const SizedBox(height: 16),
 
             // Peer Selection Prompt
@@ -572,14 +592,14 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
           ),
           const SizedBox(height: 14),
           Text(
-            'Looking for nearby Vayu devices...',
+            'Looking for nearby phones…',
             style: theme.textTheme.titleSmall?.copyWith(
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 6),
           Text(
-            'Keep both devices close and ensure Vayu is open on the other device.',
+            'Open Vayu on the other phone.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
@@ -717,6 +737,13 @@ class _PeerSelectionSheetState extends State<PeerSelectionSheet>
 
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.of(context);
+
+    // Explained here instead of a bare system dialog while connecting. A
+    // refusal still tries the routes that need no permission.
+    if (widget.container.mayNeedDirectWifi(peer)) {
+      await ensureFeature(context, widget.container, VayuFeature.directWifi);
+      if (!mounted) return;
+    }
 
     try {
       // A phone joined through its Receive code gets the files as one batch,

@@ -65,7 +65,7 @@ void main() {
           // Loopback stands in for the Wi-Fi address on a test host.
           .copyWith(lanAddress: '127.0.0.1');
 
-      final peer = await joiner.pairingCoordinator.joinFromText(
+      final peer = await joiner.pairingCoordinator.joinToSendFromText(
         shown.toUri().toString(),
       );
 
@@ -98,7 +98,7 @@ void main() {
           isA<PairingException>().having(
             (e) => e.message,
             'message',
-            contains('Not on the same Wi-Fi?'),
+            contains('open it again, then scan the new code'),
           ),
         ),
       );

@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 
-/// Files shared to Vayu from other apps through the Android share sheet.
+/// Files shared to Vayu from other apps through the Android share sheet,
+/// and Receive codes (`vayu://pair` links) opened by another app, usually
+/// the phone's own camera after scanning a Receive QR code.
 class ShareIntentService {
   static const MethodChannel _channel = MethodChannel(
     'com.achyrio.vayu/share_intent',
@@ -12,12 +14,15 @@ class ShareIntentService {
 
   final StreamController<List<SelectedDocument>> _incoming =
       StreamController<List<SelectedDocument>>.broadcast();
+  final StreamController<String> _codes = StreamController<String>.broadcast();
 
   ShareIntentService() {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onShared') {
         final docs = _parse(call.arguments);
         if (docs.isNotEmpty) _incoming.add(docs);
+      } else if (call.method == 'onCode' && call.arguments is String) {
+        _codes.add(call.arguments as String);
       }
       return null;
     });
@@ -25,6 +30,18 @@ class ShareIntentService {
 
   /// Shares that arrive while Vayu is already running.
   Stream<List<SelectedDocument>> get incoming => _incoming.stream;
+
+  /// Receive codes opened while Vayu is already running.
+  Stream<String> get codes => _codes.stream;
+
+  /// The Receive code Vayu was launched with, consumed once.
+  Future<String?> takePendingCode() async {
+    try {
+      return await _channel.invokeMethod<String>('takePendingCode');
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Files Vayu was launched with, consumed once.
   Future<List<SelectedDocument>> takePending() async {
@@ -54,5 +71,6 @@ class ShareIntentService {
   void dispose() {
     _channel.setMethodCallHandler(null);
     _incoming.close();
+    _codes.close();
   }
 }

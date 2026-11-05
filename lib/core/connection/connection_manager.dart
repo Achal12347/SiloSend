@@ -198,12 +198,14 @@ class ConnectionManager {
     required int remotePort,
     String? targetDeviceId,
     Duration? timeout,
+    String? sourceAddress,
   }) async {
     final effectiveTimeout = timeout ?? handshakeTimeout;
     final transport = await LanConnection.connect(
       remoteAddress,
       remotePort,
       timeout: effectiveTimeout,
+      sourceAddress: sourceAddress,
     );
 
     return initiateHandshake(
@@ -298,7 +300,13 @@ class ConnectionManager {
         framed: framed,
         isInitiator: true,
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      AppLogger.warning(
+        'ConnectionManager',
+        'Handshake failed on ${transport.type.name} transport',
+        error: e,
+        stackTrace: stackTrace,
+      );
       await framed.close(reason: 'handshake_failed');
       rethrow;
     }

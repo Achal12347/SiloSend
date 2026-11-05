@@ -8,7 +8,6 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/platform/qr_scanner.dart';
 import 'package:vayu/ui/card/card_ring.dart';
 import 'package:vayu/ui/card/vayu_card_view.dart';
-import 'package:vayu/ui/widgets/camera_access.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 
 /// Card history: the cards themselves, close together. When the list is
@@ -82,17 +81,12 @@ class _ReceivedCardsPageState extends State<ReceivedCardsPage> {
   Future<void> _scanCard() async {
     final store = _store;
     if (store == null) return;
-    if (!await ensureCameraAccess(context, widget.container)) return;
     final String? text;
     try {
       text = await const QrScanner().scan(cards: true);
-    } on QrScanException {
+    } on QrScanException catch (e) {
       if (mounted) {
-        showVayuNotice(
-          context,
-          'The camera could not be opened.',
-          tone: VayuNoticeTone.problem,
-        );
+        showVayuNotice(context, e.message, tone: VayuNoticeTone.problem);
       }
       return;
     }

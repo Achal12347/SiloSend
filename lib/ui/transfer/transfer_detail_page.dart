@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
+import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/core/transfer/transfer_task_impl.dart';
 import 'package:vayu/domain/contacts/contact_card.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
@@ -15,6 +16,7 @@ import 'package:vayu/ui/format.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/widgets/connection_attempt_card.dart';
 import 'package:vayu/ui/friendly_error.dart';
 
 /// Latest known progress for [task], also after the stream has closed.
@@ -31,6 +33,15 @@ bool _isActive(TransferStatus s) =>
     s == TransferStatus.transferring ||
     s == TransferStatus.paused ||
     s == TransferStatus.verifying;
+
+String _durationLabel(Duration duration) {
+  final seconds = duration.inSeconds;
+  if (seconds < 60) return '${seconds}s';
+  final minutes = seconds ~/ 60;
+  final remainder = seconds % 60;
+  if (minutes < 60) return '${minutes}m ${remainder}s';
+  return '${minutes ~/ 60}h ${minutes % 60}m';
+}
 
 /// Full-screen sending / receiving / completion view (UI5, UI6, UI7, UI8).
 ///
@@ -244,8 +255,21 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
     if (task == null) {
       return Scaffold(
         appBar: AppBar(),
-        body: Center(
-          child: Text('Preparing transfer…', style: theme.textTheme.bodyLarge),
+        body: Column(
+          children: [
+            ConnectionAttemptCard(
+              container: widget.container,
+              peerId: widget.peerDeviceId,
+            ),
+            Expanded(
+              child: Center(
+                child: Text(
+                  'Preparing transfer…',
+                  style: theme.textTheme.bodyLarge,
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -312,7 +336,10 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
             const SizedBox(height: 20),
             _StatusMessage(task: task, peerName: peerName, failure: _failure),
             const SizedBox(height: 16),
-            if (_isActive(status)) _LiveStats(task: task),
+            if (_isActive(status))
+              _LiveStats(container: widget.container, task: task),
+            if (status == TransferStatus.completed)
+              _FinishedTransferStats(container: widget.container, task: task),
             if (batch != null && batch.fileCount > 1) ...[
               const SizedBox(height: 24),
               _BatchSummary(batch: batch, focus: task),
@@ -371,7 +398,8 @@ class _TransferDetailPageState extends State<TransferDetailPage> {
     final destination = task is InboundTransferTask ? task.destination : null;
     final canOpen =
         status == TransferStatus.completed &&
-        destination is FilePayloadDestination;
+        destination is FilePayloadDestination &&
+        !isApkFile(destination.targetFilePath);
     final canShareAgain = coordinator.getKnownPeer(task.remoteDeviceId) != null;
 
     final canRetry =
@@ -681,9 +709,10 @@ class _StatusMessage extends StatelessWidget {
 }
 
 class _LiveStats extends StatelessWidget {
+  final AppContainer container;
   final TransferTask task;
 
-  const _LiveStats({required this.task});
+  const _LiveStats({required this.container, required this.task});
 
   @override
   Widget build(BuildContext context) {
@@ -692,8 +721,12 @@ class _LiveStats extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final remaining = formatRemaining(progress.etaSeconds);
+    final route = routeLabel(
+      container.fileSharingCoordinator.routeOfTask(task.transferId),
+    );
     return Row(
       children: [
+        if (route != null) _Stat(label: 'Shared via', value: route),
         _Stat(
           label: 'Transferred',
           value:
@@ -707,6 +740,60 @@ class _LiveStats extends StatelessWidget {
         ),
         _Stat(label: 'Time left', value: remaining ?? '—'),
       ],
+    );
+  }
+}
+
+class _FinishedTransferStats extends StatelessWidget {
+  final AppContainer container;
+  final TransferTask task;
+
+  const _FinishedTransferStats({required this.container, required this.task});
+
+  @override
+  Widget build(BuildContext context) {
+    final log = container.transferStatsLog;
+    TransferStats? stats;
+    for (final entry in log?.recent ?? const <TransferStats>[]) {
+      if (entry.transferId == task.transferId) {
+        stats = entry;
+        break;
+      }
+    }
+    BatchStats? batch;
+    if (stats?.batchId != null) {
+      for (final entry in log!.batches()) {
+        if (entry.batchId == stats!.batchId) {
+          batch = entry;
+          break;
+        }
+      }
+    }
+    if (stats == null) return const SizedBox.shrink();
+    final route = routeLabel(
+      container.fileSharingCoordinator.routeOfTask(task.transferId) ??
+          stats.link,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Column(
+        children: [
+          Text(
+            '${route == null ? '' : 'Shared via $route  ·  '}Time taken: ${_durationLabel(stats.elapsed)}',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (batch != null && batch.files > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Folder: ${batch.files} files  ·  ${_durationLabel(batch.wallTime)} total',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -726,10 +813,17 @@ class _Stat extends StatelessWidget {
           Text(
             value,
             textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: theme.textTheme.titleSmall,
           ),
           const SizedBox(height: 2),
-          Text(label, style: theme.textTheme.bodySmall),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall,
+          ),
         ],
       ),
     );
@@ -784,6 +878,10 @@ class _BatchWaitingView extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
           children: [
+            ConnectionAttemptCard(
+              container: container,
+              peerId: batch.peerDeviceId,
+            ),
             Center(
               child: SizedBox(
                 width: 120,
@@ -874,7 +972,7 @@ class _BatchSummary extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
               child: Text(
-                '${formatBytes(done)} of ${formatBytes(total)}',
+                _batchTimeLabel(batch, done, total),
                 style: theme.textTheme.bodySmall,
               ),
             ),
@@ -884,6 +982,23 @@ class _BatchSummary extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  String _batchTimeLabel(TransferBatch batch, int done, int total) {
+    final elapsed = DateTime.now().difference(batch.createdAt);
+    final remaining = total - done;
+    var speed = 0.0;
+    for (final task in batch.tasks.values) {
+      if (task.status == TransferStatus.transferring) {
+        speed += latestProgressOf(task)?.speedBytesPerSecond ?? 0;
+      }
+    }
+    final eta = !batch.isFinished && speed > 0 && remaining > 0
+        ? _durationLabel(Duration(seconds: (remaining / speed).ceil()))
+        : null;
+    return '${formatBytes(done)} of ${formatBytes(total)}  ·  '
+        'Elapsed ${_durationLabel(elapsed)}'
+        '${eta == null ? '' : '  ·  About $eta left'}';
   }
 
   Widget _fileRow(BuildContext context, int i, VayuPalette palette) {

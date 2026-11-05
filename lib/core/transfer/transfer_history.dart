@@ -87,6 +87,9 @@ class TransferHistoryRecord {
   /// Receiver only: where the verified file was saved.
   final String? savedPath;
 
+  /// How it travelled: `lan`, `wifiDirect`, `ble` or `relay`; null if unknown.
+  final String? route;
+
   const TransferHistoryRecord({
     required this.transferId,
     this.batchId,
@@ -101,6 +104,7 @@ class TransferHistoryRecord {
     this.failureKind,
     required this.finishedAt,
     this.savedPath,
+    this.route,
   });
 
   Map<String, Object?> toJson() => {
@@ -117,6 +121,7 @@ class TransferHistoryRecord {
     if (failureKind != null) 'kind': failureKind,
     'at': finishedAt.toUtc().toIso8601String(),
     if (savedPath != null) 'path': savedPath,
+    if (route != null) 'route': route,
   };
 
   static TransferHistoryRecord? tryFromJson(Object? raw) {
@@ -136,6 +141,7 @@ class TransferHistoryRecord {
         failureKind: raw['kind'] as String?,
         finishedAt: DateTime.parse(raw['at'] as String).toLocal(),
         savedPath: raw['path'] as String?,
+        route: raw['route'] as String?,
       );
     } catch (_) {
       return null;

@@ -32,7 +32,6 @@ import 'package:vayu/domain/protocol/vayu_packet.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 import 'package:vayu/main.dart';
 import 'package:vayu/platform/platform_service.dart';
-import 'package:vayu/ui/apps/apps_games_page.dart';
 import 'package:vayu/ui/card/incoming_card_watcher.dart';
 import 'package:vayu/ui/contacts/contact_sharing_page.dart';
 import 'package:vayu/ui/home/nearby_devices_page.dart';
@@ -345,15 +344,6 @@ void main() {
     await s.settle();
     await s.save('16c_client');
     await c.hostService.stopHosting();
-    await s.close(c);
-  });
-
-  shotTest('15 apps and games', (s) async {
-    final c = await s.app();
-    await s.settle();
-    unawaited(AppsGamesPage.open(s.navContext));
-    await s.settle();
-    await s.save('15_apps_games');
     await s.close(c);
   });
 

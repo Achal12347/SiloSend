@@ -63,7 +63,7 @@ void main() {
       expect(find.text('Send to'), findsOneWidget);
 
       // Initially no peers -> shows empty searching state
-      expect(find.text('Looking for nearby Vayu devices...'), findsOneWidget);
+      expect(find.text('Looking for nearby phones…'), findsOneWidget);
       // Scan QR is always offered, list or no list.
       expect(find.text('Scan QR'), findsOneWidget);
 
@@ -145,7 +145,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('2 files selected'), findsOneWidget);
-      expect(find.text('3.0 MB total • Batch transfer'), findsOneWidget);
+      expect(find.text('3.0 MB total'), findsOneWidget);
 
       await container.stopDiscoveryAndAdvertising();
       container.dispose();

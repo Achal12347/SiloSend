@@ -2,6 +2,7 @@ package com.achyrio.vayu
 
 import android.content.Intent
 import com.achyrio.vayu.battery.BatteryHandler
+import com.achyrio.vayu.chat.ChatListeningService
 import com.achyrio.vayu.connection.BleConnectionHandler
 import com.achyrio.vayu.contacts.ContactsHandler
 import com.achyrio.vayu.discovery.BleDiscoveryHandler
@@ -85,7 +86,7 @@ class MainActivity : FlutterActivity() {
         wifiDirectHandler = WifiDirectHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
-        qrScannerHandler = QrScannerHandler(this).apply {
+        qrScannerHandler = QrScannerHandler(this, permissionGate).apply {
             register(flutterEngine.dartExecutor.binaryMessenger)
         }
         nfcHandler = NfcHandler(this).apply {
@@ -148,6 +149,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // Messages are handled in Dart: with the engine gone nothing is listening.
+        ChatListeningService.stop(this)
         platformHandler?.unregister()
         platformHandler = null
         bleDiscoveryHandler?.unregister()

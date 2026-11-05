@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:vayu/core/capabilities/capability_coordinator.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/pairing/local_hotspot_service.dart';
 import 'package:vayu/core/pairing/nfc_pairing_service.dart';
@@ -11,11 +12,9 @@ import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/transfer/transfer_batch.dart';
 import 'package:vayu/domain/pairing/pairing_payload.dart';
 import 'package:vayu/ui/friendly_error.dart';
-import 'package:vayu/ui/pairing/pairing_page.dart';
 import 'package:vayu/ui/pairing/qr_code_view.dart';
 import 'package:vayu/ui/theme/vayu_theme.dart';
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
-import 'package:vayu/ui/widgets/info_dot.dart';
 import 'package:vayu/ui/widgets/nfc_off_row.dart';
 import 'package:vayu/ui/widgets/permission_flow.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
@@ -71,6 +70,8 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     _c.fileSharingCoordinator.openReceiveScreen();
     // The code is also served over NFC, which needs the screen on.
     _c.platformService.keepScreenOn(true);
+    // The code is scanned off this screen, often outdoors.
+    _c.platformService.fullBrightness(true);
     _acceptedSub = _c.fileSharingCoordinator.autoAcceptedBatches.listen(
       _onAccepted,
     );
@@ -117,6 +118,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     _ticker?.cancel();
     _acceptedSub?.cancel();
     _c.platformService.keepScreenOn(false);
+    _c.platformService.fullBrightness(false);
     try {
       _c.releaseDiscovery(this);
       _c.fileSharingCoordinator.closeReceiveScreen();
@@ -138,10 +140,11 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     });
     try {
       // Being findable is the point of this screen: explain and ask once.
+      // A refusal does not end it here: a shared Wi-Fi can still reach this
+      // phone, and without one the steps below say what is missing.
+      await ensureFindPhonesIfNeeded(context, _c);
+      if (!mounted) return;
       final raw = _c.capabilityCoordinator.rawCapabilities;
-      if (raw.isNearbyPermissionNotRequested) {
-        await ensureFeature(context, _c, VayuFeature.findPhones);
-      }
       // Stay findable for as long as this screen is open.
       _c.holdDiscovery(this);
 
@@ -153,7 +156,7 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       // send over a Wi-Fi Direct group this phone hosts: explain and ask
       // once while the user is here to receive.
       var askForBluetoothSenders = false;
-      if (_c.wifiDirectSupported) {
+      if (_c.wifiDirectSupported && !raw.canUseLan) {
         final report = await _c.permissionManager.refresh();
         final group = PermissionManager.groupFor(
           VayuFeature.directWifi,
@@ -165,7 +168,16 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
                 PermissionState.notRequested;
       }
       if ((needDirect || askForBluetoothSenders) && mounted) {
-        await ensureFeature(context, _c, VayuFeature.directWifi);
+        final ready = await ensureFeature(context, _c, VayuFeature.directWifi);
+        if (!mounted) return;
+        if (!ready) {
+          // Never a blank screen: say what is missing and offer the fix.
+          setState(() {
+            _problem = _hotspotProblem(HotspotStartError.permissionDenied);
+            _fixable = HotspotStartError.permissionDenied;
+          });
+          return;
+        }
       }
       final directReady = (await _c.permissionManager.check(
         VayuFeature.directWifi,
@@ -179,7 +191,8 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       if (hotspotError != null) {
         _problem = _hotspotProblem(hotspotError);
         if (hotspotError == HotspotStartError.permissionDenied ||
-            hotspotError == HotspotStartError.locationOff) {
+            hotspotError == HotspotStartError.locationOff ||
+            hotspotError == HotspotStartError.wifiOff) {
           _fixable = hotspotError;
         }
       }
@@ -231,10 +244,21 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  void _onAccepted(TransferBatch batch) {
+  /// True while a transfer screen opened from here is showing.
+  bool _showingTransfer = false;
+
+  Future<void> _onAccepted(TransferBatch batch) async {
     if (!mounted) return;
     HapticFeedback.mediumImpact();
-    TransferDetailPage.open(context, _c, batchId: batch.batchId);
+    // A second sender while one transfer is on screen: it is already in
+    // Home's transfers, so the screens do not pile up on Back.
+    if (_showingTransfer) return;
+    _showingTransfer = true;
+    try {
+      await TransferDetailPage.open(context, _c, batchId: batch.batchId);
+    } finally {
+      _showingTransfer = false;
+    }
   }
 
   String _hotspotProblem(HotspotStartError error) => switch (error) {
@@ -244,6 +268,8 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
       'Turn on Location. Android needs it to create a direct connection.',
     HotspotStartError.tetheringActive =>
       'Turn off your mobile hotspot, then try again.',
+    HotspotStartError.wifiOff =>
+      'Turn on Wi-Fi. Phones connect over Wi-Fi even without internet.',
     HotspotStartError.unsupported =>
       'This phone cannot create a direct connection.',
     HotspotStartError.failed =>
@@ -281,52 +307,23 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
             ),
             const SizedBox(height: 14),
             Text(
-              'Visible as $name',
+              'Receiving as $name',
               textAlign: TextAlign.center,
               style: theme.textTheme.titleLarge,
             ),
+            _BluetoothVisibility(container: _c),
             const SizedBox(height: 6),
             if (payload != null)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _nfcReady
-                        ? 'Tap or scan to send here'
-                        : 'Scan to send here',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  InfoDot(
-                    title: 'Receiving',
-                    message: _nfcReady
-                        ? "Touch this phone to the sender's Send screen, or let them scan this code. Files are accepted automatically while this screen is open."
-                        : 'Let the sender scan this code. Files are accepted automatically while this screen is open.',
-                  ),
-                ],
+              Text(
+                _nfcReady ? 'Tap or scan to send here' : 'Scan to send here',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
             if (payload != null && _nfcOff) ...[
               const SizedBox(height: 8),
               NfcOffRow(container: _c),
-            ],
-            if (payload != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.circle,
-                    size: 8,
-                    color: VayuPalette.of(context).success,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Waiting for a sender…',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
-              ),
             ],
             const SizedBox(height: 24),
             Center(
@@ -389,11 +386,11 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
             if (_fixable != null)
               FilledButton(
                 onPressed: _preparing ? null : _fix,
-                child: Text(
-                  _fixable == HotspotStartError.locationOff
-                      ? 'Turn on Location'
-                      : 'Allow',
-                ),
+                child: Text(switch (_fixable) {
+                  HotspotStartError.locationOff => 'Turn on Location',
+                  HotspotStartError.wifiOff => 'Turn on Wi-Fi',
+                  _ => 'Allow',
+                }),
               )
             else if (expired || _problem != null)
               FilledButton(
@@ -409,10 +406,6 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
                 },
                 child: const Text('Not on the same Wi-Fi?'),
               ),
-            TextButton(
-              onPressed: () => PairingPage.open(context, _c),
-              child: const Text('Other ways to connect'),
-            ),
             const SizedBox(height: 8),
             OutlinedButton(
               onPressed: () => Navigator.of(context).maybePop(),
@@ -421,6 +414,75 @@ class _ReceivePageState extends State<ReceivePage> with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Says when nearby phones cannot find this one over Bluetooth, instead of
+/// the screen implying it is visible. Scanning the code works either way.
+class _BluetoothVisibility extends StatelessWidget {
+  final AppContainer container;
+
+  const _BluetoothVisibility({required this.container});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<EvaluatedCapabilityState>(
+      stream: container.capabilityCoordinator.stateStream,
+      initialData: container.capabilityCoordinator.state,
+      builder: (context, snapshot) {
+        final canUseBle = snapshot.data?.canUseBle ?? true;
+        return ValueListenableBuilder<String?>(
+          valueListenable: container.bleAdvertisingProblem,
+          builder: (context, problem, _) {
+            if (canUseBle && problem == null) return const SizedBox.shrink();
+            final (text, action, onAction) = !canUseBle
+                ? (
+                    'Nearby phones can\'t find this one over Bluetooth. '
+                        'They can still scan the code.',
+                    'Turn on',
+                    () => ensureFeature(
+                      context,
+                      container,
+                      VayuFeature.findPhones,
+                    ),
+                  )
+                : problem == 'ADVERTISING_NOT_SUPPORTED'
+                ? (
+                    'This phone can\'t announce itself over Bluetooth. '
+                        'The other phone can scan the code instead.',
+                    null,
+                    null,
+                  )
+                : (
+                    'Bluetooth could not announce this phone. The other '
+                        'phone can still scan the code.',
+                    'Try again',
+                    () async {
+                      await container.discoveryCoordinator.stopAdvertising();
+                      await container.startDiscoveryAndAdvertising();
+                    },
+                  );
+            final theme = Theme.of(context);
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.bluetooth_disabled_rounded,
+                    size: 18,
+                    color: VayuPalette.of(context).warning,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(text, style: theme.textTheme.bodySmall)),
+                  if (action != null)
+                    TextButton(onPressed: onAction, child: Text(action)),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

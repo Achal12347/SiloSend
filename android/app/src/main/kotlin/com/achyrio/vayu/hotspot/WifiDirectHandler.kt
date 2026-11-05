@@ -20,6 +20,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.security.SecureRandom
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Phone-to-phone Wi-Fi Direct (Android 10+), the fast path between two phones.
@@ -38,6 +39,20 @@ class WifiDirectHandler(
     private val activity: Activity,
     private val permissions: PermissionGate,
 ) : MethodChannel.MethodCallHandler {
+    private class GuardedResult(private val target: MethodChannel.Result) : MethodChannel.Result {
+        private val completed = AtomicBoolean(false)
+        val isActive: Boolean get() = !completed.get()
+        fun claim(): Boolean = completed.compareAndSet(false, true)
+        override fun success(result: Any?) {
+            if (claim()) target.success(result)
+        }
+        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+            if (claim()) target.error(errorCode, errorMessage, errorDetails)
+        }
+        override fun notImplemented() {
+            if (claim()) target.notImplemented()
+        }
+    }
     companion object {
         private const val TAG = "Vayu.WifiDirect"
         private const val CHANNEL = "com.achyrio.vayu/wifi_direct"
@@ -67,6 +82,10 @@ class WifiDirectHandler(
     private var joined = false
     private var joinPoll: Runnable? = null
 
+    // Answers the join still waiting when a newer join or a leave replaces
+    // it; that caller used to wait forever.
+    private var supersedeJoin: (() -> Unit)? = null
+
     fun register(messenger: BinaryMessenger) {
         channel = MethodChannel(messenger, CHANNEL).also { it.setMethodCallHandler(this) }
     }
@@ -86,7 +105,10 @@ class WifiDirectHandler(
             "supports5Ghz" -> result.success(isSupported() && supports5Ghz())
             "createGroup" -> {
                 val allow5Ghz = call.argument<Boolean>("allow5Ghz") ?: true
-                withPermission(result) { createGroup(result, allow5Ghz) }
+                withPermission(result) {
+                    val guarded = guardedResult(result, 25_000L, "Group creation timed out")
+                    createGroup(guarded, allow5Ghz)
+                }
             }
             "removeGroup" -> {
                 stopHosting()
@@ -95,11 +117,32 @@ class WifiDirectHandler(
             "connect" -> {
                 val name = call.argument<String>("networkName")
                 val passphrase = call.argument<String>("passphrase")
-                if (name.isNullOrEmpty() || passphrase.isNullOrEmpty()) {
-                    result.error("INVALID_ARGS", "networkName and passphrase required", null)
+                val nameBytes = name?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                val passwordLength = passphrase?.length ?: 0
+                val passwordPrintableAscii = passphrase?.all { it.code in 0x20..0x7e } == true
+                if (name == null || passphrase == null || nameBytes !in 1..32 ||
+                    passwordLength !in 8..63 || !passwordPrintableAscii) {
+                    Log.e(
+                        TAG,
+                        "stage=join_validation_failed ssidBytes=$nameBytes " +
+                            "passphraseLength=$passwordLength",
+                    )
+                    result.error(
+                        "INVALID_CREDENTIALS",
+                        "Wi-Fi Direct credentials have invalid lengths",
+                        null,
+                    )
                     return
                 }
-                withPermission(result) { connect(name, passphrase, result) }
+                Log.i(
+                    TAG,
+                    "stage=join_credentials_received ssidBytes=$nameBytes " +
+                        "passphraseLength=$passwordLength",
+                )
+                withPermission(result) {
+                    val guarded = guardedResult(result, 42_000L, "Joining the Wi-Fi Direct group timed out")
+                    connect(name, passphrase, guarded)
+                }
             }
             "disconnect" -> {
                 leave()
@@ -107,6 +150,32 @@ class WifiDirectHandler(
             }
             else -> result.notImplemented()
         }
+    }
+
+    /** Android/OEM P2P callbacks can be lost; never leave Flutter waiting forever. */
+    private fun guardedResult(
+        target: MethodChannel.Result,
+        timeoutMs: Long,
+        timeoutMessage: String,
+    ): GuardedResult {
+        val guarded = GuardedResult(target)
+        val timeout = Runnable {
+            if (!guarded.claim()) return@Runnable
+            Log.e(TAG, "stage=platform_callback_timeout timeoutMs=$timeoutMs")
+            joinPoll?.let { main.removeCallbacks(it) }
+            joinPoll = null
+            supersedeJoin = null
+            joined = false
+            hosting = false
+            val ch = p2pChannel
+            if (ch != null) try {
+                manager?.cancelConnect(ch, null)
+                manager?.removeGroup(ch, null)
+            } catch (_: Exception) {}
+            target.error("P2P_TIMEOUT", timeoutMessage, null)
+        }
+        main.postDelayed(timeout, timeoutMs)
+        return guarded
     }
 
     /** Group creation with chosen credentials (the no-dialog path) needs Android 10. */
@@ -129,15 +198,18 @@ class WifiDirectHandler(
 
     private fun withPermission(result: MethodChannel.Result, action: () -> Unit) {
         if (!isSupported()) {
+            Log.e(TAG, "stage=preflight_failed reason=wifi_direct_unsupported")
             result.error("UNSUPPORTED", "Wi-Fi Direct needs Android 10 or later", null)
             return
         }
         if (!wifi.isWifiEnabled) {
+            Log.e(TAG, "stage=preflight_failed reason=wifi_disabled")
             result.error("WIFI_OFF", "Wi-Fi is off", null)
             return
         }
         permissions.request(PermissionGate.directWifiPermissions()) { status ->
             if (status != PermissionGate.GRANTED) {
+                Log.e(TAG, "stage=preflight_failed reason=permission status=$status")
                 result.error("PERMISSION_DENIED", "Nearby Wi-Fi permission: $status", null)
                 return@request
             }
@@ -148,6 +220,7 @@ class WifiDirectHandler(
             ) {
                 val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
                 if (!lm.isLocationEnabled) {
+                    Log.e(TAG, "stage=preflight_failed reason=location_services_disabled")
                     result.error("LOCATION_OFF", "Location services must be on for Wi-Fi Direct", null)
                     return@request
                 }
@@ -167,25 +240,27 @@ class WifiDirectHandler(
      * replaced.
      */
     @SuppressLint("MissingPermission")
-    private fun createGroup(result: MethodChannel.Result, allow5Ghz: Boolean) {
+    private fun createGroup(result: GuardedResult, allow5Ghz: Boolean) {
         val m = manager
         val ch = p2p()
         if (m == null || ch == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             result.error("UNSUPPORTED", "Wi-Fi Direct unavailable", null)
             return
         }
+        if (!result.isActive) return
         if (hosting) {
             if (allow5Ghz) {
                 describeGroup(m, ch, result, attempt = 0)
                 return
             }
             m.requestGroupInfo(ch) { group ->
+                if (!result.isActive) return@requestGroupInfo
                 if (group != null && group.frequency >= 4900) {
                     Log.i(TAG, "Replacing the 5 GHz group for a 2.4 GHz-only phone")
                     hosting = false
                     m.removeGroup(ch, object : WifiP2pManager.ActionListener {
-                        override fun onSuccess() = startGroup(m, ch, result, allow5Ghz)
-                        override fun onFailure(reason: Int) = startGroup(m, ch, result, allow5Ghz)
+                        override fun onSuccess() { if (result.isActive) startGroup(m, ch, result, allow5Ghz) }
+                        override fun onFailure(reason: Int) { if (result.isActive) startGroup(m, ch, result, allow5Ghz) }
                     })
                 } else {
                     describeGroup(m, ch, result, attempt = 0)
@@ -195,8 +270,8 @@ class WifiDirectHandler(
         }
         // A group left by an earlier screen (or another app) blocks creating one.
         m.removeGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() = startGroup(m, ch, result, allow5Ghz)
-            override fun onFailure(reason: Int) = startGroup(m, ch, result, allow5Ghz)
+            override fun onSuccess() { if (result.isActive) startGroup(m, ch, result, allow5Ghz) }
+            override fun onFailure(reason: Int) { if (result.isActive) startGroup(m, ch, result, allow5Ghz) }
         })
     }
 
@@ -204,10 +279,10 @@ class WifiDirectHandler(
     private fun startGroup(
         m: WifiP2pManager,
         ch: WifiP2pManager.Channel,
-        result: MethodChannel.Result,
+        result: GuardedResult,
         allow5Ghz: Boolean,
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !result.isActive) return
         // 5 GHz is several times faster than 2.4 GHz; fall back when the phone
         // cannot host there (no 5 GHz, or its radio is tied to a 2.4 GHz router).
         // A 2.4 GHz-only joiner gets a 2.4 GHz group.
@@ -231,27 +306,55 @@ class WifiDirectHandler(
         ch: WifiP2pManager.Channel,
         bands: List<Int>,
         index: Int,
-        result: MethodChannel.Result,
+        result: GuardedResult,
     ) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q || !result.isActive) return
+        val networkName = "DIRECT-vy-${randomText(6)}"
+        val passphrase = randomText(16)
         val config = WifiP2pConfig.Builder()
-            .setNetworkName("DIRECT-vy-${randomText(6)}")
-            .setPassphrase(randomText(16))
+            .setNetworkName(networkName)
+            .setPassphrase(passphrase)
             .setGroupOperatingBand(bands[index])
             .enablePersistentMode(false)
             .build()
+        Log.i(
+            TAG,
+            "stage=group_create_start band=${bands[index]} " +
+                "ssidBytes=${networkName.toByteArray(Charsets.UTF_8).size} " +
+                "passphraseLength=${passphrase.length}",
+        )
+        if (!result.isActive) return
         try {
             m.createGroup(ch, config, object : WifiP2pManager.ActionListener {
                 override fun onSuccess() {
+                    if (!result.isActive) {
+                        hosting = false
+                        m.removeGroup(ch, null)
+                        return
+                    }
                     hosting = true
-                    Log.i(TAG, "Group created (band ${bands[index]})")
-                    describeGroup(m, ch, result, attempt = 0)
+                    Log.i(TAG, "stage=group_create_accepted band=${bands[index]}")
+                    // Some radios accept a 5 GHz group they cannot bring up
+                    // (Wi-Fi busy on another channel); then try the next band.
+                    val nextBand = if (index + 1 < bands.size) {
+                        { tryCreate(m, ch, bands, index + 1, result) }
+                    } else {
+                        null
+                    }
+                    describeGroup(m, ch, result, attempt = 0, fallback = nextBand)
                 }
 
                 override fun onFailure(reason: Int) {
+                    if (!result.isActive) return
                     if (index + 1 < bands.size) {
+                        Log.w(
+                            TAG,
+                            "stage=group_create_failed reason=$reason; " +
+                                "retryBand=${bands[index + 1]}",
+                        )
                         tryCreate(m, ch, bands, index + 1, result)
                     } else {
+                        Log.e(TAG, "stage=group_create_failed reason=$reason")
                         result.error(failureCode(reason), "Could not create the group ($reason)", null)
                     }
                 }
@@ -266,30 +369,73 @@ class WifiDirectHandler(
     private fun describeGroup(
         m: WifiP2pManager,
         ch: WifiP2pManager.Channel,
-        result: MethodChannel.Result,
+        result: GuardedResult,
         attempt: Int,
+        fallback: (() -> Unit)? = null,
     ) {
+        if (!result.isActive) return
         try {
             m.requestGroupInfo(ch) { group ->
+                if (!result.isActive) {
+                    if (group?.isGroupOwner == true) {
+                        hosting = false
+                        m.removeGroup(ch, null)
+                    }
+                    return@requestGroupInfo
+                }
                 val address = group?.let { ownerAddress(it) }
-                if (group != null && group.isGroupOwner && group.passphrase != null &&
-                    (address != null || attempt >= 10)
-                ) {
+                val ssidBytes = group?.networkName?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                val groupPassphrase = group?.passphrase
+                val passwordLength = groupPassphrase?.length ?: 0
+                val passwordPrintableAscii =
+                    groupPassphrase?.all { it.code in 0x20..0x7e } == true
+                val credentialsValid = ssidBytes in 1..32 &&
+                    passwordLength in 8..63 && passwordPrintableAscii
+                val frequencyMhz = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    group?.frequency ?: 0
+                } else {
+                    0
+                }
+                if (group != null && group.isGroupOwner && credentialsValid &&
+                    (address != null || attempt >= 10)) {
+                    Log.i(
+                        TAG,
+                        "stage=group_ready ssidBytes=$ssidBytes " +
+                            "passphraseLength=$passwordLength " +
+                            "ownerAddressPresent=${address != null} frequencyMhz=$frequencyMhz",
+                    )
                     result.success(
                         mapOf(
                             "networkName" to group.networkName,
                             "passphrase" to group.passphrase,
                             "hostAddress" to (address ?: DEFAULT_OWNER_ADDRESS),
-                            "frequencyMhz" to
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) group.frequency else 0,
+                            "frequencyMhz" to frequencyMhz,
                         )
                     )
                 } else if (attempt < 15) {
                     // The group interface takes a moment to come up.
-                    main.postDelayed({ describeGroup(m, ch, result, attempt + 1) }, POLL_MS)
+                    main.postDelayed({ describeGroup(m, ch, result, attempt + 1, fallback) }, POLL_MS)
+                } else if (fallback != null) {
+                    Log.w(TAG, "stage=group_ready_failed; retrying on the next band")
+                    hosting = false
+                    m.removeGroup(ch, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() = fallback()
+                        override fun onFailure(reason: Int) = fallback()
+                    })
                 } else {
                     stopHosting()
-                    result.error("FAILED", "The group did not come up", null)
+                    val reason = if (group?.isGroupOwner == true && !credentialsValid) {
+                        "The group returned invalid credential lengths"
+                    } else {
+                        "The group did not come up"
+                    }
+                    Log.e(
+                        TAG,
+                        "stage=group_ready_failed ssidBytes=$ssidBytes " +
+                            "passphraseLength=$passwordLength " +
+                            "ownerAddressPresent=${address != null}",
+                    )
+                    result.error("FAILED", reason, null)
                 }
             }
         } catch (e: SecurityException) {
@@ -325,51 +471,68 @@ class WifiDirectHandler(
      * finishes; connecting then failed at once, and Vayu gave up on the group.
      */
     @SuppressLint("MissingPermission")
-    private fun connect(networkName: String, passphrase: String, result: MethodChannel.Result) {
+    private fun connect(networkName: String, passphrase: String, result: GuardedResult) {
         val m = manager
         val ch = p2p()
         if (m == null || ch == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             result.error("UNSUPPORTED", "Wi-Fi Direct unavailable", null)
             return
         }
+        supersedeJoin?.invoke()
         joinPoll?.let { main.removeCallbacks(it) }
         joinPoll = null
         var answered = false
+        supersedeJoin = {
+            if (!answered) {
+                answered = true
+                main.post { result.error("SUPERSEDED", "Replaced by a newer join", null) }
+            }
+        }
         val deadline = System.currentTimeMillis() + JOIN_TIMEOUT_MS
-        fun finish(ownerAddress: String?, why: String) {
+        fun finish(ownerAddress: String?, localAddress: String?, why: String) {
             if (answered) return
             answered = true
+            supersedeJoin = null
             joinPoll?.let { main.removeCallbacks(it) }
             joinPoll = null
             if (ownerAddress == null) {
-                Log.w(TAG, "Join failed: $why")
+                Log.e(TAG, "stage=group_join_failed reason=$why")
                 joined = true // whatever half-formed group exists is left
                 leave()
-                main.post { result.success(null) }
+                main.post { result.error("JOIN_FAILED", why, null) }
             } else {
-                Log.i(TAG, "Joined group ($why)")
+                Log.i(
+                    TAG,
+                    "stage=group_joined ownerAddress=$ownerAddress localAddress=$localAddress",
+                )
                 joined = true
-                main.post { result.success(mapOf("groupOwnerAddress" to ownerAddress)) }
+                main.post {
+                    result.success(
+                        mapOf("groupOwnerAddress" to ownerAddress, "localAddress" to localAddress),
+                    )
+                }
             }
         }
 
         val poll = object : Runnable {
             override fun run() {
-                if (answered) return
+                if (answered || !result.isActive) return
                 m.requestConnectionInfo(ch) { info ->
+                    if (answered || !result.isActive) return@requestConnectionInfo
                     val owner = info?.groupOwnerAddress?.hostAddress
                     if (info != null && info.groupFormed && !info.isGroupOwner && owner != null) {
                         m.requestGroupInfo(ch) { group ->
+                            if (answered || !result.isActive) return@requestGroupInfo
                             val local = group?.let { ownerAddress(it) } ?: p2pClientAddress()
                             when {
-                                local != null -> finish(owner, "own address $local")
+                                local != null -> finish(owner, local, "own address $local")
                                 System.currentTimeMillis() > deadline ->
-                                    finish(null, "no address in the group")
+                                    finish(null, null, "no address in the group")
                                 else -> main.postDelayed(this, POLL_MS)
                             }
                         }
                     } else if (System.currentTimeMillis() > deadline) {
-                        finish(null, "group not formed in time")
+                        finish(null, null, "group not formed in time")
                     } else {
                         main.postDelayed(this, POLL_MS)
                     }
@@ -384,22 +547,30 @@ class WifiDirectHandler(
             .build()
 
         fun attempt(left: Int) {
-            if (answered) return
+            if (answered || !result.isActive) return
             try {
                 m.connect(ch, config, object : WifiP2pManager.ActionListener {
                     override fun onSuccess() {
+                        if (answered || !result.isActive) return
+                        Log.i(TAG, "stage=group_connect_request_accepted retriesRemaining=$left")
                         joinPoll = poll
                         main.postDelayed(poll, POLL_MS)
                     }
 
                     override fun onFailure(reason: Int) {
+                        if (answered || !result.isActive) return
                         // BUSY right after leaving a group or while a scan
                         // runs is common and passes within a second or two.
                         if (left > 0 && reason != WifiP2pManager.P2P_UNSUPPORTED) {
-                            Log.i(TAG, "connect refused ($reason); trying again")
+                            Log.w(
+                                TAG,
+                                "stage=group_connect_request_refused reason=$reason " +
+                                    "retriesRemaining=$left",
+                            )
                             main.postDelayed({ attempt(left - 1) }, RETRY_MS)
                         } else {
-                            finish(null, "connect refused ($reason)")
+                            Log.e(TAG, "stage=group_connect_request_failed reason=$reason")
+                            finish(null, null, "connect refused ($reason)")
                         }
                     }
                 })
@@ -417,8 +588,8 @@ class WifiDirectHandler(
             m.cancelConnect(ch, null)
         } catch (_: Exception) {}
         m.removeGroup(ch, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { main.postDelayed({ attempt(CONNECT_RETRIES) }, SETTLE_MS) }
-            override fun onFailure(reason: Int) { attempt(CONNECT_RETRIES) }
+            override fun onSuccess() { if (result.isActive) main.postDelayed({ attempt(CONNECT_RETRIES) }, SETTLE_MS) }
+            override fun onFailure(reason: Int) { if (result.isActive) attempt(CONNECT_RETRIES) }
         })
     }
 
@@ -434,6 +605,8 @@ class WifiDirectHandler(
     }
 
     private fun leave() {
+        supersedeJoin?.invoke()
+        supersedeJoin = null
         joinPoll?.let { main.removeCallbacks(it) }
         joinPoll = null
         val ch = p2pChannel ?: return

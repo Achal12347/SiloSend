@@ -8,12 +8,10 @@ import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/file_picker_contract.dart';
 import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/connection/connection_session.dart';
-import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/core/state/app_scope.dart';
 import 'package:vayu/ui/connection/active_connections_card.dart';
 import 'package:vayu/ui/contacts/contact_sharing_page.dart';
-import 'package:vayu/ui/apps/apps_games_page.dart';
 import 'package:vayu/ui/chats/conversation_page.dart';
 import 'package:vayu/ui/home/capability_setup_banner.dart';
 import 'package:vayu/ui/home/discovered_peer_card.dart';
@@ -28,6 +26,7 @@ import 'package:vayu/ui/transfer/incoming_transfer_dialog.dart';
 import 'package:vayu/ui/transfer/peer_selection_sheet.dart';
 import 'package:vayu/ui/transfer/transfer_history_page.dart';
 import 'package:vayu/ui/transfer/transfer_progress_card.dart';
+import 'package:vayu/ui/widgets/vayu_mark.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
 import 'package:vayu/ui/profile/profile_widgets.dart';
@@ -36,7 +35,7 @@ import 'package:vayu/ui/widgets/permission_flow.dart';
 
 /// Home: the file-sharing dashboard.
 ///
-/// Top to bottom: what Vayu can do (Send, Receive, contacts, apps), who is
+/// Top to bottom: what Vayu can do (Send, Receive, contacts), who is
 /// nearby (a short preview), and what moved recently. Protocol details live
 /// in Diagnostics, not here. Also the place that listens for incoming
 /// requests and items shared from other apps, which is why it stays alive
@@ -91,6 +90,7 @@ class _VayuHomePageState extends State<VayuHomePage>
   StreamSubscription<IncomingBatchRequest>? _incomingBatchesSub;
   ShareIntentService? _shareIntents;
   StreamSubscription<List<SelectedDocument>>? _sharedSub;
+  StreamSubscription<String>? _codeSub;
 
   @override
   void initState() {
@@ -116,7 +116,15 @@ class _VayuHomePageState extends State<VayuHomePage>
     final shares = ShareIntentService();
     _shareIntents = shares;
     _sharedSub = shares.incoming.listen(_offerShared);
+    _codeSub = shares.codes.listen(_sendToCode);
     _offerShared(await shares.takePending());
+    final code = await shares.takePendingCode();
+    if (code != null) _sendToCode(code);
+  }
+
+  Future<void> _sendToCode(String code) async {
+    if (!mounted) return;
+    await ShareActions.sendToCode(context, AppScope.of(context), code);
   }
 
   Future<void> _offerShared(List<SelectedDocument> docs) async {
@@ -131,9 +139,13 @@ class _VayuHomePageState extends State<VayuHomePage>
   Future<void> _autoStartDiscoveryIfReady() async {
     if (!mounted) return;
     final container = AppScope.of(context);
+    // First Home after onboarding: ask for what finding phones needs, then
+    // search. Later visits leave this to the setup banner.
+    if (!container.userSettings.baselinePermissionsAsked) {
+      await askBaselinePermissions(context, container);
+      if (!mounted) return;
+    }
     try {
-      // Nearby access is asked by the setup banner or when the user starts
-      // something that needs it; never unprompted here.
       // Searches for a short while, then stops to save battery.
       container.discoverFor(AppContainer.discoveryWindow);
     } catch (_) {}
@@ -184,6 +196,7 @@ class _VayuHomePageState extends State<VayuHomePage>
     _incomingRequestsSub?.cancel();
     _incomingBatchesSub?.cancel();
     _sharedSub?.cancel();
+    _codeSub?.cancel();
     _shareIntents?.dispose();
     super.dispose();
   }
@@ -258,29 +271,12 @@ class _VayuHomePageState extends State<VayuHomePage>
           ],
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: _ActionTile(
-                style: _TileStyle.plain,
-                icon: Icons.contacts_outlined,
-                title: 'Contact sharing',
-                subtitle: 'Contacts & your card',
-                onTap: () => ContactSharingPage.open(context, container),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _ActionTile(
-                style: _TileStyle.plain,
-                icon: Icons.sports_esports_outlined,
-                title: 'Apps & games',
-                subtitle: 'Coming soon',
-                badge: 'Soon',
-                onTap: () => AppsGamesPage.open(context),
-              ),
-            ),
-          ],
+        _ActionTile(
+          style: _TileStyle.plain,
+          icon: Icons.contacts_outlined,
+          title: 'Contacts',
+          subtitle: 'Share a contact or your card',
+          onTap: () => ContactSharingPage.open(context, container),
         ),
       ],
     );
@@ -566,20 +562,16 @@ class _VayuHomePageState extends State<VayuHomePage>
   Future<void> _startSearch(AppContainer container) async {
     setState(() => _isTogglingDiscovery = true);
     try {
-      final raw = container.capabilityCoordinator.rawCapabilities;
       // Explain, then ask; if Android will not ask any more, the sheet
       // offers the settings page. Either way Wi-Fi discovery starts below.
-      if (raw.isNearbyPermissionNotRequested ||
-          (raw.isNearbyPermissionMissing && !raw.canUseLan)) {
-        await ensureFeature(context, container, VayuFeature.findPhones);
-      }
+      await ensureFindPhonesIfNeeded(context, container);
       await container.startDiscoveryAndAdvertising();
       container.discoverFor(AppContainer.discoveryWindow);
     } catch (error) {
       if (mounted) {
         showVayuNotice(
           context,
-          error.toString().replaceFirst('Bad state: ', ''),
+          'Vayu can\'t search right now. Turn on Wi-Fi or Bluetooth and try again.',
           tone: VayuNoticeTone.problem,
         );
       }
@@ -598,19 +590,10 @@ class _HomeTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final palette = VayuPalette.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(
-          width: 36,
-          height: 36,
-          decoration: BoxDecoration(
-            gradient: palette.heroGradient,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Icon(Icons.air_rounded, color: palette.heroGlow, size: 22),
-        ),
+        const VayuMark(size: 36),
         const SizedBox(width: 12),
         Flexible(
           child: Column(
@@ -697,14 +680,13 @@ class _Availability extends StatelessWidget {
 
 enum _TileStyle { primary, accent, plain }
 
-/// One of the four Home actions. Send is the ink tile, Receive the sage
-/// tile; contacts and apps are quiet surfaces.
+/// One of the Home actions. Send is the ink tile and Receive the sage tile,
+/// side by side; Contacts is a quiet full-width row beneath them.
 class _ActionTile extends StatelessWidget {
   final _TileStyle style;
   final IconData icon;
   final String title;
   final String subtitle;
-  final String? badge;
   final bool busy;
   final VoidCallback? onTap;
 
@@ -713,7 +695,6 @@ class _ActionTile extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
-    this.badge,
     this.busy = false,
     this.onTap,
   });
@@ -749,6 +730,22 @@ class _ActionTile extends StatelessWidget {
       ),
     };
     final radius = BorderRadius.circular(big ? 26 : 22);
+    final labels = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          title,
+          style: (big ? theme.textTheme.titleLarge : theme.textTheme.titleSmall)
+              ?.copyWith(color: fg),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          subtitle,
+          style: theme.textTheme.bodySmall?.copyWith(color: muted),
+        ),
+      ],
+    );
     return Semantics(
       button: true,
       label: '$title, $subtitle',
@@ -768,55 +765,36 @@ class _ActionTile extends StatelessWidget {
             borderRadius: radius,
             onTap: onTap,
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: big ? 132 : 96),
+              constraints: BoxConstraints(minHeight: big ? 132 : 72),
               child: Padding(
                 padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Wraps at large text sizes: the badge moves under the
-                    // icon instead of overflowing.
-                    Wrap(
-                      alignment: WrapAlignment.spaceBetween,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: [
-                        busy
-                            ? SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.4,
-                                  color: fg,
-                                ),
-                              )
-                            : Icon(icon, color: fg, size: big ? 28 : 24),
-                        if (badge != null)
-                          StatusPill(
-                            label: badge!,
-                            foreground: palette.warning,
-                            background: palette.warningContainer,
-                          ),
-                      ],
-                    ),
-                    SizedBox(height: big ? 22 : 12),
-                    Text(
-                      title,
-                      style:
-                          (big
-                                  ? theme.textTheme.titleLarge
-                                  : theme.textTheme.titleSmall)
-                              ?.copyWith(color: fg),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall?.copyWith(color: muted),
-                    ),
-                  ],
-                ),
+                child: big
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          busy
+                              ? SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.4,
+                                    color: fg,
+                                  ),
+                                )
+                              : Icon(icon, color: fg, size: 28),
+                          const SizedBox(height: 22),
+                          labels,
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Icon(icon, color: fg, size: 24),
+                          const SizedBox(width: 14),
+                          Expanded(child: labels),
+                          Icon(Icons.chevron_right_rounded, color: muted),
+                        ],
+                      ),
               ),
             ),
           ),

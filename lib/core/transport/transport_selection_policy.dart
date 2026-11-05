@@ -2,6 +2,7 @@ import 'package:vayu/core/battery/battery_snapshot.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/domain/identity/device_capabilities.dart';
 
 /// Configurable decision policy and multi-criteria scoring algorithm for Smart Transport Selection.
@@ -88,7 +89,12 @@ class TransportSelectionPolicy {
     factors['payloadSuitability'] = payloadScore;
 
     // 2.2 LAN Preference Score (0 to weightLanPreference)
-    final lanScore = scoreLanPreference(transport, request.targetPeer);
+    final lanScore = scoreLanPreference(
+      transport,
+      request.targetPeer,
+      payloadType: request.payloadType,
+      payloadSizeBytes: request.payloadSizeBytes,
+    );
     factors['lanPreference'] = lanScore;
 
     // 2.3 Battery Conservation Score (0 to weightBattery)
@@ -148,7 +154,8 @@ class TransportSelectionPolicy {
 
     // Check transport-specific prerequisites
     if (transport == TransportType.lan) {
-      final endpoint = request.targetPeer.endpointAddress;
+      final endpoint =
+          request.targetPeer.lanEndpoint ?? request.targetPeer.endpointAddress;
       if (endpoint == null || !endpoint.contains(':')) {
         return 'missing_valid_lan_endpoint';
       }
@@ -222,10 +229,19 @@ class TransportSelectionPolicy {
   }
 
   /// Scores LAN preference when valid endpoint and connectivity are verified.
-  double scoreLanPreference(TransportType transport, DiscoveredPeer peer) {
+  double scoreLanPreference(
+    TransportType transport,
+    DiscoveredPeer peer, {
+    PayloadType? payloadType,
+    int payloadSizeBytes = 0,
+  }) {
     if (transport != TransportType.lan) return 0.0;
+    if (payloadType == PayloadType.message &&
+        payloadSizeBytes <= bleOptimalPayloadBytes) {
+      return 0.0;
+    }
 
-    final endpoint = peer.endpointAddress;
+    final endpoint = peer.lanEndpoint ?? peer.endpointAddress;
     if (endpoint != null &&
         endpoint.contains(':') &&
         peer.availableTransports.contains(TransportType.lan)) {

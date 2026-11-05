@@ -22,6 +22,7 @@ import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/transfer/batch_payloads.dart';
 import 'package:vayu/domain/transfer/payload_destination.dart';
 import 'package:vayu/domain/transfer/payload_source.dart';
+import 'package:vayu/domain/transfer/content_uri_payload_source.dart';
 import 'package:vayu/domain/transfer/transfer_packet_payloads.dart';
 
 /// High-level coordinator orchestrating the full Phase 9 file sharing experience:
@@ -641,6 +642,9 @@ class FileSharingCoordinator {
     var transferStarted = false;
 
     try {
+      if (declaredSize <= 0 && source is ContentUriPayloadSource) {
+        declaredSize = await source.resolveLength();
+      }
       // 1. Connect or reuse existing authenticated SecureSession via Smart Transport Selection
       final session = await transportSelector.connectWithSmartSelection(
         peer,
@@ -783,15 +787,26 @@ class FileSharingCoordinator {
     String? receiveTicket, [
     void Function(TransferBatch batch)? onBatch,
   ]) async {
+    var selectedPayloadSize = 0;
+    for (final document in documents) {
+      if (document.sizeBytes > 0) {
+        selectedPayloadSize += document.sizeBytes;
+        continue;
+      }
+      final source = filePickerService.createPayloadSource(document);
+      if (source is ContentUriPayloadSource) {
+        selectedPayloadSize += await source.resolveLength().catchError(
+          (_) => 0,
+        );
+      }
+      await source.close();
+    }
     // Connect or reuse existing authenticated session once for the entire batch
     final session = await transportSelector.connectWithSmartSelection(
       peer,
       request: TransportSelectionRequest(
         targetPeer: peer,
-        payloadSizeBytes: documents.fold<int>(
-          0,
-          (sum, d) => sum + (d.sizeBytes > 0 ? d.sizeBytes : 0),
-        ),
+        payloadSizeBytes: selectedPayloadSize,
       ),
     );
 
@@ -821,6 +836,9 @@ class FileSharingCoordinator {
     _notifyTransfersChanged();
 
     if (offerAsBatch) {
+      // The receiver may take a while to answer; the session must not be torn
+      // down by the countdown of an earlier transfer meanwhile.
+      sessionLifecyclePolicy.markTransferStarted(session.sessionId);
       try {
         await transferEngine.offerBatch(
           targetDeviceId: peer.deviceId,
@@ -849,6 +867,8 @@ class FileSharingCoordinator {
         batch.error = e;
         _notifyTransfersChanged();
         rethrow;
+      } finally {
+        sessionLifecyclePolicy.markTransferEnded(session.sessionId);
       }
       batch.state = TransferBatchState.transferring;
       _notifyTransfersChanged();
@@ -1194,11 +1214,27 @@ class FileSharingCoordinator {
     _notifyTransfersChanged();
   }
 
+  // Route of each task's own session: a phone can hold a Bluetooth control
+  // session and a Wi-Fi session at once, so looking up by peer can be wrong.
+  final Map<String, String> _taskRoutes = {};
+
+  /// How this transfer travels (`lan`, `wifiDirect`, `ble`, `relay`), if known.
+  String? routeOfTask(String transferId) => _taskRoutes[transferId];
+
   void _trackTask(
     TransferTask task,
     String sessionId, {
     String? mediaScanPath,
   }) {
+    final route = secureSessionManager
+        .getSession(sessionId)
+        ?.connectionSession
+        .info
+        .routeName;
+    if (route != null) {
+      if (_taskRoutes.length >= 200) _taskRoutes.remove(_taskRoutes.keys.first);
+      _taskRoutes[task.transferId] = route;
+    }
     // Saving may move a file to the next free name; report where it is.
     String? savedPath() {
       final destination = task is InboundTransferTask ? task.destination : null;
@@ -1343,6 +1379,7 @@ class FileSharingCoordinator {
             failureKind: error == null ? null : transferFailureKind(error).name,
             finishedAt: DateTime.now(),
             savedPath: error == null ? savedPath : null,
+            route: _taskRoutes[task.transferId],
           ),
         )
         .ignore();

@@ -60,6 +60,20 @@ abstract class PlatformService {
   /// Opens [page] in system settings. False if no page could be opened.
   Future<bool> openSettingsPage(SettingsPage page) async => false;
 
+  /// Keeps the app running with the screen off, to receive chat messages.
+  /// Android only allows starting this while the app is on screen.
+  Future<bool> setChatPresenceEnabled(bool enabled) async => false;
+
+  /// Keeps the CPU awake for a moment to handle something that just arrived.
+  Future<void> holdAwakeBriefly() async {}
+
+  /// Sends the app to the background without closing it. False if it could
+  /// not, and the caller should close it normally.
+  Future<bool> moveToBackground() async => false;
+
+  /// Shows a privacy-preserving notification for an incoming chat message.
+  Future<bool> showChatNotification(String peerName) async => false;
+
   /// Opens a verified completed file in the host system's default viewer.
   Future<bool> openFile(String filePath, {String? mimeType}) async => true;
 
@@ -80,6 +94,10 @@ abstract class PlatformService {
   /// Keeps the screen from turning off while [on] (screens that answer NFC
   /// taps: Android stops answering once the screen is off).
   Future<void> keepScreenOn(bool on) async {}
+
+  /// Turns this app's screen up to full brightness while [on] (a code being
+  /// scanned outdoors); the user's own brightness returns afterwards.
+  Future<void> fullBrightness(bool on) async {}
 
   /// Backward-compatible boolean permission requester.
   Future<bool> requestPermissions();

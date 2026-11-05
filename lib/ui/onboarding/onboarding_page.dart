@@ -10,7 +10,7 @@ import 'package:vayu/ui/widgets/vayu_mark.dart';
 /// what Vayu is, privacy, and setting up a profile (just a name).
 ///
 /// The profile can be skipped; home then shows a small "Set up your profile"
-/// banner. Permissions are not asked here, only when they are first needed.
+/// banner. Permissions are not asked here: Home asks once it opens.
 class OnboardingPage extends StatefulWidget {
   final AppContainer container;
 

@@ -17,6 +17,10 @@ class TransportSelectionRequest {
   /// Optional explicit caller preference override.
   final TransportType? preferredTransport;
 
+  /// Local source address for a route-specific TCP connection, when known.
+  /// Used after Wi-Fi Direct joins so the socket originates on the P2P link.
+  final String? localSourceAddress;
+
   /// Whether device battery and power state should be considered during scoring.
   final bool batteryAware;
 
@@ -25,6 +29,7 @@ class TransportSelectionRequest {
     this.payloadSizeBytes = 0,
     this.payloadType,
     this.preferredTransport,
+    this.localSourceAddress,
     this.batteryAware = true,
   });
 

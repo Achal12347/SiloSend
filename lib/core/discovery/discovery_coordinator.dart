@@ -105,8 +105,12 @@ class DiscoveryCoordinator {
   Stream<DiscoveryOperationalState> get operationalStateStream =>
       _operationalStateController.stream;
 
-  /// Starts discovery scanning across all configured transport services.
-  Future<void> startDiscovery() async {
+  /// Starts discovery scanning on [transports] (every service when null).
+  ///
+  /// Only usable radios may start: on Android 8-11 a Bluetooth scan started
+  /// without permission appears to succeed, so it counted as running and was
+  /// not restarted once permission was granted.
+  Future<void> startDiscovery({Set<TransportType>? transports}) async {
     if (_status == DiscoveryStatus.active) return;
 
     _updateStatus(DiscoveryStatus.starting);
@@ -119,6 +123,9 @@ class DiscoveryCoordinator {
     Object? lastError;
     _activeTransports.clear();
     for (final service in services) {
+      if (transports != null && !transports.contains(service.transportType)) {
+        continue;
+      }
       try {
         await service.startDiscovery();
         startedCount++;
@@ -186,13 +193,20 @@ class DiscoveryCoordinator {
     AppLogger.info('DiscoveryCoordinator', 'Multi-transport discovery stopped');
   }
 
-  /// Starts advertising local presence across all supported transports.
-  Future<void> startAdvertising(DeviceAdvertisement advertisement) async {
+  /// Starts advertising local presence on [transports] (every service when
+  /// null).
+  Future<void> startAdvertising(
+    DeviceAdvertisement advertisement, {
+    Set<TransportType>? transports,
+  }) async {
     AppLogger.info(
       'DiscoveryCoordinator',
       'Starting multi-transport advertising...',
     );
     for (final service in services) {
+      if (transports != null && !transports.contains(service.transportType)) {
+        continue;
+      }
       try {
         await service.startAdvertising(advertisement);
       } catch (e) {

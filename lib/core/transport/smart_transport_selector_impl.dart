@@ -6,6 +6,7 @@ import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/security_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
 import 'package:vayu/core/contracts/transport_selector_contract.dart';
+import 'package:vayu/core/contracts/connection_attempt_progress.dart';
 import 'package:vayu/core/connection/connection_manager.dart';
 import 'package:vayu/core/connection/connection_session.dart';
 import 'package:vayu/core/connection/link_upgrade_service.dart';
@@ -35,6 +36,13 @@ class SmartTransportSelectorImpl implements TransportSelector {
   /// Whether this phone has Wi-Fi Direct (the platform capability probe
   /// does not report it).
   final Future<bool> Function()? wifiDirectSupported;
+  final double? Function(String peerId, TransportType transport)?
+  observedThroughput;
+  final void Function(ConnectionAttemptProgress progress)? onConnectionProgress;
+
+  /// Testing switch in Diagnostics: skip the shared Wi-Fi, so Wi-Fi Direct can
+  /// be tried between phones that are on the same network.
+  final bool Function()? avoidSharedWifi;
 
   SmartTransportSelectorImpl({
     required this.platformService,
@@ -44,6 +52,9 @@ class SmartTransportSelectorImpl implements TransportSelector {
     this.policy = const TransportSelectionPolicy(),
     this.linkUpgrade,
     this.wifiDirectSupported,
+    this.observedThroughput,
+    this.onConnectionProgress,
+    this.avoidSharedWifi,
   });
 
   Future<DeviceCapabilities> _localCapabilities() async {
@@ -59,14 +70,11 @@ class SmartTransportSelectorImpl implements TransportSelector {
     );
   }
 
-  /// Route order for anything bigger than a small message (owner decision,
-  /// 2026-10-19): Wi-Fi Direct handed over from Bluetooth first, even when
-  /// both phones share a router (the phones then talk directly, on 5 GHz
-  /// when both can, instead of every byte crossing a 2.4 GHz router twice);
-  /// the shared router when Wi-Fi Direct fails; Bluetooth last.
+  /// Prefer an already-discovered LAN route. Wi-Fi Direct is the high-speed
+  /// fallback when there is no usable shared-network endpoint.
   static int _routeRank(TransportType transport) => switch (transport) {
-    TransportType.wifiDirect => 0,
-    TransportType.lan => 1,
+    TransportType.lan => 0,
+    TransportType.wifiDirect => 1,
     TransportType.ble => 2,
     TransportType.relay => 3,
   };
@@ -109,8 +117,11 @@ class SmartTransportSelectorImpl implements TransportSelector {
       if (a.isAvailable && !b.isAvailable) return -1;
       if (!a.isAvailable && b.isAvailable) return 1;
       if (request.payloadSizeBytes > policy.bleOptimalPayloadBytes) {
-        final route = _routeRank(a.transport)
-            .compareTo(_routeRank(b.transport));
+        final route = _compareLargePayloadRoutes(
+          a.transport,
+          b.transport,
+          request,
+        );
         if (route != 0) return route;
       }
       final cmp = b.score.compareTo(a.score);
@@ -163,6 +174,38 @@ class SmartTransportSelectorImpl implements TransportSelector {
     );
   }
 
+  int _compareLargePayloadRoutes(
+    TransportType a,
+    TransportType b,
+    TransportSelectionRequest request,
+  ) {
+    if ((a == TransportType.lan && b == TransportType.wifiDirect) ||
+        (a == TransportType.wifiDirect && b == TransportType.lan)) {
+      final lanRate = observedThroughput?.call(
+        request.targetPeer.deviceId,
+        TransportType.lan,
+      );
+      final directRate = observedThroughput?.call(
+        request.targetPeer.deviceId,
+        TransportType.wifiDirect,
+      );
+      // Do not switch on one incomplete sample. Until both routes have
+      // measurements, LAN avoids Wi-Fi Direct group-setup latency.
+      if (lanRate != null &&
+          directRate != null &&
+          lanRate > 0 &&
+          directRate > 0) {
+        const setupCostSeconds = 8.0;
+        final bytes = request.payloadSizeBytes.toDouble();
+        final lanSeconds = bytes / lanRate;
+        final directSeconds = setupCostSeconds + bytes / directRate;
+        final result = lanSeconds.compareTo(directSeconds);
+        if (result != 0) return a == TransportType.lan ? result : -result;
+      }
+    }
+    return _routeRank(a).compareTo(_routeRank(b));
+  }
+
   /// Reaches a phone through other phones when no direct route works
   /// (Phase 12 mesh); null where there is no mesh.
   Future<SecureSession> Function(DiscoveredPeer peer)? meshFallback;
@@ -176,12 +219,26 @@ class SmartTransportSelectorImpl implements TransportSelector {
     TransportSelectionRequest? request,
     Duration? timeout,
   }) async {
+    onConnectionProgress?.call(
+      ConnectionAttemptProgress(
+        peerId: peer.deviceId,
+        peerName: peer.displayName,
+        stage: ConnectionAttemptStage.evaluating,
+      ),
+    );
     try {
       return await connectDirectOnly(peer, request: request, timeout: timeout);
     } catch (direct) {
       final mesh = meshFallback;
       if (mesh == null ||
           direct is LinkUpgradeException && direct.declined != null) {
+        onConnectionProgress?.call(
+          ConnectionAttemptProgress(
+            peerId: peer.deviceId,
+            peerName: peer.displayName,
+            stage: ConnectionAttemptStage.failed,
+          ),
+        );
         rethrow;
       }
       AppLogger.info(
@@ -189,8 +246,24 @@ class SmartTransportSelectorImpl implements TransportSelector {
         'No direct route to ${peer.displayName}; trying through nearby phones',
       );
       try {
-        return await mesh(peer);
+        final relayed = await mesh(peer);
+        onConnectionProgress?.call(
+          ConnectionAttemptProgress(
+            peerId: peer.deviceId,
+            peerName: peer.displayName,
+            stage: ConnectionAttemptStage.connected,
+            transport: TransportType.relay,
+          ),
+        );
+        return relayed;
       } catch (meshError) {
+        onConnectionProgress?.call(
+          ConnectionAttemptProgress(
+            peerId: peer.deviceId,
+            peerName: peer.displayName,
+            stage: ConnectionAttemptStage.failed,
+          ),
+        );
         final noDirectRoute =
             direct is NoViableTransportException &&
             direct.attemptErrors.isEmpty;
@@ -209,6 +282,22 @@ class SmartTransportSelectorImpl implements TransportSelector {
   }) async {
     final effectiveRequest =
         request ?? TransportSelectionRequest(targetPeer: peer);
+    void report(ConnectionAttemptStage stage, {TransportType? transport}) {
+      onConnectionProgress?.call(
+        ConnectionAttemptProgress(
+          peerId: peer.deviceId,
+          peerName: peer.displayName,
+          stage: stage,
+          transport: transport,
+        ),
+      );
+    }
+
+    report(ConnectionAttemptStage.evaluating);
+
+    final avoidLan = avoidSharedWifi?.call() ?? false;
+    bool onSharedWifi(SecureSessionImpl s) =>
+        s.connectionSession.info.routeName == 'lan';
 
     // An established Wi-Fi session with this phone is the best route there
     // is, even when the phone has no address of its own here (it connected
@@ -216,7 +305,9 @@ class SmartTransportSelectorImpl implements TransportSelector {
     final live = secureSessionManager.getSessionForPeer(peer.deviceId);
     if (live != null &&
         live.state == SessionState.secured &&
-        live.connectionSession.connection.type == TransportType.lan) {
+        live.connectionSession.connection.type == TransportType.lan &&
+        !(avoidLan && onSharedWifi(live))) {
+      report(ConnectionAttemptStage.connected, transport: TransportType.lan);
       return live;
     }
 
@@ -231,6 +322,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
     // with this peer is reused.
     if (existingSecure != null &&
         existingSecure.state == SessionState.secured &&
+        !(avoidLan && onSharedWifi(existingSecure)) &&
         (existingType == selectionResult.selectedTransport ||
             (selectionResult.selectedTransport == TransportType.wifiDirect &&
                 existingType == TransportType.lan))) {
@@ -238,20 +330,34 @@ class SmartTransportSelectorImpl implements TransportSelector {
         'SmartTransportSelector',
         'Reusing existing authenticated SecureSession with ${peer.displayName} on ${selectionResult.selectedTransport.name}',
       );
+      report(
+        ConnectionAttemptStage.connected,
+        transport: selectionResult.selectedTransport,
+      );
       return existingSecure;
     }
 
     // Prioritized list of transports to attempt: primary + fallback chain
+    // An address inside a Wi-Fi Direct group is not the shared Wi-Fi.
+    final lanAddress = peer.lanEndpoint ?? peer.endpointAddress;
+    final skipLan =
+        avoidLan && !(lanAddress?.startsWith('192.168.49.') ?? false);
     final candidatesToAttempt = [
       selectionResult.selectedTransport,
       ...selectionResult.fallbackChain,
-    ];
+    ].where((t) => !(skipLan && t == TransportType.lan)).toList();
 
     final attemptErrors = <String>[];
     // A reason the peer gave is more useful to the user than "all failed".
     LinkUpgradeException? declined;
 
     for (final transport in candidatesToAttempt) {
+      report(
+        attemptErrors.isEmpty
+            ? ConnectionAttemptStage.connecting
+            : ConnectionAttemptStage.fallback,
+        transport: transport,
+      );
       AppLogger.info(
         'SmartTransportSelector',
         'Attempting connection to ${peer.displayName} via ${transport.name}...',
@@ -259,15 +365,21 @@ class SmartTransportSelectorImpl implements TransportSelector {
 
       ConnectionSession? transportSession;
       UpgradedLink? upgraded;
+      var stage = 'physical_connect';
       try {
         if (transport == TransportType.wifiDirect) {
+          stage = 'ble_handoff';
+          report(ConnectionAttemptStage.handingOff, transport: transport);
           upgraded = await _joinWifiDirect(peer, timeout);
+          stage = 'wifi_direct_tcp_connect';
+          report(ConnectionAttemptStage.joining, transport: transport);
           transportSession = await _connectInGroup(peer, upgraded, timeout);
         } else {
           transportSession = await _establishTransportConnection(
             peer: peer,
             transport: transport,
             timeout: timeout,
+            sourceAddress: effectiveRequest.localSourceAddress,
           );
         }
 
@@ -277,6 +389,12 @@ class SmartTransportSelectorImpl implements TransportSelector {
         );
 
         // Elevate transport connection to authenticated SecureSession
+        stage = 'secure_handshake';
+        report(ConnectionAttemptStage.securing, transport: transport);
+        AppLogger.info(
+          'TransportDiagnostic',
+          'stage=secure_handshake_started transport=${transport.name}',
+        );
         final secureSession = await secureSessionManager
             .secureOutboundConnection(
               transportSession,
@@ -291,8 +409,13 @@ class SmartTransportSelectorImpl implements TransportSelector {
         if (upgraded != null) {
           linkUpgrade!.leaveWhenClosed(transportSession, upgraded);
         }
+        report(ConnectionAttemptStage.connected, transport: transport);
         return secureSession;
       } catch (e) {
+        AppLogger.warning(
+          'TransportDiagnostic',
+          'stage=$stage result=failed errorType=${e.runtimeType}',
+        );
         if (e is LinkUpgradeException && e.declined != null) declined = e;
         if (upgraded != null) {
           try {
@@ -317,6 +440,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
 
     // All primary and fallback attempts exhausted
     if (declined != null) throw declined;
+    report(ConnectionAttemptStage.failed);
     throw NoViableTransportException(
       'All candidate transports failed for peer ${peer.displayName} (${peer.deviceId})',
       candidateScores: selectionResult.rankedCandidates,
@@ -333,16 +457,37 @@ class SmartTransportSelectorImpl implements TransportSelector {
     Duration? timeout,
   ) async {
     final until = DateTime.now().add(groupConnectWindow);
+    var attempt = 0;
     while (true) {
+      attempt++;
       try {
-        return await connectionManager.connectToLanPeer(
+        AppLogger.info(
+          'TransportDiagnostic',
+          'stage=wifi_direct_tcp_connect_started attempt=$attempt '
+              'host=${link.host} port=${link.port} '
+              'localAddressPresent=${link.localAddress != null}',
+        );
+        final connection = await connectionManager.connectToLanPeer(
           remoteAddress: link.host,
           remotePort: link.port,
           targetDeviceId: peer.deviceId,
           timeout: timeout ?? const Duration(seconds: 5),
+          sourceAddress: link.localAddress,
         );
+        AppLogger.info(
+          'TransportDiagnostic',
+          'stage=wifi_direct_tcp_connected attempt=$attempt remote=${link.host}:${link.port}',
+        );
+        return connection;
       } on Exception catch (e) {
-        if (DateTime.now().isAfter(until)) rethrow;
+        if (DateTime.now().isAfter(until)) {
+          AppLogger.error(
+            'TransportDiagnostic',
+            'stage=wifi_direct_tcp_connect_failed attempts=$attempt '
+                'errorType=${e.runtimeType} host=${link.host} port=${link.port}',
+          );
+          rethrow;
+        }
         AppLogger.info(
           'SmartTransportSelector',
           'Group joined but ${link.host} not reachable yet ($e); retrying',
@@ -428,6 +573,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
     required DiscoveredPeer peer,
     required TransportType transport,
     Duration? timeout,
+    String? sourceAddress,
   }) async {
     switch (transport) {
       case TransportType.lan:
@@ -446,6 +592,7 @@ class SmartTransportSelectorImpl implements TransportSelector {
           remotePort: port,
           targetDeviceId: peer.deviceId,
           timeout: timeout,
+          sourceAddress: sourceAddress,
         );
 
       case TransportType.ble:

@@ -179,7 +179,10 @@ void main() {
           );
 
       final permService = BleDiscoveryService(localDeviceId: localId);
-      await permService.startDiscovery();
+      await expectLater(
+        permService.startDiscovery(),
+        throwsA(isA<PlatformException>()),
+      );
 
       expect(permService.isScanning, isFalse);
       permService.dispose();

@@ -178,6 +178,7 @@ void main() {
         settingsStorage: InMemorySettingsStorage(
           const UserSettings(
             onboardingVersion: UserSettings.currentOnboardingVersion,
+            baselinePermissionsAsked: true,
           ),
         ),
       );
@@ -228,8 +229,13 @@ void main() {
   testWidgets('Settings (with the relay switch) at 2x text', (tester) async {
     await pump(tester, const SizedBox());
     await show(tester, settings.SettingsPage(container: container));
-    await scrollAll(tester);
+    await tester.scrollUntilVisible(
+      find.text('Help nearby phones connect'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Help nearby phones connect'), findsOneWidget);
+    await scrollAll(tester);
     expect(tester.takeException(), isNull);
   });
 

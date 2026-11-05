@@ -13,6 +13,7 @@ import 'package:vayu/ui/friendly_error.dart';
 import 'package:vayu/ui/transfer/selected_items_page.dart' show fileIconFor;
 import 'package:vayu/ui/transfer/transfer_detail_page.dart';
 import 'package:vayu/ui/widgets/vayu_feedback.dart';
+import 'package:vayu/ui/widgets/connection_attempt_card.dart';
 
 /// What one host shares: choose items and download them. The files arrive
 /// as an ordinary transfer, accepted because this phone asked for them.
@@ -304,7 +305,17 @@ class _HostBrowsePageState extends State<HostBrowsePage> {
               ),
             )
           : null,
-      body: SafeArea(child: body),
+      body: SafeArea(
+        child: Column(
+          children: [
+            ConnectionAttemptCard(
+              container: widget.container,
+              peerId: widget.host.deviceId,
+            ),
+            Expanded(child: body),
+          ],
+        ),
+      ),
     );
   }
 }

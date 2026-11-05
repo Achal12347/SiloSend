@@ -91,8 +91,7 @@ class ChatsPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Start one with a nearby phone. Messages are '
-                          'encrypted and need no internet.',
+                          'Start one with a nearby phone.',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
@@ -164,16 +163,6 @@ class RequestsPage extends StatelessWidget {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
-                  child: Text(
-                    'They will not see that you read their message until you '
-                    'open the chat.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
                 Card(
                   child: Column(
                     children: [

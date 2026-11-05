@@ -67,6 +67,18 @@ Every feature above is tested automatically; testing on real phones is in progre
 
 ---
 
+## Versioning
+
+Versions follow `MAJOR.MINOR.PATCH`, with a stage until the first stable release, and start at **0.1.0-alpha**:
+
+- **Stage:** `alpha` (features still changing), then `beta` (feature-complete, being tested), then none for a stable release (1.0.0).
+- **MINOR** goes up for new features, **PATCH** for fixes.
+- **Build number:** the part after `+` in `pubspec.yaml` (`0.1.0-alpha+1`) goes up by one for every build given to anyone, because Android and the Play Store require it.
+
+When releasing, change `version` in `pubspec.yaml` and `appVersion` in `lib/core/constants/app_constants.dart`. A test fails if they differ.
+
+---
+
 ## Building a release
 
 Phones download only the build for their processor when Vayu is published as an App Bundle; obfuscation makes the code harder to reverse-engineer and slightly smaller. Keep the symbols folder to read crash reports.

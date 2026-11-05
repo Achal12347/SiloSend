@@ -65,6 +65,10 @@ abstract class ChatFileTransport {
 /// request until this user opens it or replies. Receipts: "delivered" when
 /// a message arrives, "read" once the conversation is opened (never for a
 /// request still unopened).
+///
+/// Someone this user has not accepted reaches them only while the app is on
+/// screen: what they send meanwhile waits in memory, without a notification
+/// or a receipt, until the app is opened. Accepted chats arrive at any time.
 class ChatService {
   final String Function() localDeviceId;
 
@@ -93,6 +97,12 @@ class ChatService {
   /// while the chat is in use).
   void Function(SecureSession session)? onActivity;
 
+  /// Called for a newly received message when its conversation is not open.
+  final Future<void> Function(String peerName)? onIncomingMessage;
+
+  /// Whether this app is on screen.
+  final bool Function() isInForeground;
+
   /// Messages kept per conversation (oldest dropped first).
   static const int maxMessagesPerConversation = 1000;
 
@@ -102,7 +112,13 @@ class ChatService {
   static const int maxRequests = 50;
   static const int maxMessagesPerRequest = 100;
 
+  /// Messages from people not yet accepted, kept until the app is opened.
+  /// Any phone can make up new identities, so this cannot grow without end.
+  static const int maxHeld = 200;
+
   final Map<String, Conversation> _byPeer = {};
+  final List<({SecureSession session, VayuPacket packet})> _held = [];
+  bool _replayingHeld = false;
   final StreamController<List<Conversation>> _changes =
       StreamController<List<Conversation>>.broadcast();
   final Random _random = Random.secure();
@@ -119,9 +135,12 @@ class ChatService {
     this.supportsChatFiles = _noFiles,
     required this.storage,
     this.files,
+    this.onIncomingMessage,
+    this.isInForeground = _alwaysForeground,
   });
 
   static bool _noFiles(SecureSession _) => false;
+  static bool _alwaysForeground() => true;
 
   /// Sender side: the documents of offers still waiting, by message ID.
   /// Kept in memory only: after a restart the offer is answered "no longer
@@ -169,23 +188,7 @@ class ChatService {
     required Stream<SecureSession> newSessions,
   }) {
     _packets?.cancel();
-    _packets = packets.listen((event) {
-      final (:session, :packet) = event;
-      switch (packet.packetType) {
-        case PacketType.chatMessage:
-          _onMessage(session, packet);
-        case PacketType.chatDeliveryAck:
-          _onAck(session, packet);
-        case PacketType.chatFileOffer:
-          _onFileOffer(session, packet);
-        case PacketType.chatFileAnswer:
-          _onFileAnswer(session, packet).catchError((Object e) {
-            AppLogger.warning('Chat', 'Handling a file answer failed: $e');
-          });
-        default:
-          break;
-      }
-    });
+    _packets = packets.listen(_onPacket);
     _sessions?.cancel();
     _sessions = newSessions.listen(_resendFailed);
     final transport = files;
@@ -195,6 +198,56 @@ class ChatService {
       _arrivedSub = transport.arrived.listen(_onFilesArrived);
       _transfersSub = transport.changes.listen((_) => _checkTransfers());
     }
+  }
+
+  void _onPacket(({SecureSession session, VayuPacket packet}) event) {
+    final (:session, :packet) = event;
+    switch (packet.packetType) {
+      case PacketType.chatMessage:
+      case PacketType.chatFileOffer:
+        if (_mustWaitForApp(session.remoteDeviceId)) {
+          if (_held.length >= maxHeld) _held.removeAt(0);
+          _held.add(event);
+        } else if (packet.packetType == PacketType.chatMessage) {
+          _onMessage(session, packet);
+        } else {
+          _onFileOffer(session, packet);
+        }
+      case PacketType.chatDeliveryAck:
+        _onAck(session, packet);
+      case PacketType.chatFileAnswer:
+        _onFileAnswer(session, packet).catchError((Object e) {
+          AppLogger.warning('Chat', 'Handling a file answer failed: $e');
+        });
+      default:
+        break;
+    }
+  }
+
+  bool _mustWaitForApp(String deviceId) =>
+      !isInForeground() && !(_byPeer[_key(deviceId)]?.accepted ?? false);
+
+  /// The app is on screen again: what new people sent appears now, as message
+  /// requests, and they get their delivery receipts.
+  void appForegrounded() {
+    if (_held.isEmpty) return;
+    final waiting = List.of(_held);
+    _held.clear();
+    _replayingHeld = true;
+    try {
+      waiting.forEach(_onPacket);
+    } finally {
+      _replayingHeld = false;
+    }
+  }
+
+  void _notifyIncoming(SecureSession session) {
+    // Held messages appear while the user is looking at the app.
+    if (_replayingHeld || _visiblePeer == _key(session.remoteDeviceId)) return;
+    final peerName = nameOf(session) ?? 'Nearby phone';
+    onIncomingMessage?.call(peerName).catchError((Object error) {
+      AppLogger.info('Chat', 'Incoming notification was not shown: $error');
+    });
   }
 
   Future<void> dispose() async {
@@ -521,6 +574,7 @@ class ChatService {
               messages: [...?existing?.messages, message],
             ),
       );
+      _notifyIncoming(session);
       // On screen in an accepted chat: take the files now. Otherwise they
       // wait on hold until this user accepts them in the chat.
       final c = _byPeer[_key(peer)];
@@ -653,6 +707,7 @@ class ChatService {
   /// Removes every conversation from this phone only (Your data). Files
   /// already received stay where they were saved.
   void deleteAll() {
+    _held.clear();
     _byPeer.clear();
     _outgoing.clear();
     _emit();
@@ -775,6 +830,7 @@ class ChatService {
               messages: [...?existing?.messages, message],
             ),
       );
+      _notifyIncoming(session);
     }
     _sendAck(session, [payload.id], ChatReceipt.delivered).catchError((
       Object e,

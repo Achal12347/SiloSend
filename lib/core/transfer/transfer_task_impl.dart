@@ -10,6 +10,7 @@ import 'package:vayu/core/contracts/transfer_contract.dart';
 import 'package:vayu/core/logging/app_logger.dart';
 import 'package:vayu/core/security/crypto_service.dart' show AeadClock;
 import 'package:vayu/core/transfer/resumable_transfers.dart';
+import 'package:vayu/core/transfer/transfer_speed_meter.dart';
 import 'package:vayu/core/transfer/transfer_stats.dart';
 import 'package:vayu/domain/models/transfer_models.dart';
 import 'package:vayu/domain/protocol/packet_type.dart';
@@ -118,8 +119,7 @@ class OutboundTransferTask implements TransferTask {
   bool _isDisposed = false;
 
   DateTime? _transferStartTime;
-  int _lastBytesSample = 0;
-  DateTime _lastSampleTime = DateTime.now();
+  final TransferSpeedMeter _speedMeter = TransferSpeedMeter();
   double _currentSpeed = 0.0;
 
   /// Receives a timing summary once the transfer ends (speed diagnostics).
@@ -211,7 +211,6 @@ class OutboundTransferTask implements TransferTask {
     _transferStartTime = DateTime.now();
     _elapsed.start();
     _aeadMicrosAtStart = AeadClock.micros;
-    _lastSampleTime = DateTime.now();
 
     _emitProgress();
 
@@ -795,6 +794,7 @@ class OutboundTransferTask implements TransferTask {
     _elapsed.stop();
     onStats!(
       TransferStats(
+        transferId: transferId,
         outbound: true,
         bytes: succeeded ? metadata.totalBytes : _bytesAcked,
         chunkSize: metadata.chunkSize,
@@ -960,14 +960,7 @@ class OutboundTransferTask implements TransferTask {
     if (_progressController.isClosed) return;
 
     final now = DateTime.now();
-    final elapsedMs = now.difference(_lastSampleTime).inMilliseconds;
-    if (elapsedMs >= 250) {
-      final bytesDelta = _bytesAcked - _lastBytesSample;
-      final instantSpeed = (bytesDelta / (elapsedMs / 1000.0));
-      _currentSpeed = (_currentSpeed * 0.7) + (instantSpeed * 0.3);
-      _lastBytesSample = _bytesAcked;
-      _lastSampleTime = now;
-    }
+    _currentSpeed = _speedMeter.update(_bytesAcked, now);
 
     final remainingBytes = metadata.totalBytes - _bytesAcked;
     final etaSeconds = (_currentSpeed > 0 && remainingBytes > 0)
@@ -1043,8 +1036,7 @@ class InboundTransferTask implements TransferTask {
   bool _isDisposed = false;
 
   DateTime? _transferStartTime;
-  int _lastBytesSample = 0;
-  DateTime _lastSampleTime = DateTime.now();
+  final TransferSpeedMeter _speedMeter = TransferSpeedMeter();
   double _currentSpeed = 0.0;
 
   /// Receives a timing summary once the transfer ends (speed diagnostics).
@@ -1090,7 +1082,6 @@ class InboundTransferTask implements TransferTask {
     _highestContiguousChunkIndex = initialContiguousChunkIndex;
     _bytesReceived = initialBytesReceived;
     _transferStartTime = DateTime.now();
-    _lastSampleTime = DateTime.now();
     _doneCompleter.future.ignore();
   }
 
@@ -1324,6 +1315,7 @@ class InboundTransferTask implements TransferTask {
       _elapsed.stop();
       onStats?.call(
         TransferStats(
+          transferId: transferId,
           outbound: false,
           bytes: _bytesReceived,
           chunkSize: metadata.chunkSize,
@@ -1623,14 +1615,7 @@ class InboundTransferTask implements TransferTask {
     if (_progressController.isClosed) return;
 
     final now = DateTime.now();
-    final elapsedMs = now.difference(_lastSampleTime).inMilliseconds;
-    if (elapsedMs >= 250) {
-      final bytesDelta = _bytesReceived - _lastBytesSample;
-      final instantSpeed = (bytesDelta / (elapsedMs / 1000.0));
-      _currentSpeed = (_currentSpeed * 0.7) + (instantSpeed * 0.3);
-      _lastBytesSample = _bytesReceived;
-      _lastSampleTime = now;
-    }
+    _currentSpeed = _speedMeter.update(_bytesReceived, now);
 
     final remainingBytes = metadata.totalBytes - _bytesReceived;
     final etaSeconds = (_currentSpeed > 0 && remainingBytes > 0)

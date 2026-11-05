@@ -8,6 +8,8 @@ TransferStats _file({
   String? batch = 'b1',
   bool outbound = true,
   bool ok = true,
+  String? peer,
+  String? link,
 }) => TransferStats(
   outbound: outbound,
   bytes: bytes,
@@ -16,6 +18,8 @@ TransferStats _file({
   succeeded: ok,
   finishedAt: end,
   batchId: batch,
+  peerDeviceId: peer,
+  link: link,
 );
 
 void main() {
@@ -59,6 +63,60 @@ void main() {
     }
     expect(log.recent, hasLength(TransferStatsLog.capacity));
   });
+
+  test(
+    'route estimate uses recent successful outbound samples for that peer',
+    () {
+      final t = DateTime(2026, 10, 18);
+      final log = TransferStatsLog()
+        ..record(
+          _file(
+            end: t,
+            seconds: 2,
+            bytes: 20 * 1024 * 1024,
+            peer: 'peer-a',
+            link: 'lan',
+          ),
+        )
+        ..record(
+          _file(
+            end: t,
+            seconds: 1,
+            bytes: 10 * 1024 * 1024,
+            peer: 'peer-a',
+            link: 'lan',
+          ),
+        )
+        ..record(
+          _file(
+            end: t,
+            seconds: 1,
+            outbound: false,
+            bytes: 50 * 1024 * 1024,
+            peer: 'peer-a',
+            link: 'wifiDirect',
+          ),
+        )
+        ..record(
+          _file(
+            end: t,
+            seconds: 1,
+            bytes: 50 * 1024 * 1024,
+            peer: 'peer-b',
+            link: 'lan',
+          ),
+        );
+
+      expect(
+        log.estimatedThroughput(peerDeviceId: 'PEER-A', link: 'lan'),
+        closeTo(10 * 1024 * 1024, 1),
+      );
+      expect(
+        log.estimatedThroughput(peerDeviceId: 'peer-a', link: 'wifiDirect'),
+        isNull,
+      );
+    },
+  );
 
   test('the environment is attached after the transfer is recorded', () async {
     final log = TransferStatsLog()

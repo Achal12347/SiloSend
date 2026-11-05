@@ -41,7 +41,7 @@ class IncomingCardWatcher extends StatefulWidget {
 }
 
 class _IncomingCardWatcherState extends State<IncomingCardWatcher> {
-  final List<StreamSubscription<Uint8List>> _subs = [];
+  final List<StreamSubscription<Object?>> _subs = [];
   final List<Uint8List> _queue = [];
   bool _showing = false;
   Uint8List? _lastCard;
@@ -66,6 +66,14 @@ class _IncomingCardWatcherState extends State<IncomingCardWatcher> {
     const inbox = NfcCardInbox();
     _subs
       ..add(inbox.cards.listen(_onCard))
+      ..add(
+        inbox.tapHints.listen((_) {
+          showVayuNotice(
+            null,
+            'To send, choose your files first, then touch the phones on the Send to screen.',
+          );
+        }),
+      )
       ..add(widget.container.nfcPairingService.onCardReceived.listen(_onCard));
     final pending = await inbox.takePending();
     if (pending != null) _onCard(pending);

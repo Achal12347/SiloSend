@@ -74,6 +74,17 @@ class UserSettings {
   /// phones (Phase 12 mesh). Off unless the user turns it on.
   final bool relayEnabled;
 
+  /// Keep nearby BLE discovery active in the background so existing chat
+  /// conversations can receive messages. Users may turn this off to save
+  /// battery.
+  final bool chatListeningEnabled;
+
+  /// The baseline permission sheet was shown on Home (once per install).
+  final bool baselinePermissionsAsked;
+
+  /// Notifications were offered on opening Chats (once per install).
+  final bool chatNotificationsAsked;
+
   /// Bump to show onboarding again after a meaningful change.
   static const int currentOnboardingVersion = 1;
 
@@ -85,6 +96,9 @@ class UserSettings {
     this.onboardingVersion = 0,
     this.profilePromptDismissed = false,
     this.relayEnabled = false,
+    this.chatListeningEnabled = true,
+    this.baselinePermissionsAsked = false,
+    this.chatNotificationsAsked = false,
   });
 
   bool get needsOnboarding => onboardingVersion < currentOnboardingVersion;
@@ -97,6 +111,9 @@ class UserSettings {
     int? onboardingVersion,
     bool? profilePromptDismissed,
     bool? relayEnabled,
+    bool? chatListeningEnabled,
+    bool? baselinePermissionsAsked,
+    bool? chatNotificationsAsked,
   }) {
     return UserSettings(
       batterySaverMode: batterySaverMode ?? this.batterySaverMode,
@@ -107,6 +124,11 @@ class UserSettings {
       profilePromptDismissed:
           profilePromptDismissed ?? this.profilePromptDismissed,
       relayEnabled: relayEnabled ?? this.relayEnabled,
+      chatListeningEnabled: chatListeningEnabled ?? this.chatListeningEnabled,
+      baselinePermissionsAsked:
+          baselinePermissionsAsked ?? this.baselinePermissionsAsked,
+      chatNotificationsAsked:
+          chatNotificationsAsked ?? this.chatNotificationsAsked,
     );
   }
 
@@ -118,6 +140,9 @@ class UserSettings {
     'onboardingVersion': onboardingVersion,
     if (profilePromptDismissed) 'profilePromptDismissed': true,
     if (relayEnabled) 'relayEnabled': true,
+    'chatListeningEnabled': chatListeningEnabled,
+    if (baselinePermissionsAsked) 'baselinePermissionsAsked': true,
+    if (chatNotificationsAsked) 'chatNotificationsAsked': true,
   };
 
   factory UserSettings.fromJson(Map<String, dynamic> json) {
@@ -147,6 +172,9 @@ class UserSettings {
       onboardingVersion: json['onboardingVersion'] as int? ?? 0,
       profilePromptDismissed: json['profilePromptDismissed'] as bool? ?? false,
       relayEnabled: json['relayEnabled'] == true,
+      chatListeningEnabled: json['chatListeningEnabled'] as bool? ?? true,
+      baselinePermissionsAsked: json['baselinePermissionsAsked'] == true,
+      chatNotificationsAsked: json['chatNotificationsAsked'] == true,
     );
   }
 }

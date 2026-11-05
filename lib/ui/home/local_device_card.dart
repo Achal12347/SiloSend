@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
-import 'package:vayu/ui/widgets/rename_device_sheet.dart';
+import 'package:vayu/ui/settings/device_name_page.dart';
 import 'package:vayu/ui/widgets/vayu_widgets.dart';
 
 /// How this phone appears to others, with a rename action.
@@ -56,8 +56,7 @@ class LocalDeviceCard extends StatelessWidget {
                     trailing: IconButton(
                       icon: const Icon(Icons.edit_outlined),
                       tooltip: 'Change name',
-                      onPressed: () =>
-                          _showEditNameDialog(context, displayName),
+                      onPressed: () => DeviceNamePage.open(context, container),
                     ),
                   );
                 },
@@ -66,14 +65,6 @@ class LocalDeviceCard extends StatelessWidget {
           ],
         );
       },
-    );
-  }
-
-  void _showEditNameDialog(BuildContext context, String currentName) {
-    showRenameDeviceSheet(
-      context,
-      container: container,
-      currentName: currentName,
     );
   }
 }

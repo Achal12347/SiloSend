@@ -211,6 +211,50 @@ class SystemPlatformService implements PlatformService {
   }
 
   @override
+  Future<bool> setChatPresenceEnabled(bool enabled) async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('setChatPresence', {
+            'enabled': enabled,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> holdAwakeBriefly() async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('holdAwakeBriefly');
+    } catch (_) {}
+  }
+
+  @override
+  Future<bool> moveToBackground() async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('moveToBackground') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> showChatNotification(String peerName) async {
+    if (!_isActualAndroid) return false;
+    try {
+      return await _channel.invokeMethod<bool>('notifyChatMessage', {
+            'peerName': peerName,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
   Future<bool> requestEnableBluetooth() {
     return _pendingEnableBluetooth ??= _requestEnableBluetoothOnce()
         .whenComplete(() => _pendingEnableBluetooth = null);
@@ -289,6 +333,14 @@ class SystemPlatformService implements PlatformService {
       await _channel.invokeMethod<bool>('keepScreenOn', {
         'on': _screenOnHolds > 0,
       });
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> fullBrightness(bool on) async {
+    if (!_isActualAndroid) return;
+    try {
+      await _channel.invokeMethod<bool>('fullBrightness', {'on': on});
     } catch (_) {}
   }
 

@@ -13,6 +13,25 @@ class WifiDirectGroup {
   const WifiDirectGroup({required this.credentials, this.frequencyMhz = 0});
 }
 
+/// The platform could not join a Wi-Fi Direct group.
+class WifiDirectJoinException implements Exception {
+  final String code;
+  final String message;
+
+  const WifiDirectJoinException(this.code, this.message);
+
+  @override
+  String toString() => '$code: $message';
+}
+
+/// Successful Wi-Fi Direct join details for routing TCP over the P2P interface.
+class WifiDirectJoinResult {
+  final String ownerAddress;
+  final String? localAddress;
+
+  const WifiDirectJoinResult({required this.ownerAddress, this.localAddress});
+}
+
 /// Phone-to-phone Wi-Fi Direct (Android 10+): the fast direct path.
 ///
 /// Used like the hotspot: it puts both phones on one network, then the
@@ -37,11 +56,26 @@ abstract class WifiDirectService {
 
   Future<void> removeGroup();
 
-  /// Joins a group; returns the group owner's address, or null on failure.
+  /// Joins a group and returns its live owner address.
+  /// Throws [WifiDirectJoinException] when the platform reports a join failure.
   Future<String?> connect({
     required String networkName,
     required String passphrase,
   });
+
+  /// Joins and returns both P2P addresses where the platform can report them.
+  /// The default preserves compatibility with platform adapters that only
+  /// return the group owner address.
+  Future<WifiDirectJoinResult?> connectWithDetails({
+    required String networkName,
+    required String passphrase,
+  }) async {
+    final owner = await connect(
+      networkName: networkName,
+      passphrase: passphrase,
+    );
+    return owner == null ? null : WifiDirectJoinResult(ownerAddress: owner);
+  }
 
   Future<void> disconnect();
 }
@@ -63,6 +97,11 @@ class UnsupportedWifiDirectService implements WifiDirectService {
   Future<void> removeGroup() async {}
   @override
   Future<String?> connect({
+    required String networkName,
+    required String passphrase,
+  }) async => null;
+  @override
+  Future<WifiDirectJoinResult?> connectWithDetails({
     required String networkName,
     required String passphrase,
   }) async => null;
@@ -137,6 +176,7 @@ class AndroidWifiDirectService implements WifiDirectService {
       final error = switch (e.code) {
         'PERMISSION_DENIED' => HotspotStartError.permissionDenied,
         'LOCATION_OFF' => HotspotStartError.locationOff,
+        'WIFI_OFF' => HotspotStartError.wifiOff,
         'UNSUPPORTED' => HotspotStartError.unsupported,
         _ => HotspotStartError.failed,
       };
@@ -158,6 +198,15 @@ class AndroidWifiDirectService implements WifiDirectService {
   Future<String?> connect({
     required String networkName,
     required String passphrase,
+  }) async => (await connectWithDetails(
+    networkName: networkName,
+    passphrase: passphrase,
+  ))?.ownerAddress;
+
+  @override
+  Future<WifiDirectJoinResult?> connectWithDetails({
+    required String networkName,
+    required String passphrase,
   }) async {
     // Joining ends a group this phone hosted (one group at a time).
     _hosting = false;
@@ -166,10 +215,28 @@ class AndroidWifiDirectService implements WifiDirectService {
         'connect',
         {'networkName': networkName, 'passphrase': passphrase},
       );
-      return result?['groupOwnerAddress'] as String?;
-    } catch (e) {
-      AppLogger.warning('WifiDirect', 'Joining a group failed: $e');
-      return null;
+      final owner = result?['groupOwnerAddress'] as String?;
+      if (owner == null || owner.isEmpty) {
+        throw const WifiDirectJoinException(
+          'NO_OWNER_ADDRESS',
+          'The group joined without reporting its owner address',
+        );
+      }
+      return WifiDirectJoinResult(
+        ownerAddress: owner,
+        localAddress: result?['localAddress'] as String?,
+      );
+    } on PlatformException catch (e) {
+      AppLogger.warning('WifiDirect', 'Joining a group failed: ${e.code}');
+      throw WifiDirectJoinException(
+        e.code,
+        e.message ?? 'The phone could not join the Wi-Fi Direct group',
+      );
+    } on MissingPluginException {
+      throw const WifiDirectJoinException(
+        'UNSUPPORTED',
+        'Wi-Fi Direct is unavailable on this platform',
+      );
     }
   }
 

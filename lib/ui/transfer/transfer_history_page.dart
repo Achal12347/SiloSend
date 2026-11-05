@@ -198,6 +198,10 @@ Future<void> openHistoryRecord(
     );
     return;
   }
+  if (!record.isContact && isApkFile(path)) {
+    showVayuNotice(null, messenger: messenger, 'Saved in Downloads/Vayu');
+    return;
+  }
   final opened = await container.platformService.openFile(
     path,
     mimeType: record.isContact ? 'text/x-vcard' : record.mimeType,
@@ -248,8 +252,9 @@ class HistoryRow extends StatelessWidget {
     final direction = record.outbound
         ? 'To ${record.peerName}'
         : 'From ${record.peerName}';
+    final route = routeLabel(record.route);
     final status = completed
-        ? formatBytes(record.sizeBytes)
+        ? '${formatBytes(record.sizeBytes)}${route == null ? '' : ' · via $route'}'
         : describeFailureKind(record.failureKind);
 
     return ListTile(

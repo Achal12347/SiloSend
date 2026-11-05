@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:vayu/core/contracts/discovery_contract.dart';
 import 'package:vayu/core/contracts/transport_contract.dart';
-import 'package:vayu/core/permissions/permission_manager.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/ui/home/discovered_peer_card.dart';
 import 'package:vayu/ui/chats/conversation_page.dart';
@@ -70,11 +69,7 @@ class _NearbyDevicesPageState extends State<NearbyDevicesPage> {
         _c.endDiscoveryWindow();
         await _c.stopDiscoveryAndAdvertising();
       } else {
-        final raw = _c.capabilityCoordinator.rawCapabilities;
-        if (raw.isNearbyPermissionNotRequested ||
-            (raw.isNearbyPermissionMissing && !raw.canUseLan)) {
-          await ensureFeature(context, _c, VayuFeature.findPhones);
-        }
+        await ensureFindPhonesIfNeeded(context, _c);
         await _c.startDiscoveryAndAdvertising();
         _c.discoverFor(AppContainer.discoveryWindow);
       }
@@ -82,7 +77,7 @@ class _NearbyDevicesPageState extends State<NearbyDevicesPage> {
       if (mounted) {
         showVayuNotice(
           context,
-          error.toString().replaceFirst('Bad state: ', ''),
+          'Vayu can\'t search right now. Turn on Wi-Fi or Bluetooth and try again.',
           tone: VayuNoticeTone.problem,
         );
       }

@@ -51,6 +51,16 @@ enum LinkUpgradeDeclineReason {
       );
 }
 
+/// What the answering phone hosts for the hand-over.
+enum LinkUpgradeKind {
+  /// A Wi-Fi Direct group (Android 10+ host).
+  wifiDirect,
+
+  /// A phone-hosted local-only hotspot: hosts without Wi-Fi Direct
+  /// (Android 8-9) still move a Bluetooth session onto Wi-Fi this way.
+  hotspot,
+}
+
 /// The answer (packet 0x41): the group to join and where Vayu listens on it,
 /// or why there is none. Travels only inside the encrypted session, so the
 /// passphrase is never visible to anyone else.
@@ -65,6 +75,9 @@ class LinkUpgradeResponse {
   /// Channel of the group, for diagnostics (0 when unknown).
   final int frequencyMhz;
 
+  /// Absent on the wire for a Wi-Fi Direct group (what older Vayu sends).
+  final LinkUpgradeKind kind;
+
   const LinkUpgradeResponse.accepted({
     required this.requestId,
     required String this.networkName,
@@ -72,6 +85,7 @@ class LinkUpgradeResponse {
     required String this.hostAddress,
     required int this.port,
     this.frequencyMhz = 0,
+    this.kind = LinkUpgradeKind.wifiDirect,
   }) : declined = null;
 
   const LinkUpgradeResponse.declined({
@@ -81,7 +95,8 @@ class LinkUpgradeResponse {
        passphrase = null,
        hostAddress = null,
        port = null,
-       frequencyMhz = 0;
+       frequencyMhz = 0,
+       kind = LinkUpgradeKind.wifiDirect;
 
   bool get isAccepted => declined == null;
 
@@ -96,6 +111,7 @@ class LinkUpgradeResponse {
                 'host': hostAddress,
                 'port': port,
                 'mhz': frequencyMhz,
+                if (kind == LinkUpgradeKind.hotspot) 'kind': kind.name,
               }
             : {'id': requestId, 'declined': declined!.name},
       ),
@@ -123,7 +139,11 @@ class LinkUpgradeResponse {
     final port = json['port'];
     if (ssid is! String ||
         ssid.isEmpty ||
+        utf8.encode(ssid).length > 32 ||
         pass is! String ||
+        pass.length < 8 ||
+        pass.length > 63 ||
+        !pass.codeUnits.every((unit) => unit >= 0x20 && unit <= 0x7e) ||
         host is! String ||
         InternetAddressCheck.parseIpv4(host) == null ||
         port is! int ||
@@ -138,6 +158,9 @@ class LinkUpgradeResponse {
       hostAddress: host,
       port: port,
       frequencyMhz: json['mhz'] is int ? json['mhz'] as int : 0,
+      kind: json['kind'] == LinkUpgradeKind.hotspot.name
+          ? LinkUpgradeKind.hotspot
+          : LinkUpgradeKind.wifiDirect,
     );
   }
 }

@@ -79,9 +79,8 @@ void main() {
       );
 
       // 2. Hero Section
-      // Four actions replace the old hero card (reference layout).
-      expect(find.text('Contact sharing'), findsOneWidget);
-      expect(find.text('Apps & games'), findsOneWidget);
+      expect(find.text('Contacts'), findsOneWidget);
+      expect(find.text('Apps & games'), findsNothing);
       expect(find.text('Send'), findsOneWidget);
       expect(find.text('Receive'), findsOneWidget);
 

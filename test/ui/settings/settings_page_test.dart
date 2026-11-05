@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -12,7 +13,9 @@ import 'package:vayu/core/settings/user_settings.dart';
 import 'package:vayu/core/state/app_container.dart';
 import 'package:vayu/domain/identity/local_device_identity.dart';
 import 'package:vayu/ui/diagnostics/diagnostics_page.dart';
-import 'package:vayu/ui/settings/permissions_rationale_dialog.dart';
+import 'package:vayu/core/constants/app_constants.dart';
+import 'package:vayu/ui/settings/about_page.dart';
+import 'package:vayu/ui/settings/device_name_page.dart';
 import 'package:vayu/ui/settings/settings_page.dart';
 
 void main() {
@@ -69,8 +72,10 @@ void main() {
       expect(find.text('Settings'), findsOneWidget);
       expect(find.text('Initial-Device-Name'), findsOneWidget);
       expect(find.text('Battery saver'), findsOneWidget);
-      expect(find.text('Received files'), findsOneWidget);
-      expect(find.text('Why Vayu asks for permissions'), findsOneWidget);
+      // Toggles and links only: nothing here just explains things.
+      expect(find.text('Received files'), findsNothing);
+      expect(find.text('Receiving'), findsNothing);
+      expect(find.text('Permissions'), findsOneWidget);
       expect(find.text('Diagnostics'), findsOneWidget);
       expect(find.text('About'), findsOneWidget);
     });
@@ -81,11 +86,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Tap Edit button
-      await tester.tap(find.text('Edit'));
+      // A page of its own, not a popup.
+      await tester.tap(find.text('Phone name'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Device name'), findsOneWidget);
+      expect(find.byType(DeviceNamePage), findsOneWidget);
 
       // Enter new name
       await tester.enterText(find.byType(TextFormField), 'Updated-Phone-01');
@@ -134,7 +139,9 @@ void main() {
       },
     );
 
-    testWidgets('Opens Permissions Rationale dialog', (tester) async {
+    testWidgets('About is a page with version, brand and links', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(800, 1600);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(() => tester.view.resetPhysicalSize());
@@ -143,17 +150,20 @@ void main() {
         MaterialApp(home: SettingsPage(container: container)),
       );
       await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Why Vayu asks for permissions'));
+      await tester.tap(find.text('About'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(PermissionsRationaleDialog), findsOneWidget);
-      expect(find.text('Nearby devices'), findsOneWidget);
+      expect(find.byType(AboutPage), findsOneWidget);
+      expect(find.text('Version 0.1.0 alpha'), findsOneWidget);
+      expect(find.text('by Achyrio'), findsOneWidget);
+      expect(find.text(AppConstants.developerName), findsOneWidget);
+      expect(find.text('github.com/Achal12347'), findsOneWidget);
+      expect(find.text('github.com/Achal12347/SiloSend'), findsOneWidget);
+    });
 
-      await tester.tap(find.text('Got it'));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(PermissionsRationaleDialog), findsNothing);
+    test('the shown version matches pubspec.yaml', () {
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      expect(pubspec, contains('version: ${AppConstants.appVersion}+'));
     });
 
     testWidgets('Navigates to Diagnostics & Telemetry page', (tester) async {

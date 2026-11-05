@@ -404,5 +404,5 @@ String routeName(TransportType transport, String? remoteAddress) =>
       TransportType.lan =>
         (remoteAddress?.startsWith('192.168.49.') ?? false)
             ? 'Wi-Fi Direct'
-            : 'Wi-Fi',
+            : 'LAN',
     };

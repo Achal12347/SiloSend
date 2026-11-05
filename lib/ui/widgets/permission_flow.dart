@@ -43,6 +43,49 @@ Future<bool> ensureFeature(
   return ready ?? false;
 }
 
+/// The baseline, shown once on Home after onboarding: what finding nearby
+/// phones needs (permission, then Bluetooth, then Location where Android
+/// requires it). Everything else is asked when the user starts what needs it.
+Future<void> askBaselinePermissions(
+  BuildContext context,
+  AppContainer container,
+) async {
+  await container.markBaselinePermissionsAsked();
+  if (!context.mounted) return;
+  final ready = await ensureFeature(context, container, VayuFeature.findPhones);
+  if (!ready) return;
+  // Android 13+ lists this under the same "Nearby devices" permission, so
+  // allowing it here avoids a second question in the middle of a transfer.
+  final manager = container.permissionManager;
+  final report = await manager.refresh();
+  if ((report.sdkVersion ?? 0) >= 33 &&
+      manager.stateOf(PermissionGroup.directWifi, report) ==
+          PermissionState.notRequested) {
+    await manager.request(PermissionGroup.directWifi);
+  }
+}
+
+/// For screens that search for phones: walks through what is missing when
+/// Bluetooth is the only way to find phones, or the permission was never
+/// asked. On a shared Wi-Fi phones are found anyway, so the Home banner offers
+/// the rest instead of a sheet on every visit. True when nothing is missing.
+Future<bool> ensureFindPhonesIfNeeded(
+  BuildContext context,
+  AppContainer container,
+) async {
+  final blockers = await container.permissionManager.check(
+    VayuFeature.findPhones,
+  );
+  if (blockers.isEmpty) return true;
+  final neverAsked = blockers.first.state == PermissionState.notRequested;
+  if (container.capabilityCoordinator.rawCapabilities.canUseLan &&
+      !neverAsked) {
+    return false;
+  }
+  if (!context.mounted) return false;
+  return ensureFeature(context, container, VayuFeature.findPhones);
+}
+
 /// Sheet that walks through what [feature] is missing, one item at a time.
 class PermissionFixSheet extends StatefulWidget {
   final PermissionManager manager;
@@ -152,7 +195,12 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
   @override
   Widget build(BuildContext context) {
     final blocker = _blockers.first;
-    final text = describeBlocker(blocker, widget.feature, _sdk);
+    final text = describeBlocker(
+      blocker,
+      widget.feature,
+      _sdk,
+      approximateLocationOnly: _m.lastReport?.approximateLocationOnly ?? false,
+    );
     final theme = Theme.of(context);
     return VayuSheet(
       title: text.title,
@@ -194,8 +242,9 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
 ({String title, String message, String? actionLabel}) describeBlocker(
   Blocker blocker,
   VayuFeature feature,
-  int sdk,
-) {
+  int sdk, {
+  bool approximateLocationOnly = false,
+}) {
   final version = PermissionManager.androidVersionName(sdk);
   final android = version.isEmpty ? 'Android' : 'Android $version';
   const noLocation = 'Vayu never reads your location.';
@@ -230,6 +279,22 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
     case BlockerKind.permission:
       final group = blocker.group!;
       final name = permissionName(group, sdk);
+      // Android 12 lists Location as allowed when only "Approximate" was
+      // chosen; the direct connection still needs the precise one.
+      if (group == PermissionGroup.directWifi &&
+          sdk < 33 &&
+          approximateLocationOnly) {
+        return (
+          title: 'Turn on precise location',
+          message:
+              '$android connects phones directly only with precise location. '
+              'On the page that opens, tap Permissions, Location, then turn on '
+              '"Use precise location". $noLocation',
+          actionLabel: blocker.state == PermissionState.permanentlyDenied
+              ? 'Open settings'
+              : 'Allow',
+        );
+      }
       if (blocker.state == PermissionState.permanentlyDenied) {
         return (
           title: '$name is blocked',
@@ -242,6 +307,8 @@ class _PermissionFixSheetState extends State<PermissionFixSheet>
       final why = switch ((group, feature)) {
         (PermissionGroup.camera, _) =>
           'Vayu uses the camera only to scan the code on the other phone.',
+        (PermissionGroup.notifications, VayuFeature.chatNotifications) =>
+          'Lets Vayu alert you when a nearby phone sends a chat message.',
         (PermissionGroup.notifications, _) =>
           'Shows progress while a long transfer runs with the screen off.',
         (PermissionGroup.storage, _) =>
